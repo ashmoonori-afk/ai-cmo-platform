@@ -30,7 +30,9 @@
 
 1. `clients/{client}/config.md` 읽기 → 업종, ICP, 경쟁사 파악
 2. `knowledge-base/{client}/insights.md` 확인 → 기존 인사이트와 중복 방지
-3. WebSearch로 최신 정보 수집 (최소 5개 소스)
+3. WebSearch로 최신 정보 수집
+   - quick 모드: 최소 3개 소스
+   - deep 모드: 최소 7개 소스, 반드시 1개 이상 1차 출처(공식 보도자료, 기업 IR, 정부 통계) 포함
 4. 수집된 정보를 구조화하여 아래 출력 형식으로 정리
 5. 결과를 `{output_path}`에 저장
 6. `knowledge-base/{client}/insights.md`에 핵심 발견 append (knowledge-update.md 규칙 준수)

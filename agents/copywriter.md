@@ -21,7 +21,7 @@
 
 ## 입력
 - `client`: 클라이언트명
-- `content_type`: blog / social / newsletter / case-study / lead-magnet
+- `content_type`: blog / social-all / social-linkedin / social-instagram / social-twitter / newsletter / case-study / lead-magnet
 - `topic`: 주제
 - `keywords`: SEO 키워드 (선택)
 - `brief`: 콘텐츠 브리프 또는 전략 방향 (선택)
@@ -31,6 +31,8 @@
 1. 클라이언트 참조 문서 로드 (config, brand-guidelines, copy-patterns)
 2. winning-copy.md 확인 → 검증된 톤/패턴 파악
 3. content_type별 구조에 맞춰 초안 작성
+   - content_type이 `social-all`이면 3개 플랫폼 모두, 개별 플랫폼이면 해당 플랫폼만 작성
+   - `social`로 입력된 경우 `social-all`로 간주
 4. keywords 있으면 H2, 도입부, 본문에 자연스럽게 배치
 5. brand-guidelines 대조 자체 검수
 6. 결과를 output_path에 저장
