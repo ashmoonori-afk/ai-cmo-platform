@@ -42,6 +42,17 @@
 - 금지 표현 미사용
 - 카피 패턴 준수
 
+### content_type별 추가 검증
+| content_type | 추가 검증 항목 |
+|-------------|--------------|
+| blog | 글자 수 1500-3000자, H2 최소 3개, CTA 포함 |
+| social | 플랫폼별 글자 수 제한 준수 (LinkedIn 500자, Instagram 150자, Twitter 280자) |
+| outbound | 이메일당 300자 이내, 개인화 포인트 최소 1개 |
+| proposal | 7개 필수 섹션 존재 (현황→과제→솔루션→차별화→ROI→계획→비용) |
+| research | 출처 최소 3개, [추정] 태그 적절 사용 |
+| seo | 키워드 클러스터 최소 3개 (keyword-research), 100점 스코어카드 (audit) |
+| pitch-deck | 15개 슬라이드 구조 확인 |
+
 ## 출력 형식
 
 ```

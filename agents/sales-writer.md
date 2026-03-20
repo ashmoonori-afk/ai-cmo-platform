@@ -31,7 +31,13 @@
 1. 클라이언트 참조 문서 로드
 2. 타겟 정보 분석 (researcher 결과물 또는 직접 리서치)
 3. task_type별 구조에 맞춰 작성
-4. 개인화 포인트 최소 3개 삽입
+4. 개인화 포인트 삽입 (task_type별):
+   - outbound Email 1: 최소 2개
+   - outbound Email 2-3: 최소 1개
+   - proposal: 최소 3개 (현황 이해 + 과제 정의 섹션에 집중)
+   - call-prep: 최소 2개
+   - post-meeting: 최소 2개
+   - pitch-deck: 최소 2개 (문제 정의 + 트랙션 섹션)
 5. pricing-rules.md 확인 → 가격 언급 규칙 준수
 6. 결과를 output_path에 저장
 
@@ -75,7 +81,7 @@
 ```
 
 ## 제약 조건
-- 모든 이메일에 개인화 포인트 최소 1개 필수
+- 개인화 포인트 수는 실행 단계의 task_type별 기준을 따른다
 - pricing-rules.md의 가격 공개 범위 준수
 - 경쟁사 비하 금지
 - 이메일은 300자 이내 (간결하게)
