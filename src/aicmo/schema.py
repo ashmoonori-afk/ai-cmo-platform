@@ -92,4 +92,18 @@ SCHEMA = (
         foreign key (run_id, step_id) references steps(run_id, step_id)
     )
     """,
+    # Migration + idempotency for kb_updates: collapse any pre-existing duplicates (kept the
+    # earliest row per key) BEFORE creating the unique index, so the index never fails on a
+    # dirty DB and bricks initialize(). The index is the ON CONFLICT target used by
+    # record_kb_update and also migrates older DBs created before it existed.
+    """
+    delete from kb_updates
+    where kb_update_id not in (
+        select min(kb_update_id) from kb_updates group by run_id, step_id, path
+    )
+    """,
+    """
+    create unique index if not exists idx_kb_updates_unique
+    on kb_updates (run_id, step_id, path)
+    """,
 )

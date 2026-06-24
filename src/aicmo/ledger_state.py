@@ -72,10 +72,14 @@ class WorkflowLedgerStore(WorkflowStepStore):
         content: str,
     ) -> None:
         with self.connect() as connection:
+            # Idempotent: re-running a kb.update step (e.g. resume after a deleted artifact)
+            # must not enqueue a duplicate. Content is regenerated deterministically per step,
+            # so keeping the existing row (do nothing) loses nothing.
             connection.execute(
                 """
                 insert into kb_updates (run_id, step_id, client, path, status, content)
                 values (?, ?, ?, ?, ?, ?)
+                on conflict(run_id, step_id, path) do nothing
                 """,
                 (run_id, step_id, client, path, "queued", content),
             )

@@ -16,10 +16,15 @@ class StoreDb:
 
     @contextmanager
     def connect(self: Self) -> Iterator[sqlite3.Connection]:
+        # Single-writer-per-run model. WAL lets readers run alongside the one writer, and
+        # busy_timeout makes an accidental concurrent writer wait-and-retry instead of
+        # failing immediately with "database is locked". Set before any transaction opens.
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         connection.execute("pragma foreign_keys = on")
+        connection.execute("pragma busy_timeout = 5000")
+        connection.execute("pragma journal_mode = wal")
         try:
             with connection:
                 yield connection
