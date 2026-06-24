@@ -1,0 +1,87 @@
+[project]
+name = "ai-cmo-platform"
+version = "0.2.0"
+description = "Markdown-first AI CMO workflow operating system with a thin DAG runner."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.11",
+    "pyyaml>=6.0.2",
+    "rich>=14.0",
+    "typer>=0.16",
+]
+
+[project.scripts]
+aicmo = "aicmo.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.29",
+    "pytest>=8.4",
+    "ruff>=0.12",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+]
+filterwarnings = ["error"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",
+    "D",
+    "D203",
+    "D213",
+    "FBT001",
+    "FBT002",
+    "ISC001",
+    "PLR0913",
+    "S105",
+    "TC001",
+    "TC003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "D",
+    "PLR2004",
+    "S101",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.basedpyright]
+typeCheckingMode = "all"
+pythonVersion = "3.13"
+pythonPlatform = "All"
+include = ["src", "tests"]
+exclude = ["**/__pycache__", "**/.venv", "**/build", "**/dist"]
+reportAny = "none"
+reportCallInDefaultInitializer = "none"
+reportDeprecated = "none"
+reportImplicitOverride = "none"
+reportImplicitStringConcatenation = "none"
+reportUnannotatedClassAttribute = "none"
+reportUnnecessaryComparison = "none"
+reportUnusedCallResult = "none"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aicmo"]

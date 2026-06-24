@@ -1,0 +1,25 @@
+id: approval-demo
+name: Manual Approval Demo
+inputs:
+  client: required
+steps:
+  - id: load_context
+    type: file.load
+    paths:
+      - clients/${client}/config.md
+    outputs:
+      - artifacts/${run_id}/context.md
+
+  - id: owner_gate
+    type: gate
+    depends_on: [load_context]
+    requires_approval: true
+    outputs:
+      - artifacts/${run_id}/owner-gate.json
+
+  - id: report
+    type: agent
+    role: reporter
+    depends_on: [owner_gate]
+    outputs:
+      - artifacts/${run_id}/approved-report.md

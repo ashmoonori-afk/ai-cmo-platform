@@ -21,11 +21,16 @@ operations agent without exposing local run logs.
 | `playbooks/00-chains/ai-cmo-operating-system.md` | Main upgraded user pipeline. |
 | `docs/role-sop/README.md` | Role SOP registry and operating standard. |
 | `docs/system/user-pipeline.md` | Detailed intake-to-delivery pipeline. |
+| `docs/system/workflow-engine.md` | Executable workflow engine contract, CLI, state tables, and adapter boundary. |
 | `docs/system/dogfooding-procedure.md` | Dogfooding procedure for running this platform against its own workflow. |
 | `docs/dogfooding/2026-06-24-ai-cmo-platform-run.md` | Completed dogfooding run for this sellable upgrade. |
+| `docs/dogfooding/2026-06-24-workflow-engine-run.md` | Completed dogfooding run for the executable workflow engine. |
 | `docs/product/owner-director-comparison.md` | Original owner workflow vs upgraded director workflow comparison. |
 | `integrations/birkin/README.md` | Birkin skill placement and approval-gated handoff contracts. |
 | `skills/README.md` | Embedded standalone skills, no external Birkin install required. |
+| `workflows/blog-article.workflow.yaml` | Sample executable workflow spec. |
+| `workflows/approval-demo.workflow.yaml` | Manual approval gate smoke-test workflow. |
+| `src/aicmo/` | Python runner, SQLite store, local adapters, and CLI. |
 
 ## Non-Transfer Local State
 
@@ -33,3 +38,7 @@ operations agent without exposing local run logs.
 ignored by Git and should not be treated as part of the sellable product
 package. The durable product-facing references live in `docs/`, `playbooks/`,
 `integrations/`, `skills/`, `templates/`, `agents/`, and `prompts/`.
+
+`.aicmo/` and `artifacts/` are local workflow-engine run state. They are useful
+for debugging a specific run, but they are not required when transferring the
+repository as a clean product package.

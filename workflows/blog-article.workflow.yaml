@@ -1,0 +1,45 @@
+id: blog-article
+name: SEO Blog Article
+inputs:
+  client: required
+  topic: required
+  target_keyword: optional
+steps:
+  - id: load_context
+    type: file.load
+    paths:
+      - clients/${client}/config.md
+      - clients/${client}/brand-guidelines.md
+    outputs:
+      - artifacts/${run_id}/context.md
+
+  - id: keyword_research
+    type: agent
+    role: seo-specialist
+    depends_on: [load_context]
+    prompt: playbooks/05-seo/keyword-research.md
+    outputs:
+      - artifacts/${run_id}/keyword-brief.md
+
+  - id: draft
+    type: agent
+    role: copywriter
+    depends_on: [keyword_research]
+    prompt: playbooks/03-content/blog-article.md
+    outputs:
+      - artifacts/${run_id}/draft.md
+
+  - id: review
+    type: gate
+    role: reviewer
+    depends_on: [draft]
+    pass_if: "status in ['PASS','WARN']"
+    outputs:
+      - artifacts/${run_id}/review.json
+
+  - id: report
+    type: agent
+    role: reporter
+    depends_on: [review]
+    outputs:
+      - artifacts/${run_id}/content-log.md
