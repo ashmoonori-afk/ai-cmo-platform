@@ -208,6 +208,6 @@ outputs/{client}/content/{YYYYMMDD}_ab-copy-{topic-slug}.md
 outputs/flowerplus/content/20260318_ab-copy-landing-headline.md
 ```
 
-**Knowledge Base 업데이트:**
-- 테스트 후 승리 버전 → `knowledge-base/{client}/winning-copy.md` append (테스트 결과·수치 포함)
-- 효과적인 톤·각도 패턴 → `knowledge-base/{client}/insights.md` append
+**Reporter handoff:**
+- 테스트 후 승리 버전 → Reporter에게 `winning-copy.md` 반영 후보 전달 (테스트 결과·수치 포함)
+- 효과적인 톤·각도 패턴 → Reporter에게 `insights.md` 반영 후보 전달

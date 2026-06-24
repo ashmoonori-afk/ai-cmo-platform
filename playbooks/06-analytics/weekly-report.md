@@ -2,7 +2,7 @@
 
 ## 목적
 
-outputs/ 폴더를 스캔하여 해당 주의 모듈별 활동을 요약하고, 핵심 발견 사항과 다음 주 추천 액션을 포함한 주간 리포트를 생성한다. 생성된 인사이트는 KB(Knowledge Base)에 자동 축적된다.
+outputs/ 폴더를 스캔하여 해당 주의 모듈별 활동을 요약하고, 핵심 발견 사항과 다음 주 추천 액션을 포함한 주간 리포트를 생성한다. 생성된 인사이트는 Reporter가 KB(Knowledge Base) 반영 후보로 정리한다.
 
 ## 에이전트 조합
 
@@ -97,10 +97,10 @@ SCAN_PATH: outputs/{brand}/ # 스캔 대상 경로
 - Nice to Have: 여유 시 실행 (최대 2개)
 ```
 
-### Phase 5: KB 업데이트
+### Phase 5: KB 반영 후보
 
 ```
-자동 업데이트 대상:
+Reporter 검토 대상:
 - knowledge-base/{brand}/insights.md
   → 이번 주 핵심 인사이트 추가 (날짜 태그 포함)
 
@@ -207,10 +207,10 @@ SCAN_PATH: outputs/{brand}/ # 스캔 대상 경로
 
 ---
 
-## KB 업데이트 내역
+## KB 반영 후보
 
-- `knowledge-base/{brand}/insights.md` → {n}개 인사이트 추가
-- `knowledge-base/{brand}/lessons-learned.md` → {n}개 교훈 추가
+- `knowledge-base/{brand}/insights.md` → {n}개 인사이트 후보
+- `knowledge-base/{brand}/lessons-learned.md` → {n}개 교훈 후보
 ```
 
 ## 출력 경로
@@ -219,8 +219,8 @@ SCAN_PATH: outputs/{brand}/ # 스캔 대상 경로
 outputs/{brand}/analytics/weekly-report-{YYYY-WNN}.md
 ```
 
-KB 자동 업데이트:
+Reporter KB 반영 대상:
 ```
-knowledge-base/{brand}/insights.md        (append)
-knowledge-base/{brand}/lessons-learned.md (append)
+knowledge-base/{brand}/insights.md        (Reporter-managed entry)
+knowledge-base/{brand}/lessons-learned.md (Reporter-managed entry)
 ```

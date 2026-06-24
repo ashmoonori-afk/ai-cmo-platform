@@ -29,7 +29,7 @@
 4. 프레임워크에 따라 전략 수립
 5. 실행 로드맵 (우선순위 + 타임라인) 작성
 6. 결과를 `{output_path}`에 저장
-7. KB 업데이트 (insights.md에 전략적 발견 append)
+7. 전략적 발견과 evidence path를 reporter에게 전달하여 KB 반영 후보로 기록
 
 ## 출력 형식
 

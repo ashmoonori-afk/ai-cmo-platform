@@ -28,6 +28,15 @@
 - 입력: Phase 3 블로그
 - 출력: LinkedIn + Twitter + 뉴스레터 + 카드뉴스
 
+### Phase 4.5: 비주얼 에셋 (선택)
+- route: `codex-image-gen`
+- 입력: Phase 3 블로그 + Phase 4 카드뉴스/소셜 방향
+- 출력: 아래 3개 상태 중 정확히 하나
+  - `visual_asset_status=generated` + 실제 `png_path`
+  - `visual_asset_status=unavailable` + `unavailable_reason`
+  - `visual_asset_status=needs_approval` + `approval_owner`
+- 주의: 이미지가 생성되지 않았으면 생성된 것처럼 보고하지 않는다
+
 ### Phase 5: 검증
 - reviewer 에이전트: 블로그 + 4개 변환물 검증
 

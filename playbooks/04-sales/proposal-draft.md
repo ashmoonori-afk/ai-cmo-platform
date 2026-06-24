@@ -26,6 +26,13 @@ researcher + competitor (병렬) → sales-writer → reviewer
 - `intelligence/competitor-snapshots/` 최신 파일 (경쟁사 분석 — 권장)
 - 제안 패키지 및 가격 (사용자 입력 또는 pricing-rules.md)
 
+### 민감정보 입력 Gate
+
+- SAL-03, 기업 리서치, 가격/ROI 자료는 고객명, 담당자명, 이메일, 전화번호, 계정 ID, 쿠키, 토큰, API 키, 인증 헤더를 제거하거나 공개 승인된 항목만 사용한다.
+- 제안서에는 private CRM row, 전체 미팅 원문, 원본 CSV/Excel 행, 사용자 단위 GA 데이터를 붙이지 않는다.
+- 담당자명과 연락처는 decision owner가 외부 발송을 승인한 경우에만 표시하고, 그 외에는 역할명/부서명으로 대체한다.
+- 민감정보가 제거되지 않은 입력이면 중단하고 redacted working copy를 요청한다.
+
 ## 참조 문서
 
 - `references/brand-guidelines.md` — 공식 소개 문구, Case Study, 법적 고지
@@ -89,7 +96,7 @@ VST SAL-06 + IRDECK 패턴 기반 7섹션 제안서:
 
 **제안 일자:** {YYYY-MM-DD}
 **제안 유효기간:** {YYYY-MM-DD}
-**담당자:** {담당자명} | {연락처}
+**담당:** {승인된 담당자 또는 역할명}
 
 ---
 
@@ -98,7 +105,7 @@ VST SAL-06 + IRDECK 패턴 기반 7섹션 제안서:
 {고객 회사명}은 {산업}에서 {규모}의 {성장 단계} 기업입니다.
 
 **현재 직면한 도전 과제:**
-- {pain point 1} (담당자 {이름} 언급, {날짜} 미팅)
+- {pain point 1} ({역할명 또는 승인된 담당자} 언급, {날짜} 미팅)
 - {pain point 2}
 - {추가 인사이트: INT-03 기반}
 

@@ -33,6 +33,7 @@ seo-specialist → copywriter → reviewer
 | `cta_destination` | CTA 링크 목적지 (랜딩페이지, 상담 신청 등) | 선택 |
 | `reference_url` | 참고할 경쟁사 글 URL | 선택 |
 | `tone` | 톤 지정 (없으면 brand-guidelines.md 따름) | 선택 |
+| `image_required` | 실제 대표 이미지 또는 섹션 이미지 생성 필요 여부 | 선택 |
 
 ---
 
@@ -99,9 +100,13 @@ SEO 체크리스트:
 - [ ] H2 최소 4개 사용
 - [ ] 내부 링크 제안 2개 이상 포함
 - [ ] 이미지 alt 텍스트 제안 포함 (이미지별)
+- [ ] `image_required=yes`인 경우 codex-image-gen prompt brief와 `visual_asset_status` 포함
+- [ ] `visual_asset_status=generated`이면 실제 `png_path` 포함
+- [ ] `visual_asset_status=unavailable`이면 이유 포함
+- [ ] `visual_asset_status=needs_approval`이면 approval owner 포함
 - [ ] 글자 수 1500–3000자 범위 내
 - [ ] 브랜드 톤앤매너 준수
-- [ ] placeholder / TODO 없음
+- [ ] 미완성 템플릿 문구 없음
 ```
 
 ---
@@ -149,7 +154,23 @@ SEO 체크리스트:
 ---
 
 **{CTA 텍스트 — 50–100자}**
-[{버튼 텍스트}]({CTA URL})
+
+- Button text: `{버튼 텍스트}`
+- Destination URL: `{CTA URL}`
+
+## Visual Asset Brief (optional)
+
+| Field | Value |
+|-------|-------|
+| Route | codex-image-gen |
+| Prompt | {image_prompt} |
+| Size | {size} |
+| Must include | {must_include} |
+| Must avoid | {must_avoid} |
+| visual_asset_status | {generated / unavailable / needs_approval} |
+| png_path | {required when generated} |
+| unavailable_reason | {required when unavailable} |
+| approval_owner | {required when needs_approval} |
 ```
 
 ---
@@ -165,6 +186,6 @@ outputs/{client}/content/{YYYYMMDD}_{slug}.md
 outputs/flowerplus/content/20260318_blog-ai-flower-delivery.md
 ```
 
-**Knowledge Base 업데이트:**
-- 성과 좋은 카피 패턴 → `knowledge-base/{client}/winning-copy.md` append
-- 업종 인사이트 → `knowledge-base/{client}/insights.md` append
+**Knowledge Base handoff:**
+- 성과 좋은 카피 패턴 → reporter에게 `winning-copy.md` 반영 후보로 전달
+- 업종 인사이트 → reporter에게 `insights.md` 반영 후보로 전달

@@ -162,5 +162,5 @@ outputs/{client}/content/{YYYYMMDD}_newsletter-{edition}.md
 outputs/flowerplus/content/20260318_newsletter-2026-03.md
 ```
 
-**Knowledge Base 업데이트:**
-- 열람률·클릭률 높은 제목·CTA → `knowledge-base/{client}/winning-copy.md` append
+**Reporter handoff:**
+- 열람률·클릭률 높은 제목·CTA → Reporter에게 `winning-copy.md` 반영 후보 전달

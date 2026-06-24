@@ -217,6 +217,6 @@ outputs/{client}/content/{YYYYMMDD}_social-calendar-{YYYY-MM}.md
 outputs/flowerplus/content/20260318_social-calendar-2026-04.md
 ```
 
-**Knowledge Base 업데이트:**
-- 인게이지먼트 높은 포스트 유형·주제 → `knowledge-base/{client}/winning-copy.md` append
-- 시즌별 효과적인 테마 → `knowledge-base/{client}/insights.md` append
+**Reporter handoff:**
+- 인게이지먼트 높은 포스트 유형·주제 → Reporter에게 `winning-copy.md` 반영 후보 전달
+- 시즌별 효과적인 테마 → Reporter에게 `insights.md` 반영 후보 전달

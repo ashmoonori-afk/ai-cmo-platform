@@ -24,6 +24,13 @@ CHANNELS: {channels}       # 분석 채널 (기본: organic/paid/social/email/di
 CURRENCY: KRW              # 통화 (기본: KRW)
 ```
 
+### 민감정보 입력 Gate
+
+- GA4, 광고, 매출 CSV/Excel은 고객명, 이메일, 전화번호, 사용자 ID, client ID, 쿠키, 토큰, API 키, 인증 헤더를 제거하거나 마스킹한 사본만 사용한다.
+- 산출물에는 원본 행, private CRM row, 사용자 단위 GA 데이터, 미가공 결제/매출 row를 붙이지 않는다.
+- 결과에는 채널/기간별 집계 지표, 계산 기준, 안전한 로컬 파일 경로만 남긴다.
+- 민감정보가 제거되지 않은 입력이면 중단하고 redacted working copy를 요청한다.
+
 ## 참조 문서
 
 - `clients/{brand}/config.md` — KPI 목표, 비즈니스 컨텍스트

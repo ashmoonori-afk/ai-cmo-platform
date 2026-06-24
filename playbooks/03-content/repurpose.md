@@ -217,5 +217,5 @@ outputs/{client}/content/{YYYYMMDD}_repurpose-{source-slug}.md
 outputs/flowerplus/content/20260318_repurpose-ai-flower-delivery-blog.md
 ```
 
-**Knowledge Base 업데이트:**
-- 채널별 인게이지먼트 높은 변환 패턴 → `knowledge-base/{client}/winning-copy.md` append
+**Reporter handoff:**
+- 채널별 인게이지먼트 높은 변환 패턴 → Reporter에게 `winning-copy.md` 반영 후보 전달

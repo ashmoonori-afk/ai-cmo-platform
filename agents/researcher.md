@@ -35,7 +35,7 @@
    - deep 모드: 최소 7개 소스, 반드시 1개 이상 1차 출처(공식 보도자료, 기업 IR, 정부 통계) 포함
 4. 수집된 정보를 구조화하여 아래 출력 형식으로 정리
 5. 결과를 `{output_path}`에 저장
-6. `knowledge-base/{client}/insights.md`에 핵심 발견 append (knowledge-update.md 규칙 준수)
+6. 핵심 발견과 evidence path를 reporter에게 전달하여 KB 반영 후보로 기록 (knowledge-update.md 규칙 준수)
 
 ## 출력 형식
 

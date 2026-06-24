@@ -104,7 +104,7 @@ CTA 페이지 작성:
 - [ ] 전문성·신뢰성이 느껴지는가 (데이터, 사례, 출처)
 - [ ] CTA가 자연스럽게 연결되는가 (강매 느낌 없이)
 - [ ] 브랜드 가이드라인 준수
-- [ ] placeholder / TODO 없음
+- [ ] 미완성 표시 없음
 ```
 
 ---
@@ -178,6 +178,6 @@ outputs/{client}/content/{YYYYMMDD}_lead-magnet-{topic-slug}.md
 outputs/flowerplus/content/20260318_lead-magnet-flower-business-checklist.md
 ```
 
-**Knowledge Base 업데이트:**
-- 리드마그넷 성과 (다운로드 수, 전환율) → `knowledge-base/{client}/insights.md` append
-- 효과적인 CTA 문구 → `knowledge-base/{client}/winning-copy.md` append
+**Reporter handoff:**
+- 리드마그넷 성과 (다운로드 수, 전환율) → Reporter에게 `insights.md` 반영 후보 전달
+- 효과적인 CTA 문구 → Reporter에게 `winning-copy.md` 반영 후보 전달

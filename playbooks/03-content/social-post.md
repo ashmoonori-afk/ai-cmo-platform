@@ -29,6 +29,7 @@ copywriter → reviewer
 | `purpose` | 포스트 목적 (인지 / 관심 / 전환 / 커뮤니티) | 선택 |
 | `cta_url` | CTA 링크 (있는 경우) | 선택 |
 | `visual_concept` | 함께 사용할 이미지·영상 컨셉 설명 | 선택 |
+| `image_required` | 실제 이미지 생성 필요 여부 (yes / no) | 선택 |
 
 ---
 
@@ -123,6 +124,23 @@ copywriter → reviewer
 **비주얼 컨셉:**
 {이미지 또는 영상 방향 1줄}
 
+**codex-image-gen prompt brief (image_required=yes인 경우):**
+- visual_goal:
+- target_channel:
+- audience:
+- brand_constraints:
+- must_include:
+- must_avoid:
+- prompt:
+- visual_asset_status: generated | unavailable | needs_approval
+- png_path: required when generated
+- unavailable_reason: required when unavailable
+- approval_owner: required when needs_approval
+- reviewer_notes:
+
+Reviewer must FAIL the visual route if `image_required=yes` and the artifact has
+only a prompt brief without one of these statuses.
+
 ---
 
 ## Twitter / X
@@ -159,5 +177,5 @@ outputs/{client}/content/{YYYYMMDD}_social-post-{topic-slug}.md
 outputs/flowerplus/content/20260318_social-post-spring-campaign.md
 ```
 
-**Knowledge Base 업데이트:**
-- 인게이지먼트 높은 포스트 → `knowledge-base/{client}/winning-copy.md` append
+**Knowledge Base handoff:**
+- 인게이지먼트 높은 포스트 → reporter에게 `winning-copy.md` 반영 후보로 전달

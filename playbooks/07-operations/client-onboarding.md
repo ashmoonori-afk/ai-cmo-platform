@@ -2,7 +2,7 @@
 
 ## 목적
 
-신규 클라이언트 설정을 완전 자동화한다. 기본 정보 수집부터 config.md 생성, 브랜드 가이드라인 초안, 경쟁사 초기 분석, ICP 정의, KB 초기화, 3개월 액션 플랜까지 한 번에 처리한다.
+신규 클라이언트 설정을 승인·검증 기반 워크플로우로 정리한다. 기본 정보 수집부터 config.md 초안, 브랜드 가이드라인 초안, 경쟁사 초기 분석, ICP 정의, KB 초기화, 3개월 액션 플랜 초안까지 만들고 reviewer와 decision owner 확인을 거친다.
 
 최소 입력: 회사명 + 웹사이트 URL
 
@@ -32,9 +32,10 @@ BUDGET: {budget}             # 월 마케팅 예산 범위 (선택)
 
 ## 참조 문서
 
-- `playbooks/01-strategy/positioning.md` — ICP 정의 프레임워크
-- `playbooks/02-intelligence/competitor-analysis.md` — 경쟁사 분석 방법론
-- `clients/template/config.md` — config.md 작성 템플릿 (존재하는 경우)
+- `playbooks/01-strategy/positioning-map.md` — ICP와 포지셔닝 연결
+- `playbooks/02-intelligence/competitor-monitoring.md` — 경쟁사 분석 방법론
+- `clients/_template/config.md` — config.md 작성 템플릿
+- `docs/role-sop/README.md` — 역할별 SOP, reviewer gate, owner/director 비교표
 
 ## 프레임워크
 
@@ -59,6 +60,29 @@ BUDGET: {budget}             # 월 마케팅 예산 범위 (선택)
 - 사용자가 모든 질문에 답변 → 답변을 기반으로 config.md 초안 작성 + WebSearch로 보완
 - 사용자가 일부만 답변 → 답변된 부분은 확정, 나머지는 WebSearch로 자동 수집
 - 사용자가 "스킵" → 전부 WebSearch로 자동 수집 (기존 방식)
+
+### Step 0.5: Triage (workflow selection)
+
+온보딩 요청을 바로 리서치로 넘기기 전에 실행 깊이와 후속 워크플로우를 분류합니다.
+
+| 입력 신호 | 분류 | 실행 경로 |
+|----------|------|----------|
+| 목표와 타겟이 불명확함 | clarity gap | Neurosis 방식으로 질문 1개씩 확인 후 진행 |
+| "전체 마케팅", "런칭", "성장 전략" | strategy-heavy | `playbooks/00-chains/ai-cmo-operating-system.md` → `full-strategy-chain.md` |
+| "콘텐츠", "블로그", "SNS" | content-heavy | `content-full-cycle.md` 또는 개별 content playbook |
+| "영업", "제안서", "미팅" | sales-heavy | `sales-prep-bundle.md` |
+| 데이터/성과 파일 제공 | analytics-heavy | `performance-report.md` 또는 `ga-audit.md` |
+| 원장/대표/의사결정권자에게 보고 필요 | owner-director review | onboarding report에 비교표와 의사결정 요약 포함 |
+
+**Triage output:**
+```
+route:
+confidence:
+decision_owner:
+required_assets:
+review_depth:
+follow_up_due:
+```
 
 ### Step 1: 기본 정보 수집 (researcher)
 
@@ -277,6 +301,19 @@ knowledge-base/{brand}/lessons-learned.md
 
 ---
 
+## 원장/대표 관점 비교표
+
+| 영역 | 기존 운영 방식 | AI CMO 업그레이드 방식 |
+|------|---------------|------------------------|
+| 요청 정리 | 원장/대표가 매번 배경과 목표를 반복 설명 | Intake + Triage로 목표, 제약, 승인자를 구조화 |
+| 업무 선택 | 급한 일 위주로 개별 요청 | Strategy / Content / Sales / SEO / Analytics / Operations로 자동 분류 |
+| 실행 관리 | 외주/직원/담당자별 산출물 품질 편차 | 역할별 SOP와 reviewer gate로 품질 기준 고정 |
+| 증거 관리 | 링크, 자료, 수치가 산출물마다 흩어짐 | 출처, 데이터 파일, confidence label을 산출물에 남김 |
+| 후속 실행 | 다음 액션이 채팅이나 회의록에 묻힘 | reporter가 owner, due date, evidence가 있는 follow-up queue 작성 |
+| 개선 루프 | 잘된 점/실패 원인이 개인 기억에 남음 | Reporter KB 기록 + Morpheus-style maintenance note로 반복 개선 |
+
+---
+
 ## ICP 요약
 
 ### Primary 페르소나
@@ -329,6 +366,14 @@ knowledge-base/{brand}/lessons-learned.md
 1. **config.md 검토 요청**: {contact_name}에게 공유 — 기한: {date}
 2. **GA4 접근 권한 요청**: GA4 Admin 편집 권한 — 기한: {date}
 3. **브랜드 가이드라인 확인**: brand-guidelines.md 초안 검토 — 기한: {date}
+
+## Follow-up Queue
+
+| 우선순위 | 액션 | Owner | Due | Evidence | 상태 |
+|---------|------|-------|-----|----------|------|
+| 1 | {next_action_1} | {owner} | {date} | {source_output_path} | open |
+| 2 | {next_action_2} | {owner} | {date} | {source_output_path} | open |
+| 3 | {next_action_3} | {owner} | {date} | {source_output_path} | open |
 ```
 
 ## 출력 경로

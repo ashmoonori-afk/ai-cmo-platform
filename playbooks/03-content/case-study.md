@@ -37,6 +37,13 @@ researcher → copywriter → reviewer
 | `customer_quote` | 고객 인용문 (있는 경우) | 선택 |
 | `publish_permission` | 고객사명 공개 여부 (yes/anonymize) | 선택 (기본: anonymize) |
 
+### 민감정보 입력 Gate
+
+- `customer_name`, `customer_quote`, 성과 데이터는 공개 승인 여부를 먼저 확인한다.
+- 공개 승인이 없으면 고객사명, 담당자명, 이메일, 전화번호, 계정 ID, 계약 세부 조건을 익명화한다.
+- 인용문은 민감정보를 제거한 문장만 사용하고, private CRM row나 전체 미팅 원문을 산출물에 붙이지 않는다.
+- 공개 승인 근거가 없으면 `publish_permission=anonymize`로 처리한다.
+
 ---
 
 ## 참조 문서
@@ -84,7 +91,7 @@ researcher → copywriter → reviewer
 
 ```
 publish_permission = yes:
-  - 고객사명·담당자명·인용문 그대로 사용
+  - 공개 승인된 고객사명·직책·민감정보 제거 인용문만 사용
 
 publish_permission = anonymize:
   - 고객사명 → "국내 {업종} 기업 A사"
@@ -106,8 +113,8 @@ publish_permission = anonymize:
 
 # {고객사명}: {핵심 성과 한 줄}
 
-> **"{고객 인용문 핵심 문장}"**
-> — {직책}, {고객사명}
+> **"{민감정보 제거 인용문 핵심 문장}"**
+> — {직책}, {공개 승인된 고객사명 또는 익명 표기}
 
 ---
 
@@ -157,6 +164,6 @@ outputs/{client}/content/{YYYYMMDD}_case-study-{customer-slug}.md
 outputs/flowerplus/content/20260318_case-study-retail-a.md
 ```
 
-**Knowledge Base 업데이트:**
-- 성과 수치·증거 → `knowledge-base/{client}/insights.md` append
-- 효과적인 케이스스터디 구조 → `knowledge-base/{client}/winning-copy.md` append
+**Reporter handoff:**
+- 성과 수치·증거 → Reporter에게 `insights.md` 반영 후보 전달
+- 효과적인 케이스스터디 구조 → Reporter에게 `winning-copy.md` 반영 후보 전달
