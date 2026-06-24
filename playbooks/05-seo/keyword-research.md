@@ -16,7 +16,7 @@ seo-specialist
 ## 입력
 
 ```
-BRAND: {client}               # 브랜드명 (예: flowerplus)
+BRAND: {client}               # 브랜드명 (예: sample-client-a)
 SEED_KEYWORDS: {keywords}    # 시드 키워드 목록 (쉼표 구분, 예: 기업화환, 축하화환, 꽃배달)
 INDUSTRY: {industry}         # 업종 (예: 꽃배달, B2B 선물)
 TARGET_REGION: {region}      # 지역 (예: 서울, 전국)

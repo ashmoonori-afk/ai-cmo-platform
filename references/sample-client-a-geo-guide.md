@@ -1,0 +1,200 @@
+# Sample Client A GEO 최적화 실행 가이드
+
+**현재 GEO 점수: 17/100 (위험)**
+**목표 GEO 점수: 65+ /100 (양호)**
+**작성일: 2026-03-17**
+**대상 사이트: https://example.com/sample-client-a/**
+
+> **이 문서는 누구나 따라할 수 있도록 작성되었습니다.**
+> 각 작업마다 "왜 하는지", "어디서 하는지", "어떻게 하는지"를 단계별로 안내합니다.
+> 코드 수정이 필요한 항목은 복사-붙여넣기만 하면 됩니다.
+
+---
+
+## 시작하기 전에 알아야 할 것
+
+### GEO란?
+GEO(Generative Engine Optimization)는 ChatGPT, 네이버 AI, Perplexity, 구글 AI 오버뷰 같은 **AI 검색엔진**에서 우리 사이트가 잘 노출되도록 최적화하는 작업입니다. 기존 SEO가 구글/네이버 검색 순위를 올리는 거라면, GEO는 AI가 우리 사이트를 "인용"하고 "추천"하게 만드는 것입니다.
+
+### 왜 중요한가?
+누군가 ChatGPT에 "서울에서 기업 화환 배달 추천해줘"라고 물었을 때, Sample Client A가 답변에 나와야 합니다. 현재는 전혀 나오지 않습니다. 이 가이드의 작업을 완료하면 AI가 Sample Client A를 인식하고 추천할 수 있게 됩니다.
+
+### 사이트 관리 도구 접속 방법
+Sample Client A 사이트는 PHP 기반(그누보드/카페24 스타일)으로 운영됩니다.
+- **관리자 페이지**: 보통 `https://example.com/sample-client-a/adm/` 또는 호스팅 업체 관리자 패널
+- **FTP/파일 관리자**: 호스팅 업체(카페24, 가비아 등)에서 제공하는 파일 관리자 또는 FTP 프로그램(FileZilla 등)
+- **코드 편집**: 관리자 페이지의 "스킨 편집" 또는 FTP로 직접 PHP 파일 수정
+
+> **주의**: 코드를 수정하기 전에 반드시 해당 파일을 백업(복사본 저장)하세요.
+
+---
+
+# 1단계: 즉시 실행 (오늘~3일 이내)
+
+이 항목들은 코드 한두 줄 수정 또는 파일 하나 생성으로 끝나는 작업입니다.
+**난이도: 쉬움** | 개발 경험 없어도 가능
+
+---
+
+## 1-1. HTML lang 속성 추가
+
+### 왜 하나요?
+현재 사이트의 HTML에 "이 페이지는 한국어입니다"라는 표시가 없습니다. AI와 검색엔진이 언어를 자동 감지해야 하는데, 명시적으로 알려주면 훨씬 정확하게 인식합니다.
+
+### 어디서 하나요?
+사이트의 **공통 레이아웃 파일**을 찾아야 합니다. 모든 페이지에 공통으로 적용되는 파일입니다.
+
+**파일 찾는 방법:**
+1. FTP 또는 파일 관리자로 사이트 파일에 접속합니다
+2. 아래 경로 중 하나를 찾으세요 (호스팅/CMS에 따라 다름):
+   - `/skin/layout/basic/layout.php`
+   - `/theme/basic/head.php`
+   - `/layout/basic.html` (카페24인 경우)
+   - `/header.php` 또는 `/include/head.php`
+3. 파일을 열어서 `<html` 이라는 텍스트를 찾으세요
+
+### 어떻게 하나요?
+
+**수정 전 (현재 상태):**
+```html
+<html>
+```
+또는
+```html
+<!DOCTYPE html>
+<html>
+```
+
+**수정 후:**
+```html
+<html lang="ko">
+```
+또는
+```html
+<!DOCTYPE html>
+<html lang="ko">
+```
+
+**단계:**
+1. 공통 레이아웃 파일을 엽니다
+2. `Ctrl + F`로 `<html`을 검색합니다
+3. `<html`을 `<html lang="ko"`로 변경합니다
+4. 저장합니다
+5. 사이트를 열어서 정상 작동하는지 확인합니다
+
+**확인 방법:**
+1. https://example.com/sample-client-a/ 에 접속합니다
+2. 키보드에서 `F12`를 눌러 개발자 도구를 엽니다
+3. Elements 탭에서 맨 위의 `<html` 태그를 확인합니다
+4. `lang="ko"`가 보이면 성공입니다
+
+- [ ] 완료 체크
+
+---
+
+## 1-2. 메타 설명(meta description) 추가
+
+### 왜 하나요?
+메타 설명은 검색엔진과 AI가 "이 페이지가 무엇에 대한 것인지" 파악하는 가장 기본적인 방법입니다. 현재 Sample Client A의 모든 페이지에 메타 설명이 없어서, AI가 페이지 내용을 요약할 수 없습니다.
+
+### 어디서 하나요?
+위에서 찾은 공통 레이아웃 파일 또는 각 페이지의 `<head>` 섹션
+
+### 어떻게 하나요?
+
+**방법 A: 공통 레이아웃에 PHP 변수로 추가 (권장)**
+
+공통 레이아웃 파일의 `<head>` 안에서 `<title>` 태그 바로 아래에 추가합니다:
+
+```php
+<?php
+// 페이지별 메타 설명 설정
+if (!isset($meta_description)) {
+    $meta_description = "Sample Client A는 기업용 프리미엄 화환, 식물, 꽃다발을 전국 당일 배송하는 원스톱 꽃배달 서비스입니다. 평균 2시간 내 배송, 근조화환·축하화환·동양란·서양란·꽃바구니 55종 이상.";
+}
+?>
+<meta name="description" content="<?php echo htmlspecialchars($meta_description); ?>">
+```
+
+그리고 각 카테고리 페이지 PHP 파일의 맨 위(레이아웃 include 전)에 해당 카테고리의 설명을 넣습니다:
+
+```php
+<?php
+// 근조화환 카테고리 페이지 (ca_id=20)
+$meta_description = "기업 조문용 프리미엄 근조화환 3단·2단. 전국 장례식장 평균 2시간 내 배송. 리본 문구 맞춤 제작 가능. 85,000원부터.";
+?>
+```
+
+**방법 B: 각 페이지에 직접 하드코딩 (더 쉬움)**
+
+각 페이지의 `<head>` 안, `<title>` 태그 바로 아래에 한 줄씩 추가합니다:
+
+**홈페이지 (`index.php` 또는 메인 페이지):**
+```html
+<meta name="description" content="Sample Client A는 기업용 프리미엄 화환, 식물, 꽃다발을 전국 당일 배송하는 원스톱 꽃배달 서비스입니다. 평균 2시간 내 배송, 근조화환·축하화환·동양란·서양란·꽃바구니 55종 이상.">
+```
+
+**근조화환 페이지 (ca_id=20):**
+```html
+<meta name="description" content="기업 조문용 프리미엄 근조화환 3단·2단. 전국 장례식장 평균 2시간 내 배송. 리본 문구 맞춤 제작 가능. 85,000원부터. Sample Client A.">
+```
+
+**축하화환 페이지 (ca_id=30):**
+```html
+<meta name="description" content="기업 축하용 프리미엄 축하화환 3단. 개업·승진·취임 축하에 적합. 전국 당일 배송. 리본 문구 무료 제작. Sample Client A.">
+```
+
+**동양란/서양란 페이지 (ca_id=50):**
+```html
+<meta name="description" content="고급 동양란·서양란 화분. 기업 선물·사무실 인테리어에 적합. 서울 강남 직영 배송. 관리 안내 포함. Sample Client A.">
+```
+
+**축하화분 페이지 (ca_id=60):**
+```html
+<meta name="description" content="기업 축하용 프리미엄 관엽식물·꽃화분 20종. 개업·이전·승진 축하 선물로 인기. 금전수·몬스테라·아레카야자 등. Sample Client A.">
+```
+
+**꽃다발/꽃바구니 페이지 (ca_id=40):**
+```html
+<meta name="description" content="프리미엄 꽃다발·꽃바구니 8종. 기업 이벤트·생일·환영 행사에 적합. 당일 배송 가능. Sample Client A.">
+```
+
+**확인 방법:**
+1. 해당 페이지에 접속합니다
+2. `F12` → Elements 탭 → `<head>` 안에서 `meta name="description"`을 찾습니다
+3. 또는 구글에서 `site:example.com/sample-client-a`를 검색하면 며칠 후 설명이 반영됩니다
+
+- [ ] 홈페이지 meta description 추가 완료
+- [ ] 근조화환 페이지 meta description 추가 완료
+- [ ] 축하화환 페이지 meta description 추가 완료
+- [ ] 동양란/서양란 페이지 meta description 추가 완료
+- [ ] 축하화분 페이지 meta description 추가 완료
+- [ ] 꽃다발/꽃바구니 페이지 meta description 추가 완료
+
+---
+
+## 1-3. canonical 태그 추가
+
+### 왜 하나요?
+우리 사이트는 `list.php?ca_id=20` 같은 URL 구조를 사용합니다. 같은 페이지가 여러 URL로 접근될 수 있어서, 검색엔진과 AI에게 "이 URL이 정식 주소입니다"라고 알려줘야 합니다. 안 하면 중복 페이지로 인식되어 점수가 깎입니다.
+
+### 어디서 하나요?
+공통 레이아웃 파일의 `<head>` 안
+
+### 어떻게 하나요?
+
+`<head>` 안에 아래 PHP 코드를 추가합니다:
+
+```php
+<link rel="canonical" href="https://example.com/sample-client-a<?php echo parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH); if (!empty($_SERVER['QUERY_STRING'])) echo '?' . $_SERVER['QUERY_STRING']; ?>">
+```
+
+**더 간단한 버전 (고정 URL만):**
+
+각 페이지에 직접 넣는 방법도 있습니다:
+
+```html
+<!-- 홈페이지 -->
+<link rel="canonical" href="https://example.com/sample-client-a/">
+
+<!-- 근조화환 -->

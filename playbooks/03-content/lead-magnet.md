@@ -175,7 +175,7 @@ outputs/{client}/content/{YYYYMMDD}_lead-magnet-{topic-slug}.md
 
 예시:
 ```
-outputs/flowerplus/content/20260318_lead-magnet-flower-business-checklist.md
+outputs/sample-client-a/content/20260318_lead-magnet-flower-business-checklist.md
 ```
 
 **Knowledge Base 업데이트:**

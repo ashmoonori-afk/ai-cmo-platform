@@ -162,7 +162,7 @@ outputs/{client}/content/{YYYYMMDD}_{slug}.md
 
 예시:
 ```
-outputs/flowerplus/content/20260318_blog-ai-flower-delivery.md
+outputs/sample-client-a/content/20260318_blog-ai-flower-delivery.md
 ```
 
 **Knowledge Base 업데이트:**

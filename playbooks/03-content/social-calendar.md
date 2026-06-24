@@ -214,7 +214,7 @@ outputs/{client}/content/{YYYYMMDD}_social-calendar-{YYYY-MM}.md
 
 예시:
 ```
-outputs/flowerplus/content/20260318_social-calendar-2026-04.md
+outputs/sample-client-a/content/20260318_social-calendar-2026-04.md
 ```
 
 **Knowledge Base 업데이트:**

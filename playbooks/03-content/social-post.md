@@ -156,7 +156,7 @@ outputs/{client}/content/{YYYYMMDD}_social-post-{topic-slug}.md
 
 예시:
 ```
-outputs/flowerplus/content/20260318_social-post-spring-campaign.md
+outputs/sample-client-a/content/20260318_social-post-spring-campaign.md
 ```
 
 **Knowledge Base 업데이트:**

@@ -214,7 +214,7 @@ outputs/{client}/content/{YYYYMMDD}_repurpose-{source-slug}.md
 
 예시:
 ```
-outputs/flowerplus/content/20260318_repurpose-ai-flower-delivery-blog.md
+outputs/sample-client-a/content/20260318_repurpose-ai-flower-delivery-blog.md
 ```
 
 **Knowledge Base 업데이트:**

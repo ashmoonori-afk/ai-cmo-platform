@@ -205,7 +205,7 @@ outputs/{client}/content/{YYYYMMDD}_ab-copy-{topic-slug}.md
 
 예시:
 ```
-outputs/flowerplus/content/20260318_ab-copy-landing-headline.md
+outputs/sample-client-a/content/20260318_ab-copy-landing-headline.md
 ```
 
 **Knowledge Base 업데이트:**

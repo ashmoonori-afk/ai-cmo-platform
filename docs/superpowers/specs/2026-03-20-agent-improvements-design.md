@@ -25,7 +25,7 @@ outputs/{client}/_handoff/{YYYYMMDD}_{source_agent}_{task}.json
   "meta": {
     "source_agent": "researcher",
     "target_agent": "strategist",
-    "client": "flowerplus",
+    "client": "sample-client-a",
     "created": "2026-03-20",
     "task": "gtm-motion-analysis"
   },

@@ -135,7 +135,7 @@ model: opus
 
 ## C2C 플랫폼 경쟁 분석
 
-번개장터, 당근마켓, 중고나라 등 C2C 플랫폼이 경쟁자인 경우의 분석 프레임워크:
+C2C Platform A, C2C Platform B, C2C Platform C 등 C2C 플랫폼이 경쟁자인 경우의 분석 프레임워크:
 
 ### C2C vs 전문 셀러 비교
 

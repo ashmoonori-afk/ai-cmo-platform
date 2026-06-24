@@ -1,31 +1,31 @@
-# 아이리스 코퍼레이션 — IR Deck 구조 레퍼런스
+# Sample Client B — IR Deck 구조 레퍼런스
 
 > 출처: `C:/Users/lg/marketing for companies/IRDECK/Codex/02_deck_outline_v1.md`
-> 용도: 피칭덱·IR 자료 작업 시 참조. 아이리스의 IR 스토리 구조와 슬라이드 순서를 기준으로 삼는다.
+> 용도: 피칭덱·IR 자료 작업 시 참조. Sample Client B의 IR 스토리 구조와 슬라이드 순서를 기준으로 삼는다.
 
 ---
 
 ## 핵심 테제 (One-Line Thesis)
 
-아이리스 코퍼레이션은 장례 산업 서비스 공급자를 위한 운영·유통 플랫폼을 구축하고, 이후 콘텐츠·번들 상품·PB 상조 상품으로 수익화를 확장한다.
+Sample Client B은 장례 산업 서비스 공급자를 위한 운영·유통 플랫폼을 구축하고, 이후 콘텐츠·번들 상품·PB 상조 상품으로 수익화를 확장한다.
 
 ---
 
 ## IR Deck 슬라이드 구조 (20섹션)
 
 ### 1. Cover
-- 회사명: 아이리스 코퍼레이션
+- 회사명: Sample Client B
 - 한 줄 정의 (one-line definition)
 - 투자 라운드 명시
 
 ### 2. Company Today
 - 현재 보유한 B2B SaaS (장례식장 관리 솔루션)
 - B2C 모바일 부고 서비스
-- 아이리스가 적절한 출발점인 이유
+- Sample Client B가 적절한 출발점인 이유
 
 ### 3. Vision
 - 이 회사가 존재해야 하는 이유
-- 아이리스가 정의하고자 하는 카테고리
+- Sample Client B가 정의하고자 하는 카테고리
 - 장기 포지셔닝: 장례 산업의 카테고리 정의형 인프라 플랫폼
 
 ### 4. Problem
@@ -40,14 +40,14 @@
 - 현재 가치 누수 지점
 
 ### 6. Solution
-- 공급자를 위한 가치사슬 레이어로서 아이리스 플랫폼
+- 공급자를 위한 가치사슬 레이어로서 Sample Client B 플랫폼
 - 투명한 매칭과 이벤트 중개
 - 표준화·확보·유통·운영 지원
 - 보상 가시성 및 참여자 간 조율 개선
 
 ### 7. Value Chain Map
 - 장례 산업 생태계 시각적 맵
-- 아이리스가 현재 위치한 지점과 확장 방향 표시
+- Sample Client B가 현재 위치한 지점과 확장 방향 표시
 
 ### 8. Product
 - 플랫폼 첫 번째 기능: 이벤트 소싱·공급자 조율을 위한 개방형 매칭·중개
@@ -58,7 +58,7 @@
 - 현재 SaaS·B2C 제품이 플랫폼 확장에 기여하는 방식
 - 설치 기반(installed base), 접점, 전략적 레버리지
 
-### 10. Studio Iris / Iris Life Overview
+### 10. Sample Studio B / Sample Life B Overview
 - 콘텐츠 파이프라인: 신뢰 엔진 + 리드 생성 레이어 + 인플루언스 해자
 - 미디어 → 커머스 플라이휠
 
@@ -140,7 +140,7 @@
 첫 번째 드래프트에서 제시할 프레임:
 1. **현재 SaaS·B2C 사업** → 실행 기반 (execution base)
 2. **플랫폼** → 스케일업 사업 (scale-up business)
-3. **Studio Iris** → 해자 증폭기 (moat amplifier)
+3. **Sample Studio B** → 해자 증폭기 (moat amplifier)
 4. **번들 금융·PB 사업** → 단계적 확장
 
 ---
@@ -156,11 +156,11 @@
 | `06_traction_v1.md` | 트랙션 데이터 |
 | `08_fundraising_v1.md` | 펀드레이징 전략 |
 | `09_vision_v1.md` | 비전 |
-| `10_studio_iris_v1.md` | Studio Iris 상세 |
+| `10_studio_sample-client-b_v1.md` | Sample Studio B 상세 |
 | `11_revenue_roadmap_v1.md` | 수익 로드맵 |
 | `13_team_v1.md` | 팀 구성 |
 | `14_slide_draft_v1.md` | 슬라이드 초안 |
 | `16_market_research_v1.md` | 시장 리서치 |
 | `17_slide_draft_investor_tone_v2.md` | 투자자 톤 슬라이드 초안 v2 |
-| `아이리스_코퍼레이션_IR_Deck_v1.pptx` | IR Deck 완성본 v1 |
-| `아이리스_코퍼레이션_IR_Deck_v2.pptx` | IR Deck 완성본 v2 |
+| `Sample_Client_B_IR_Deck_v1.pptx` | IR Deck 완성본 v1 |
+| `Sample_Client_B_IR_Deck_v2.pptx` | IR Deck 완성본 v2 |

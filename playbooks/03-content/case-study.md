@@ -170,7 +170,7 @@ outputs/{client}/content/{YYYYMMDD}_case-study-{customer-slug}.md
 
 예시:
 ```
-outputs/flowerplus/content/20260318_case-study-retail-a.md
+outputs/sample-client-a/content/20260318_case-study-retail-a.md
 ```
 
 **Knowledge Base 업데이트:**

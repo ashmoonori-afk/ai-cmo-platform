@@ -159,7 +159,7 @@ outputs/{client}/content/{YYYYMMDD}_newsletter-{edition}.md
 
 예시:
 ```
-outputs/flowerplus/content/20260318_newsletter-2026-03.md
+outputs/sample-client-a/content/20260318_newsletter-2026-03.md
 ```
 
 **Knowledge Base 업데이트:**

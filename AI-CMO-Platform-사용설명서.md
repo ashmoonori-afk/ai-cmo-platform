@@ -98,8 +98,8 @@ Claude Code에서 입력:
 
 작업 시 클라이언트명만 지정하면 해당 설정이 자동 로드됩니다:
 ```
-"플라워플러스 블로그 써줘"    ← 플라워플러스 설정 로드
-"아이리스 경쟁사 분석해줘"    ← 아이리스 설정 로드
+"Sample Client A 블로그 써줘"    ← Sample Client A 설정 로드
+"Sample Client B 경쟁사 분석해줘"    ← Sample Client B 설정 로드
 ```
 
 ---
@@ -114,8 +114,8 @@ Claude Code에서 입력:
 
 예시:
 ```
-"플라워플러스 GTM 전략 짜줘"
-"아이리스 콜드메일 시퀀스 만들어줘 — 타겟: 대형 장례식장"
+"Sample Client A GTM 전략 짜줘"
+"Sample Client B 콜드메일 시퀀스 만들어줘 — 타겟: 대형 장례식장"
 "블로그 써줘 — 주제: AI 마케팅 자동화의 미래"
 ```
 
@@ -146,7 +146,7 @@ Reporter가 knowledge-base 반영 후보 정리
 
 ```
 outputs/
-└── flowerplus/
+└── sample-client-a/
     ├── strategy/     ← 전략 산출물
     ├── intelligence/  ← 리서치/분석 결과
     ├── content/       ← 블로그, SNS, 뉴스레터
@@ -234,7 +234,7 @@ outputs/
 | # | 플레이북 | 명령어 예시 | 에이전트 조합 | 산출물 |
 |---|---------|-----------|-------------|--------|
 | 12 | **Blog Article** | "블로그 써줘" | seo-specialist → copywriter → reviewer | SEO 최적화 블로그 (1500-3000자) + 메타 설명 + 내부 링크 제안 |
-| 13 | **Social Post** | "SNS 포스트 만들어줘" | copywriter → reviewer | LinkedIn (300-500자) + Instagram (150자+해시태그) + Twitter (스레드) |
+| 13 | **Social Post** | "SNS 포스트 만들어줘" | copywriter → reviewer | LinkedIn (300-500자) + Social Channel A (150자+해시태그) + Twitter (스레드) |
 | 14 | **Newsletter** | "뉴스레터 써줘" | copywriter → reviewer | 뉴스레터 원고 (제목 + 인트로 + 3섹션 + CTA) |
 | 15 | **Case Study** | "케이스스터디 만들어줘" | researcher → copywriter → reviewer | 고객 사례 (상황→과제→솔루션→결과, 수치 필수) |
 | 16 | **Lead Magnet** | "리드마그넷 만들어줘" | strategist → copywriter → reviewer | 체크리스트/가이드/템플릿 원고 (PDF 변환용) |
@@ -306,8 +306,8 @@ outputs/
 
 작업 중 다른 클라이언트로 전환하려면 이름만 바꾸면 됩니다:
 ```
-"플라워플러스 블로그 써줘"   → 플라워플러스 설정 로드
-"아이리스 제안서 만들어줘"   → 아이리스 설정 로드
+"Sample Client A 블로그 써줘"   → Sample Client A 설정 로드
+"Sample Client B 제안서 만들어줘"   → Sample Client B 설정 로드
 ```
 
 ---

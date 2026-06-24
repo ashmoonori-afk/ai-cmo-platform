@@ -109,7 +109,7 @@ model: opus
 | **Viral Loop** | 유저가 콘텐츠 생성 → 외부 공유 → 신규 유저 유입 | 기하급수적 성장 | Figma, Loom |
 | **Usage Loop** | 유저 생성 → 공유 → 소비 → 참여 유저화 | 사용과 성장 연동 | Twitter, Notion |
 | **Collaboration Loop** | 유저가 동료 초대 → 동료가 가치 발견 | 조직 침투력, 높은 리텐션 | Google Docs, Slack |
-| **UGC Loop** | 콘텐츠 발견 → 유사 콘텐츠 생성 → 공유 → 발견 | 콘텐츠 플라이휠 | TikTok, Pinterest |
+| **UGC Loop** | 콘텐츠 발견 → 유사 콘텐츠 생성 → 공유 → 발견 | 콘텐츠 플라이휠 | TikTok, Visual Discovery Platform A |
 | **Referral Loop** | 추천 → 가입 → 리워드 → 추가 추천 | 직접 인센티브, ROI 측정 쉬움 | Dropbox, Uber |
 
 **루프 계수 계산**: 유저당 초대 수 × 전환율 = 순 신규 유저. 루프 계수 > 1이면 자체 성장.

@@ -52,11 +52,11 @@ User request
 Claude Code에서 이 저장소를 연 뒤 자연어로 요청합니다.
 
 ```text
-플라워플러스 GTM 전략 짜줘
-아이리스 경쟁사 분석해줘
-플라워플러스 블로그 써줘: 주제는 기업 꽃 구독의 장점
+Sample Client A GTM 전략 짜줘
+Sample Client B 경쟁사 분석해줘
+Sample Client A 블로그 써줘: 주제는 기업 꽃 구독의 장점
 새 클라이언트 온보딩: {회사명}, 웹사이트: {URL}
-플라워플러스 주간 리포트
+Sample Client A 주간 리포트
 AI CMO 운영체계로 정리해줘
 이 요청을 먼저 dogfooding 절차에 맞게 검증해줘
 ```
@@ -116,8 +116,8 @@ ai-cmo-platform/
 ├── agents/
 ├── clients/
 │   ├── _template/
-│   ├── flowerplus/
-│   └── iris/
+│   ├── sample-client-a/
+│   └── sample-client-b/
 ├── docs/
 │   ├── dogfooding/
 │   ├── product/
