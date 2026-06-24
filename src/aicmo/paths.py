@@ -7,6 +7,7 @@ from pathlib import Path
 from aicmo.errors import WorkflowExecutionError
 
 SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+UNRESOLVED_VARIABLE = re.compile(r"\$\{[^}]+\}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +25,9 @@ def resolve_inside_repo(repo_root: Path, path_template: str, context: dict[str, 
     value = path_template
     for key, replacement in context.items():
         value = value.replace("${" + key + "}", replacement)
+    if UNRESOLVED_VARIABLE.search(value) is not None:
+        step_id = "path"
+        raise WorkflowExecutionError(step_id, f"unresolved variable in path: {value}")
     candidate_path = Path(value)
     if candidate_path.is_absolute() or ".." in candidate_path.parts:
         step_id = "path"

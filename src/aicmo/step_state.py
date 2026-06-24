@@ -135,6 +135,29 @@ class WorkflowStepStore(WorkflowRunStore):
             )
             self._mark_run(connection, run_id, RunStatus.RUNNING, step_id)
 
+    def reopen_step(self: Self, run_id: str, step_id: str) -> None:
+        """Reset a previously SUCCESS step to PENDING so resume can regenerate lost outputs."""
+        with self.connect() as connection:
+            row = connection.execute(
+                "select status from steps where run_id = ? and step_id = ?",
+                (run_id, step_id),
+            ).fetchone()
+            if row is None:
+                raise StepTransitionError(run_id, step_id, "step does not exist")
+            if row["status"] != StepStatus.SUCCESS.value:
+                raise StepTransitionError(run_id, step_id, "only successful steps can be reopened")
+            connection.execute(
+                """
+                update steps set
+                    status = ?,
+                    error_json = null,
+                    completed_at = null
+                where run_id = ? and step_id = ?
+                """,
+                (StepStatus.PENDING.value, run_id, step_id),
+            )
+            self._mark_run(connection, run_id, RunStatus.RUNNING, step_id)
+
     def _record_artifacts(
         self: Self,
         connection: sqlite3.Connection,

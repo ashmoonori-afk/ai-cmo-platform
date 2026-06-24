@@ -3,6 +3,7 @@ outputs/
 .aicmo/
 .venv/
 artifacts/
+.ulw/
 __pycache__/
 *.pyc
 *.tmp

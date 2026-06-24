@@ -108,6 +108,10 @@ class WorkflowSpec(BaseModel):
         if len(step_ids) != len(set(step_ids)):
             msg = "duplicate step id"
             raise ValueError(msg)
+        for input_name, requirement in self.inputs.items():
+            if requirement not in ("required", "optional"):
+                msg = f"invalid requirement for input {input_name}: {requirement}"
+                raise ValueError(msg)
         known_steps = set(step_ids)
         outputs: list[str] = []
         for step in self.steps:
@@ -120,6 +124,10 @@ class WorkflowSpec(BaseModel):
             if missing:
                 msg = f"unknown dependency for {step.id}: {', '.join(missing)}"
                 raise ValueError(msg)
+            for template in (*step.paths, *step.outputs):
+                if not template.strip():
+                    msg = f"empty path or output template in {step.id}"
+                    raise ValueError(msg)
             outputs.extend(step.outputs)
         if len(outputs) != len(set(outputs)):
             msg = "duplicate output path"
@@ -146,3 +154,34 @@ class WorkflowSpec(BaseModel):
 
         for step_id in graph:
             visit(step_id)
+
+    def execution_order(self) -> tuple[WorkflowStep, ...]:
+        """Return steps in a stable topological order (dependencies first).
+
+        Declaration order is preserved among steps that are ready at the same time, so a
+        spec that is already authored in dependency order keeps its original sequence.
+        The spec is validated acyclic before this runs, so every step is emitted exactly once.
+        """
+        position = {step.id: index for index, step in enumerate(self.steps)}
+        step_by_id = {step.id: step for step in self.steps}
+        indegree = {step.id: len(step.depends_on) for step in self.steps}
+        dependents: dict[str, list[str]] = {step.id: [] for step in self.steps}
+        for step in self.steps:
+            for dependency in step.depends_on:
+                dependents[dependency].append(step.id)
+        ready = sorted(
+            (step_id for step_id, degree in indegree.items() if degree == 0),
+            key=position.__getitem__,
+        )
+        ordered: list[WorkflowStep] = []
+        while ready:
+            current = ready.pop(0)
+            ordered.append(step_by_id[current])
+            newly_ready: list[str] = []
+            for dependent in dependents[current]:
+                indegree[dependent] -= 1
+                if indegree[dependent] == 0:
+                    newly_ready.append(dependent)
+            if newly_ready:
+                ready = sorted([*ready, *newly_ready], key=position.__getitem__)
+        return tuple(ordered)

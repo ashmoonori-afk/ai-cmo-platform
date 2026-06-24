@@ -33,6 +33,7 @@ class WorkflowRunner(WorkflowStepExecutor):
         run = self.store.get_run(run_id)
         spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
         inputs = self.store.get_inputs(run_id)
+        self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
         self.store.record_event(run_id, None, "run.resumed", f"Resumed {run_id}")
         return self._execute(spec, run_id, inputs)
 
@@ -54,12 +55,12 @@ class WorkflowRunner(WorkflowStepExecutor):
 
     def _execute(self: Self, spec: WorkflowSpec, run_id: str, inputs: dict[str, str]) -> RunResult:
         context = {**inputs, "run_id": run_id, "workflow_id": spec.id}
-        for step in spec.steps:
+        for step in spec.execution_order():
             status = self.store.get_step_status(run_id, step.id)
             if status == StepStatus.SUCCESS:
                 if self._successful_outputs_present(run_id, step, context):
                     continue
-                self.store.retry_step(run_id, step.id)
+                self.store.reopen_step(run_id, step.id)
                 status = StepStatus.PENDING
             if not self._dependencies_done(run_id, step):
                 return self._fail(run_id, step.id, "dependency did not complete")
@@ -67,6 +68,8 @@ class WorkflowRunner(WorkflowStepExecutor):
                 outputs = self._execute_step(run_id, step, context, status)
             except WorkflowExecutionError as exc:
                 return self._fail(run_id, step.id, str(exc))
+            except Exception as exc:  # noqa: BLE001 — record any step failure, never strand the run
+                return self._fail(run_id, step.id, f"unexpected error: {type(exc).__name__}: {exc}")
             waiting_without_approval = (
                 self.store.get_step_status(run_id, step.id) == StepStatus.WAITING_APPROVAL
                 and self.store.approval_for(run_id, step.id) is None

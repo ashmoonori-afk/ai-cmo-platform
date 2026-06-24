@@ -165,6 +165,9 @@ class WorkflowStepExecutor:
     def _read_optional(self, step: WorkflowStep, path_template: str | None) -> str:
         if path_template is None:
             return ""
+        # role/prompt templates are static references (agents/, playbooks/) resolved with only
+        # run_id/workflow_id, NOT client inputs. A ${input} variable here is unsupported and will
+        # fail the paths guard with "unresolved variable in path".
         path = self._resolve(path_template, {"run_id": "", "workflow_id": ""})
         if not path.exists():
             raise WorkflowExecutionError(step.id, f"required file missing: {path}")

@@ -10,11 +10,32 @@ from rich.console import Console
 from rich.table import Table
 
 from aicmo.errors import AicmoError
+from aicmo.models import RunResult, RunStatus
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 console = Console()
+
+EXIT_FAILED = 1
+EXIT_WAITING_APPROVAL = 75  # EX_TEMPFAIL: paused for approval; resume after the gate is approved
+
+
+def exit_code_for(status: str) -> int:
+    if status == RunStatus.FAILED.value:
+        return EXIT_FAILED
+    if status == RunStatus.WAITING_APPROVAL.value:
+        return EXIT_WAITING_APPROVAL
+    return 0
+
+
+def emit_result(result: RunResult) -> None:
+    console.print(f"{result.run_id}: {result.status}")
+    if result.failed_step_id is not None:
+        console.print(f"failed_step: {result.failed_step_id}")
+    code = exit_code_for(result.status)
+    if code != 0:
+        raise typer.Exit(code)
 
 
 def default_db(repo: Path) -> Path:
@@ -50,9 +71,7 @@ def run_workflow(
     )
     runner = make_runner(repo, db)
     result = runner.run(workflow_id=workflow_id, run_id=run_id or generated_run_id(), inputs=inputs)
-    console.print(f"{result.run_id}: {result.status}")
-    if result.failed_step_id is not None:
-        console.print(f"failed_step: {result.failed_step_id}")
+    emit_result(result)
 
 
 @app.command("resume")
@@ -62,9 +81,7 @@ def resume_run(
     db: Annotated[Path | None, typer.Option("--db")] = None,
 ) -> None:
     result = make_runner(repo, db).resume(run_id)
-    console.print(f"{result.run_id}: {result.status}")
-    if result.failed_step_id is not None:
-        console.print(f"failed_step: {result.failed_step_id}")
+    emit_result(result)
 
 
 @app.command("status")
@@ -153,4 +170,7 @@ def main() -> None:
         app()
     except AicmoError as exc:
         console.print(f"error: {exc}")
+        raise SystemExit(1) from None
+    except Exception as exc:  # noqa: BLE001 — top-level CLI guard: surface a clean message
+        console.print(f"unexpected error: {exc}")
         raise SystemExit(1) from None
