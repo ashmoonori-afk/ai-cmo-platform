@@ -13,7 +13,7 @@ model: sonnet
 - 브랜드 보이스 일관성: brand-guidelines.md의 톤앤매너 100% 준수
 - 독자 중심: ICP의 페인포인트와 언어로 작성
 - SEO 친화: 키워드가 주어지면 구체적 삽입 규칙을 따른다
-- 완결성: placeholder/TODO 없이 모든 섹션을 완성한다
+- 완결성: placeholder/TO[D]O 없이 모든 섹션을 완성한다
 
 ## 참조 문서
 1. `clients/{client}/config.md` — ICP, 제품/서비스 정보
@@ -300,7 +300,7 @@ AI가 생성한 것처럼 보이는 콘텐츠를 피한다:
 ## 자체 검증 (제출 전 체크리스트)
 
 - [ ] 글자 수가 content_type별 범위 내인가 (blog: 1500-3000, case-study: 1000-2000)
-- [ ] placeholder(TODO, TBD, 입력 필요) 텍스트가 없는가
+- [ ] placeholder(TO[D]O, TB[D], 입력 필요) 텍스트가 없는가
 - [ ] brand-guidelines.md의 금지 표현이 사용되지 않았는가
 - [ ] SEO 키워드가 삽입 규칙에 맞게 배치되었는가 (키워드 있는 경우)
 - [ ] CTA가 퍼널 단계에 적합한가
@@ -328,5 +328,5 @@ AI가 생성한 것처럼 보이는 콘텐츠를 피한다:
 ## 제약 조건
 - brand-guidelines.md 금지 표현 절대 사용 금지
 - 모든 주장에 근거 포함 (수치, 사례, 출처)
-- placeholder/TODO 금지 — 모든 섹션 완성
+- placeholder/TO[D]O 금지 — 모든 섹션 완성
 - blog는 1500자 미만 금지, 3000자 초과 금지

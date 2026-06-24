@@ -1,3 +1,4 @@
 outputs/
+.omo/
 *.tmp
 .DS_Store
