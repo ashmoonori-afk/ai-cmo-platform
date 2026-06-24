@@ -15,6 +15,7 @@ controls, Birkin integration contracts, and owner/director positioning.
 | User pipeline | `docs/system/user-pipeline.md`, `playbooks/00-chains/ai-cmo-operating-system.md` |
 | Dogfooding | `docs/system/dogfooding-procedure.md`, `docs/dogfooding/` |
 | Role SOPs | `docs/role-sop/README.md`, `playbooks/08-role-sops/` |
+| Embedded skills | `skills/birkin/` |
 | Birkin contracts | `integrations/birkin/`, `templates/handoffs/birkin/` |
 | Core playbooks | `playbooks/01-strategy/` through `playbooks/07-operations/` |
 | Client state | `clients/`, `knowledge-base/` |
@@ -33,6 +34,8 @@ controls, Birkin integration contracts, and owner/director positioning.
 6. Keep raw-data gates in playbooks that touch GA, CRM, customer feedback,
    sales files, meeting notes, or private analytics.
 7. Keep visual workflows on the explicit `visual_asset_status` contract.
+8. Keep `skills/birkin/` self-contained so downstream users do not need Birkin
+   installed.
 
 ## Verification Commands
 
@@ -56,8 +59,8 @@ Expected result:
 ## Packaging Rules
 
 - Include `README.md`, `CLAUDE.md`, `docs/`, `playbooks/`, `agents/`,
-  `prompts/`, `integrations/`, `templates/`, `clients/`, `knowledge-base/`, and
-  `handoff/`.
+  `prompts/`, `integrations/`, `skills/`, `templates/`, `clients/`,
+  `knowledge-base/`, and `handoff/`.
 - Exclude `.git/`, `.omo/`, `outputs/`, local caches, temporary files, and any
   private client files not intentionally approved for transfer.
 - Do not package secrets or environment files.
@@ -73,3 +76,5 @@ Expected result:
 - Handoff docs match the current repository paths.
 - Dogfooding runs list every discovered defect, its fix, and the final
   verification result.
+- The embedded skill docs do not require external Birkin paths or commands for
+  normal operation.

@@ -551,7 +551,8 @@ The repository now has an explicit sellable operating layer:
 | Role SOP hub | `docs/role-sop/README.md` | Role registry, gate matrix, KB handoff, owner/director comparison |
 | Role SOP playbooks | `playbooks/08-role-sops/` | Executable SOP for each of the 10 specialist roles |
 | User pipeline | `playbooks/00-chains/ai-cmo-operating-system.md` | Intake, Neurosis clarity gate, triage, Odyssey-style execution, reviewer, reporter, Morpheus-style maintenance |
-| Birkin contracts | `integrations/birkin/` | Approval-gated handoff contracts for Neurosis, Odyssey, Morpheus, and codex-image-gen |
+| Embedded skills | `skills/birkin/` | Standalone Neurosis, Odyssey, Morpheus, and codex-image-gen protocols. No external Birkin installation required. |
+| Birkin contracts | `integrations/birkin/` | Approval-gated handoff contracts that point to embedded skill instructions |
 
 Skill placement:
 - **Neurosis**: use before execution when the request is too vague to route safely.
@@ -565,6 +566,7 @@ Mandatory safety gate:
 - Image generation is complete only with `visual_asset_status=generated` and a real `png_path`; otherwise mark `visual_asset_status=unavailable` with reason or `visual_asset_status=needs_approval` with owner.
 - Analytics, CRM, GA, customer, and lead data must be summarized and redacted; do not expose raw secrets, tokens, cookies, auth headers, private CRM rows, GA user-level data, or customer PII.
 - Birkin handoffs, publishing, sending, downloads, image generation, and live integrations remain approval-gated.
+- Use `skills/birkin/` as the canonical local source for Neurosis, Odyssey, Morpheus, and codex-image-gen instructions. External Birkin tooling is optional only when explicitly installed and approved.
 
 ### 폴더 구조
 

@@ -52,6 +52,9 @@ Collect only the fields needed to route the work.
 
 ## Phase 2: Neurosis clarity gate
 
+Use `skills/birkin/neurosis/SKILL.md` as the local protocol. Do not require a
+separate Birkin install.
+
 If any of these are missing, pause execution and ask one focused question:
 
 - target customer
@@ -81,6 +84,8 @@ For {client}, produce {artifact} for {audience} to achieve {goal}, using {requir
 
 ## Phase 4: Odyssey execution plan
 
+Use `skills/birkin/odyssey/SKILL.md` as the local protocol for multi-step work.
+
 For multi-step work, create a short checklist before running agents.
 
 | Step | Owner | Acceptance |
@@ -108,6 +113,8 @@ Use the existing agent contracts. Do not bypass them.
 
 Use `codex-image-gen` only when the user asks for a real image, ad visual,
 thumbnail, card-news visual, or product/offer scene.
+
+Use `skills/birkin/codex-image-gen/SKILL.md` as the local protocol.
 
 Minimum visual brief:
 
@@ -161,6 +168,8 @@ KB records preserve existing entries. Follow-up tasks belong in the delivery rep
 `insights.md`.
 
 ## Phase 9: Morpheus-style maintenance
+
+Use `skills/birkin/morpheus/SKILL.md` as the local protocol.
 
 At the end of a meaningful run, record one maintenance note:
 

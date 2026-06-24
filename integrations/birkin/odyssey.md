@@ -1,5 +1,7 @@
 # Odyssey Handoff
 
+Embedded skill: `../../skills/birkin/odyssey/SKILL.md`
+
 ## Use When
 
 Use the Odyssey pattern for complex work that needs more than one role, more than

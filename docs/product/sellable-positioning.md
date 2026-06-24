@@ -21,6 +21,7 @@ marketing department.
 - 33 preserved core playbooks
 - 10 role SOP playbooks
 - 4 chain playbooks after the operating-system upgrade
+- 4 embedded Birkin-pattern skill protocols
 - reviewer-gated outputs
 - non-destructive client knowledge
 
@@ -28,7 +29,7 @@ marketing department.
 
 - not an unattended execution service
 - not a replacement for buyer approval
-- not a live Birkin installation
+- not dependent on a separate Birkin installation
 - not a claim that images, analytics, or integrations ran without proof
 
 ## Sales Narrative

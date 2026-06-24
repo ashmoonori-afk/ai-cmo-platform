@@ -1,5 +1,7 @@
 # Neurosis Handoff
 
+Embedded skill: `../../skills/birkin/neurosis/SKILL.md`
+
 ## Use When
 
 Use the Neurosis pattern before execution when the request is vague, high value,

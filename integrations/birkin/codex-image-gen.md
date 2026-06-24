@@ -1,5 +1,7 @@
 # codex-image-gen Handoff
 
+Embedded skill: `../../skills/birkin/codex-image-gen/SKILL.md`
+
 ## Use When
 
 Use codex-image-gen only when the user asks for a real image, ad visual,

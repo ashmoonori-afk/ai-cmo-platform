@@ -25,10 +25,11 @@ operations agent without exposing local run logs.
 | `docs/dogfooding/2026-06-24-ai-cmo-platform-run.md` | Completed dogfooding run for this sellable upgrade. |
 | `docs/product/owner-director-comparison.md` | Original owner workflow vs upgraded director workflow comparison. |
 | `integrations/birkin/README.md` | Birkin skill placement and approval-gated handoff contracts. |
+| `skills/README.md` | Embedded standalone skills, no external Birkin install required. |
 
 ## Non-Transfer Local State
 
 `.omo/` contains local planning and review evidence from this workspace. It is
 ignored by Git and should not be treated as part of the sellable product
 package. The durable product-facing references live in `docs/`, `playbooks/`,
-`integrations/`, `templates/`, `agents/`, and `prompts/`.
+`integrations/`, `skills/`, `templates/`, `agents/`, and `prompts/`.

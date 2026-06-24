@@ -6,8 +6,8 @@ each role is run, reviewed, and improved.
 
 Individual executable role SOP playbooks live in `playbooks/08-role-sops/`.
 Related sellable system docs live in `docs/system/`, product docs live in
-`docs/product/`, and approval-gated Birkin handoff contracts live in
-`integrations/birkin/`.
+`docs/product/`, embedded skill protocols live in `skills/birkin/`, and
+approval-gated handoff contracts live in `integrations/birkin/`.
 
 ## Source-Backed Design Rules
 
@@ -104,14 +104,14 @@ operator.
 | Follow-up | Next actions live in chat history or memory. | Reporter creates a follow-up queue and KB record after every meaningful run. |
 | Improvement | Lessons are informal. | Morpheus-style maintenance turns repeated learnings into memory, SOP refinements, and queued improvements. |
 
-## Birkin Skill Integration Map
+## Embedded Skill Integration Map
 
-| Skill | Where it fits | Operating rule |
-|-------|---------------|----------------|
-| Neurosis | Before execution when the user request is vague or high stakes. | Ask one clarifying question at a time until the brief has goal, constraints, success criteria, and owner. |
-| Odyssey | Complex multi-step chains such as full strategy, onboarding, sales bundles, and launch plans. | Plan, critique, execute one step at a time, and verify each step before moving on. |
-| codex-image-gen | Content and campaign assets where an actual image or visual concept is requested. | Produce a prompt brief and require an image route to save a real PNG; never pretend an image exists. |
-| Morpheus | Background improvement after the day's work. | Summarize durable learnings, propose SOP/memory refinements, and queue consequential actions for approval. |
+| Skill | Local source | Where it fits | Operating rule |
+|-------|--------------|---------------|----------------|
+| Neurosis | `../../skills/birkin/neurosis/SKILL.md` | Before execution when the user request is vague or high stakes. | Ask one clarifying question at a time until the brief has goal, constraints, success criteria, and owner. |
+| Odyssey | `../../skills/birkin/odyssey/SKILL.md` | Complex multi-step chains such as full strategy, onboarding, sales bundles, and launch plans. | Plan, critique, execute one step at a time, and verify each step before moving on. |
+| codex-image-gen | `../../skills/birkin/codex-image-gen/SKILL.md` | Content and campaign assets where an actual image or visual concept is requested. | Produce a prompt brief and require an image route to save a real PNG; never pretend an image exists. |
+| Morpheus | `../../skills/birkin/morpheus/SKILL.md` | Background improvement after the day's work. | Summarize durable learnings, propose SOP/memory refinements, and queue consequential actions for approval. |
 
 ## Review Cadence
 

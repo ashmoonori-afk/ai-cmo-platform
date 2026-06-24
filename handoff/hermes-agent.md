@@ -21,17 +21,18 @@ playbook chain, reviewer gate, and Reporter knowledge-base record.
 2. Load `clients/{client}/config.md` before role execution.
 3. Use `CLAUDE.md` to map the request to a playbook or chain.
 4. If the request is vague, route through the Neurosis clarity gate before
-   execution.
+   execution using `skills/birkin/neurosis/SKILL.md`.
 5. If the work is multi-step, run the Odyssey-style chain with explicit
-   intermediate artifacts.
+   intermediate artifacts using `skills/birkin/odyssey/SKILL.md`.
 6. If a visual asset is requested, use the codex-image-gen contract only after
-   approval.
+   approval using `skills/birkin/codex-image-gen/SKILL.md`.
 7. Run Reviewer before any buyer-facing, owner-facing, sent, published, or final
    artifact is accepted.
 8. Send durable-learning candidates to Reporter. Reporter owns durable
    knowledge-base records.
 9. Use the Morpheus maintenance pattern after delivery to record improvement
-   opportunities without unattended side effects.
+   opportunities without unattended side effects using
+   `skills/birkin/morpheus/SKILL.md`.
 10. For platform self-tests, use `docs/system/dogfooding-procedure.md` and
     record the run in `docs/dogfooding/`.
 
@@ -44,6 +45,8 @@ playbook chain, reviewer gate, and Reporter knowledge-base record.
 - Analytics and CRM inputs must be summarized, redacted, and evidence-scoped.
 - Birkin handoffs, publishing, sending, downloads, image generation, and live
   integrations remain approval-gated.
+- No separate Birkin repository, Birkin CLI, or Birkin MCP server is required.
+  Use the embedded `skills/birkin/` docs as the operating source.
 - Image generation is complete only with exactly one of:
   - `visual_asset_status=generated` and a real `png_path`
   - `visual_asset_status=unavailable` and `unavailable_reason`

@@ -12,7 +12,8 @@
     "dogfooding_run": "docs/dogfooding/2026-06-24-ai-cmo-platform-run.md",
     "role_sop_registry": "docs/role-sop/README.md",
     "owner_director_comparison": "docs/product/owner-director-comparison.md",
-    "birkin_contracts": "integrations/birkin/README.md"
+    "birkin_contracts": "integrations/birkin/README.md",
+    "embedded_skills": "skills/README.md"
   },
   "agent_handoffs": {
     "hermes_agent": "handoff/hermes-agent.md",
@@ -26,15 +27,15 @@
     "Birkin handoffs, publishing, sending, downloads, image generation, and live integrations are approval-gated."
   ],
   "birkin_skill_placement": {
-    "neurosis": "Use before execution when the request is too vague to route safely.",
-    "odyssey": "Use for complex multi-step chains with intermediate verification.",
-    "codex_image_gen": "Use only for approved visual asset generation in content and creative workflows.",
-    "morpheus": "Use after delivery for maintenance, durable learning, and improvement proposals without unattended side effects."
+    "neurosis": "Use skills/birkin/neurosis/SKILL.md before execution when the request is too vague to route safely.",
+    "odyssey": "Use skills/birkin/odyssey/SKILL.md for complex multi-step chains with intermediate verification.",
+    "codex_image_gen": "Use skills/birkin/codex-image-gen/SKILL.md only for approved visual asset generation in content and creative workflows.",
+    "morpheus": "Use skills/birkin/morpheus/SKILL.md after delivery for maintenance, durable learning, and improvement proposals without unattended side effects."
   },
   "verification": {
     "whitespace": "git diff --check",
-    "required_terms": "rg -n \"Role SOP|Owner/Director|User Pipeline|Dogfooding|Neurosis|Odyssey|Morpheus|codex-image-gen\" README.md CLAUDE.md docs playbooks integrations templates handoff",
-    "unfinished_markers": "rg -n \"TO[D]O|TB[D]|FIX[M]E\" README.md CLAUDE.md docs playbooks integrations templates handoff agents prompts",
+    "required_terms": "rg -n \"Role SOP|Owner/Director|User Pipeline|Dogfooding|Neurosis|Odyssey|Morpheus|codex-image-gen|skills/birkin\" README.md CLAUDE.md docs playbooks integrations templates handoff skills",
+    "unfinished_markers": "rg -n \"TO[D]O|TB[D]|FIX[M]E\" README.md CLAUDE.md docs playbooks integrations templates handoff skills agents prompts",
     "private_data_gates": "rg -n \"Sensitive Data Gate|Raw Data Gate|Private Data Gate|민감정보 입력 Gate\" playbooks/02-intelligence playbooks/03-content playbooks/04-sales playbooks/06-analytics playbooks/07-operations"
   },
   "excluded_local_state": [
@@ -44,5 +45,6 @@
     "local caches",
     "temporary files",
     "secrets and environment files"
-  ]
+  ],
+  "external_birkin_required": false
 }

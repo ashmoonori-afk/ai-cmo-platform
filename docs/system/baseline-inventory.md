@@ -33,7 +33,8 @@ Do not overwrite or revert these paths without explicit user approval:
 | Product positioning | `docs/product/sellable-positioning.md` | Explains what the platform sells. |
 | Owner/director comparison | `docs/product/owner-director-comparison.md` | Shows the business operator before/after model. |
 | Role SOP playbooks | `playbooks/08-role-sops/` | Gives each role an executable SOP surface. |
-| Birkin integration contracts | `integrations/birkin/` | Places Neurosis, Odyssey, Morpheus, and codex-image-gen at approval-gated handoff points. |
+| Embedded skill protocols | `skills/birkin/` | Provides standalone Neurosis, Odyssey, Morpheus, and codex-image-gen instructions. |
+| Birkin integration contracts | `integrations/birkin/` | Places embedded Neurosis, Odyssey, Morpheus, and codex-image-gen at approval-gated handoff points. |
 
 ## Verification Commands
 

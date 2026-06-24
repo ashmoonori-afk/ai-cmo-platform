@@ -1,5 +1,7 @@
 # Morpheus Handoff
 
+Embedded skill: `../../skills/birkin/morpheus/SKILL.md`
+
 ## Use When
 
 Use the Morpheus pattern after meaningful work has been delivered and reviewed.
