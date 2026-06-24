@@ -53,10 +53,12 @@ class WorkflowStepStore(WorkflowRunStore):
                     attempt = ?,
                     started_at = current_timestamp,
                     completed_at = null,
-                    error_json = null
+                    error_json = null,
+                    locked_by = ?,
+                    locked_at = current_timestamp
                 where run_id = ? and step_id = ?
                 """,
-                (StepStatus.RUNNING.value, attempt, run_id, step.id),
+                (StepStatus.RUNNING.value, attempt, "runner", run_id, step.id),
             )
             self._mark_run(connection, run_id, RunStatus.RUNNING, step.id)
         return attempt
@@ -69,7 +71,9 @@ class WorkflowStepStore(WorkflowRunStore):
                     status = ?,
                     outputs_json = ?,
                     completed_at = current_timestamp,
-                    error_json = null
+                    error_json = null,
+                    locked_by = null,
+                    locked_at = null
                 where run_id = ? and step_id = ?
                 """,
                 (
@@ -88,7 +92,9 @@ class WorkflowStepStore(WorkflowRunStore):
                 update steps set
                     status = ?,
                     outputs_json = ?,
-                    completed_at = current_timestamp
+                    completed_at = current_timestamp,
+                    locked_by = null,
+                    locked_at = null
                 where run_id = ? and step_id = ?
                 """,
                 (
@@ -109,7 +115,9 @@ class WorkflowStepStore(WorkflowRunStore):
                 update steps set
                     status = ?,
                     error_json = ?,
-                    completed_at = current_timestamp
+                    completed_at = current_timestamp,
+                    locked_by = null,
+                    locked_at = null
                 where run_id = ? and step_id = ?
                 """,
                 (StepStatus.FAILED.value, payload, run_id, step_id),
@@ -128,7 +136,9 @@ class WorkflowStepStore(WorkflowRunStore):
                 update steps set
                     status = ?,
                     error_json = null,
-                    completed_at = null
+                    completed_at = null,
+                    locked_by = null,
+                    locked_at = null
                 where run_id = ? and step_id = ?
                 """,
                 (StepStatus.PENDING.value, run_id, step_id),
@@ -151,7 +161,9 @@ class WorkflowStepStore(WorkflowRunStore):
                 update steps set
                     status = ?,
                     error_json = null,
-                    completed_at = null
+                    completed_at = null,
+                    locked_by = null,
+                    locked_at = null
                 where run_id = ? and step_id = ?
                 """,
                 (StepStatus.PENDING.value, run_id, step_id),
