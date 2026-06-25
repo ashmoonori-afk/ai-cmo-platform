@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import assert_never
 
+from aicmo.adapters import AgentRequest, LocalAdapter, StepAdapter
 from aicmo.errors import WorkflowExecutionError
+from aicmo.gate import allowed_statuses, evaluate_artifacts
 from aicmo.models import (
     ApprovalDecision,
     GateDecision,
@@ -21,6 +23,7 @@ from aicmo.store import WorkflowStore
 class WorkflowStepExecutor:
     repo_root: Path
     store: WorkflowStore
+    adapter: StepAdapter = field(default_factory=LocalAdapter)
 
     @property
     def _repo_root(self) -> Path:
@@ -63,26 +66,23 @@ class WorkflowStepExecutor:
         return self._write_outputs(step, context, "\n\n---\n\n".join(loaded))
 
     def _run_agent(self, step: WorkflowStep, context: dict[str, str]) -> list[str]:
+        # Role/prompt files are read here (not in the adapter) so a missing prompt still
+        # fails the step exactly as before, independent of which executor is configured.
         role_text = self._read_optional(step, f"agents/{step.role}.md" if step.role else None)
         prompt_text = self._read_optional(step, step.prompt)
-        body = "\n\n".join(
-            [
-                f"# Agent Step: {step.id}",
-                f"- role: {step.role or 'local-adapter'}",
-                f"- workflow: {context['workflow_id']}",
-                f"- run_id: {context['run_id']}",
-                "## Inputs",
-                json.dumps(context, ensure_ascii=False, indent=2),
-                "## Role Contract",
-                role_text or "[no role contract configured]",
-                "## Prompt Source",
-                prompt_text or "[no prompt configured]",
-                "## Adapter Result",
-                "Local deterministic adapter completed. Replace this adapter with Hermes, "
-                "Claude, OpenAI, or Codex for live agent execution.",
-            ],
+        request = AgentRequest(
+            step_id=step.id,
+            run_id=context["run_id"],
+            workflow_id=context["workflow_id"],
+            role=step.role or "local-adapter",
+            role_contract=role_text or "[no role contract configured]",
+            prompt_source=prompt_text or "[no prompt configured]",
+            inputs_json=json.dumps(context, ensure_ascii=False, indent=2),
         )
-        return self._write_outputs(step, context, body)
+        result = self.adapter.generate(request)
+        if not result.ok:
+            raise WorkflowExecutionError(step.id, f"agent executor failed: {result.detail}")
+        return self._write_outputs(step, context, result.text)
 
     def _run_gate(
         self,
@@ -108,8 +108,34 @@ class WorkflowStepExecutor:
             return outputs
         if approval == ApprovalDecision.REJECTED:
             raise WorkflowExecutionError(step.id, "manual gate rejected")
-        payload = self._gate_payload(step, GateDecision.PASS, context)
-        return self._write_outputs(step, context, json.dumps(payload, ensure_ascii=False, indent=2))
+        # Approved manual gates pass on the human's authority; auto gates are evaluated
+        # against the gated artifacts so a stub/empty/incomplete output cannot pass silently.
+        status = (
+            GateDecision.PASS
+            if approval == ApprovalDecision.APPROVED
+            else self._evaluate_gate(run_id, step)
+        )
+        payload = self._gate_payload(step, status, context)
+        outputs = self._write_outputs(
+            step,
+            context,
+            json.dumps(payload, ensure_ascii=False, indent=2),
+        )
+        if status.value not in allowed_statuses(step.pass_if):
+            msg = f"gate {status.value}: artifact failed quality check"
+            raise WorkflowExecutionError(step.id, msg)
+        return outputs
+
+    def _evaluate_gate(self, run_id: str, step: WorkflowStep) -> GateDecision:
+        texts: list[str] = []
+        for dependency in step.depends_on:
+            for relative in self._store.get_step_outputs(run_id, dependency):
+                source = self._repo_root / relative
+                if source.exists():
+                    texts.append(source.read_text(encoding="utf-8"))
+        if not texts:
+            return GateDecision.PASS
+        return evaluate_artifacts(texts).status
 
     def _run_kb_update(
         self,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shlex
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -9,10 +11,16 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from aicmo.adapters import CommandAdapter, StepAdapter
 from aicmo.errors import AicmoError
+from aicmo.evaluate import evaluate_asset, render_report
+from aicmo.mockup import brief_from_answers, render_landing_mockup, render_png
 from aicmo.models import RunResult, RunStatus
+from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
+from aicmo.reporter import flush_kb_updates
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
+from aicmo.web import run_server
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 console = Console()
@@ -42,9 +50,18 @@ def default_db(repo: Path) -> Path:
     return repo / ".aicmo" / "runs.sqlite3"
 
 
-def make_runner(repo: Path, db: Path | None) -> WorkflowRunner:
+def make_runner(repo: Path, db: Path | None, adapter: StepAdapter | None = None) -> WorkflowRunner:
     repo_root = repo.resolve()
-    return WorkflowRunner(repo_root=repo_root, store=WorkflowStore(db or default_db(repo_root)))
+    store = WorkflowStore(db or default_db(repo_root))
+    if adapter is None:
+        return WorkflowRunner(repo_root=repo_root, store=store)
+    return WorkflowRunner(repo_root=repo_root, store=store, adapter=adapter)
+
+
+def adapter_from_cmd(executor_cmd: str | None) -> StepAdapter | None:
+    if not executor_cmd:
+        return None
+    return CommandAdapter(command=tuple(shlex.split(executor_cmd)))
 
 
 def generated_run_id() -> str:
@@ -61,6 +78,14 @@ def run_workflow(
     run_id: Annotated[str | None, typer.Option("--run-id")] = None,
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
     db: Annotated[Path | None, typer.Option("--db")] = None,
+    executor_cmd: Annotated[
+        str | None,
+        typer.Option(
+            "--executor-cmd",
+            help="Live executor; the prompt is piped on stdin (e.g. 'claude -p'). "
+            "Omit to use the deterministic local adapter.",
+        ),
+    ] = None,
 ) -> None:
     inputs = compact_inputs(
         {
@@ -69,7 +94,7 @@ def run_workflow(
             "target_keyword": target_keyword,
         },
     )
-    runner = make_runner(repo, db)
+    runner = make_runner(repo, db, adapter_from_cmd(executor_cmd))
     result = runner.run(workflow_id=workflow_id, run_id=run_id or generated_run_id(), inputs=inputs)
     emit_result(result)
 
@@ -79,8 +104,12 @@ def resume_run(
     run_id: Annotated[str, typer.Argument()],
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
     db: Annotated[Path | None, typer.Option("--db")] = None,
+    executor_cmd: Annotated[
+        str | None,
+        typer.Option("--executor-cmd", help="Live executor command (prompt piped on stdin)."),
+    ] = None,
 ) -> None:
-    result = make_runner(repo, db).resume(run_id)
+    result = make_runner(repo, db, adapter_from_cmd(executor_cmd)).resume(run_id)
     emit_result(result)
 
 
@@ -159,6 +188,77 @@ def retry_step(
 ) -> None:
     make_runner(repo, db).retry(run_id, step_id)
     console.print(f"{run_id}/{step_id}: retry queued")
+
+
+def emit_onboarding(result: OnboardingResult) -> None:
+    console.print(f"onboarded {result.client}: {len(result.created)} files created")
+    for path in result.created:
+        console.print(f"  {path}")
+
+
+@app.command("onboard")
+def onboard_client(
+    client: Annotated[str, typer.Option("--client", help="Client slug (folder under clients/)")],
+    answers: Annotated[Path, typer.Option("--from", help="Path to the 7-answer JSON file")],
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+    force: Annotated[bool, typer.Option("--force")] = False,
+    date: Annotated[str | None, typer.Option("--date")] = None,
+) -> None:
+    loaded = load_answers(answers)
+    loaded = replace(loaded, client=client, onboarding_date=date or loaded.onboarding_date)
+    result = scaffold_client(repo.resolve(), loaded, force=force)
+    emit_onboarding(result)
+
+
+@app.command("serve")
+def serve_cmd(
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port")] = 8765,
+) -> None:
+    console.print(f"AI CMO web: http://{host}:{port}  (Ctrl-C to stop)")
+    run_server(host, port)
+
+
+@app.command("mockup")
+def mockup_cmd(
+    source: Annotated[Path, typer.Option("--from", help="Onboarding answers JSON")],
+    out: Annotated[Path, typer.Option("--out", help="HTML mockup output path")],
+    png: Annotated[Path | None, typer.Option("--png", help="PNG via Playwright")] = None,
+) -> None:
+    brief = brief_from_answers(load_answers(source))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_landing_mockup(brief), encoding="utf-8")
+    console.print(f"mockup: {out}")
+    if png is not None:
+        console.print(f"png: {render_png(out, png)}")
+
+
+@app.command("evaluate")
+def evaluate_cmd(
+    source: Annotated[Path, typer.Option("--from", help="Asset markdown to score")],
+    title: Annotated[str | None, typer.Option("--title")] = None,
+    out: Annotated[Path | None, typer.Option("--out", help="Write scorecard markdown")] = None,
+) -> None:
+    result = evaluate_asset(source.read_text(encoding="utf-8"))
+    console.print(f"score: {result.total}/100 — {result.band}")
+    for dim in result.dimensions:
+        console.print(f"  {dim.name}: {dim.score}/{dim.max}")
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(render_report(result, title or source.stem), encoding="utf-8")
+        console.print(f"scorecard: {out}")
+
+
+@app.command("kb-flush")
+def kb_flush(
+    client: Annotated[str | None, typer.Option("--client")] = None,
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+) -> None:
+    repo_root = repo.resolve()
+    store = WorkflowStore(db or default_db(repo_root))
+    count = flush_kb_updates(repo_root, store, client)
+    console.print(f"kb-flush: {count} queued update(s) appended to knowledge-base")
 
 
 def compact_inputs(values: dict[str, str | None]) -> dict[str, str]:
