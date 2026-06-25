@@ -106,4 +106,15 @@ SCHEMA = (
     create unique index if not exists idx_kb_updates_unique
     on kb_updates (run_id, step_id, path)
     """,
+    # Content hashes of successful step outputs, so resume can detect a tampered or
+    # partially-written artifact instead of trusting mere file existence.
+    """
+    create table if not exists step_output_hashes (
+        run_id text not null,
+        step_id text not null,
+        path text not null,
+        sha256 text not null,
+        primary key (run_id, step_id, path)
+    )
+    """,
 )

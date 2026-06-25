@@ -80,7 +80,7 @@ def generate_page(form: dict[str, list[str]]) -> str:
     return render_landing_mockup(brief_from_answers(answers_from_form(form)))
 
 
-class _Handler(BaseHTTPRequestHandler):
+class RequestHandler(BaseHTTPRequestHandler):
     def _send_html(self, body: str) -> None:
         encoded = body.encode("utf-8")
         self.send_response(200)
@@ -109,7 +109,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
-    server = ThreadingHTTPServer((host, port), _Handler)
+    server = ThreadingHTTPServer((host, port), RequestHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

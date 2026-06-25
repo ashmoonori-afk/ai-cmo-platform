@@ -4,7 +4,7 @@ import socket
 import threading
 from http.server import ThreadingHTTPServer
 
-from aicmo.web import _Handler, answers_from_form, generate_page, render_form_page
+from aicmo.web import RequestHandler, answers_from_form, generate_page, render_form_page
 
 FIELDS = (
     "company_name", "offer", "audience", "problem",
@@ -64,7 +64,7 @@ def test_generate_page_escapes_user_content() -> None:
 
 
 def test_malformed_content_length_returns_clean_response() -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RequestHandler)
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -28,11 +29,13 @@ def resolve_model(alias: str, default: str = _DEFAULT_MODEL) -> str:
 
 
 class _Block(Protocol):
-    text: str
+    @property
+    def text(self) -> str: ...
 
 
 class _Response(Protocol):
-    content: list[_Block]
+    @property
+    def content(self) -> Sequence[_Block]: ...
 
 
 class _Messages(Protocol):
@@ -40,7 +43,8 @@ class _Messages(Protocol):
 
 
 class _Client(Protocol):
-    messages: _Messages
+    @property
+    def messages(self) -> _Messages: ...
 
 
 def _make_client() -> _Client | None:

@@ -35,13 +35,20 @@ def flush_kb_updates(repo_root: Path, store: WorkflowStore, client: str | None =
 
 
 def _append_insight(target: Path, row: sqlite3.Row) -> None:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        target.write_text(_INSIGHTS_HEADER, encoding="utf-8")
-    created = str(row["created_at"])[:10]
     run_id = str(row["run_id"])
     step_id = str(row["step_id"])
+    path = str(row["path"])
+    # Content-addressed marker: if a crash replays a row whose block was already
+    # appended (but not yet consumed), the marker is present and we skip — no duplicate.
+    marker = f"<!-- kb:{run_id}:{step_id}:{path} -->"
+    existing = target.read_text(encoding="utf-8") if target.exists() else _INSIGHTS_HEADER
+    if marker in existing:
+        return
+    created = str(row["created_at"])[:10]
     content = str(row["content"])
-    block = f"\n### [{created} / {run_id} / {step_id}]\n\n{content}\n\n---\n"
-    with target.open("a", encoding="utf-8") as handle:
-        handle.write(block)
+    block = f"\n{marker}\n### [{created} / {run_id} / {step_id}]\n\n{content}\n\n---\n"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Atomic read-modify-write so a crash mid-append cannot leave a torn marker line.
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(existing + block, encoding="utf-8")
+    tmp.replace(target)

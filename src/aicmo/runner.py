@@ -77,6 +77,7 @@ class WorkflowRunner(WorkflowStepExecutor):
             if waiting_without_approval:
                 return RunResult(status=StepStatus.WAITING_APPROVAL.value, run_id=run_id)
             self.store.mark_step_success(run_id, step.id, outputs)
+            self.store.record_output_hashes(run_id, step.id, self._hash_outputs(outputs))
             self.store.record_event(run_id, step.id, "step.success", f"Completed {step.id}")
         self.store.mark_run_success(run_id)
         self.store.record_event(run_id, None, "run.success", f"Completed {run_id}")
@@ -97,6 +98,10 @@ class WorkflowRunner(WorkflowStepExecutor):
         if missing:
             step_id = "inputs"
             raise WorkflowExecutionError(step_id, f"missing required inputs: {', '.join(missing)}")
+        undeclared = sorted(key for key in inputs if key not in spec.inputs)
+        if undeclared:
+            step_id = "inputs"
+            raise WorkflowExecutionError(step_id, f"undeclared inputs: {', '.join(undeclared)}")
 
     def _fail(self: Self, run_id: str, step_id: str, message: str) -> RunResult:
         self.store.mark_step_failed(run_id, step_id, message)
