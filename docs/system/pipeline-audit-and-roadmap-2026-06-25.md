@@ -169,7 +169,7 @@ External (retrieved 2026-06-25): conversion.com/framework/the-lift-model; nngrou
 
 ### 2026-06-25 — P1 Novice Onboarding Wizard SHIPPED
 
-The first roadmap item the owner chose was built and verified the same day (HEAVY ultrawork, 3-reviewer gate APPROVE, 36 tests green).
+The first roadmap item the owner chose was built and verified the same day (independent review, 36 tests green).
 
 - `aicmo onboard --client <slug> --from answers.json` deterministically scaffolds a **placeholder-free, jargon-annotated** Korean `config.md` + `brand-guidelines.md` + 3 KB files from 7 plain-language answers. Inline definitions for ICP/UVP/CTA; safe slug validation; no-overwrite-without-`--force`.
 - `playbooks/07-operations/client-onboarding.md` rewritten **wizard-first**: Mode A writes `config.md` **before** any agent runs — this breaks the pre-onboarding **circular dependency** flagged in §3.5.
@@ -180,7 +180,7 @@ This closes the "Novice self-serve onboarding" gap at the config layer. It does 
 
 ### 2026-06-25 — P0 Live Execution Adapter SHIPPED
 
-The §0 verdict's central defect ("it does not generate anything") is now structurally fixed (HEAVY ultrawork, 3-reviewer gate APPROVE, 45 tests green).
+The §0 verdict's central defect ("it does not generate anything") is now structurally fixed (independent review, 45 tests green).
 
 - New `src/aicmo/adapters.py`: `StepAdapter` Protocol + `LocalAdapter` (deterministic default — keeps every existing test green) + `CommandAdapter` (pipes the composed prompt to an operator-configured subprocess on stdin and captures stdout as the artifact). `step_executor._run_agent` now delegates generation to the injected adapter; a missing role/prompt file still fails the step exactly as before.
 - CLI: `aicmo run --executor-cmd "<cmd>"` (also on `resume`) selects a live executor, e.g. `--executor-cmd "claude -p"`, `"codex exec"`, `"ollama run llama3"`, or any script. Default (no flag) = the deterministic local adapter.
@@ -191,7 +191,7 @@ The stub→real unlock is done at the executor layer. Remaining to make the live
 
 ### 2026-06-25 — P2 engine, P1 evaluation, P2 mockup, P3 access ALL SHIPPED
 
-The remaining roadmap was built out sequentially, each as its own HEAVY ultrawork task (RED→GREEN→real-surface→cleanup→3-reviewer gate). Final suite: **71 tests green, ruff(ALL) + basedpyright clean.**
+The remaining roadmap was built out sequentially, each built test-first and verified on the real CLI surface with independent review. Final suite: **71 tests green, ruff(ALL) + basedpyright clean.**
 
 - **P2 — real reviewer gate** (`src/aicmo/gate.py`): `_run_gate` no longer hardcodes PASS. It evaluates the gated artifacts deterministically (empty / TODO·TBD·placeholder `{{}}` → FAIL; thin → WARN; else PASS), checks against `pass_if`, and a FAIL stops the run. Recognizes the offline-stub sentinel → WARN so deterministic default runs still pass. Surface-proven: a TODO artifact fails the run at `review`; clean passes.
 - **P2 — KB consumer** (`src/aicmo/reporter.py`, `aicmo kb-flush`): dequeues queued `kb_updates` → appends to `knowledge-base/<client>/insights.md` (append-only) and marks them consumed (idempotent). Closes the durable-learning loop.

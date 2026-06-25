@@ -18,7 +18,7 @@ from turning into an untracked draft pile.
 
 - Full strategy, launch planning, onboarding, sales bundles, campaign packages,
   dogfooding, packaging, or repo release work.
-- The user asks for ultrawork, end-to-end completion, or "finish until there are
+- The user asks for end-to-end completion, or "finish until there are
   no bugs."
 - The output needs intermediate acceptance criteria.
 
