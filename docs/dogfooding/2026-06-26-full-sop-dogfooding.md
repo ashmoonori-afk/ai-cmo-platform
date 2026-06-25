@@ -93,7 +93,7 @@ uv run basedpyright src tests          # 0 errors, 0 warnings, 0 notes
 git diff --check                       # no whitespace errors
 ```
 
-Real CLI surfaces (captured in `.ulw/artifacts/dogfood/`): blog run/status/resume/list-runs,
+Real CLI surfaces (captured during the run): blog run/status/resume/list-runs,
 approval approve/reject/retry, onboard, evaluate (strong/weak), mockup, serve GET+POST,
 kb-flush (incl. crash-replay), tamper-resume, empty-gate fail-closed, lease block+recover,
 `--executor` presets — all observed as documented.
