@@ -23,10 +23,14 @@ def test_blog_workflow_run_is_idempotent_and_records_artifacts(repo_root: Path) 
 
     assert result.status == "success"
     assert second_result.status == "success"
-    assert (repo_root / "artifacts" / "run_test_blog" / "context.md").exists()
-    assert (repo_root / "artifacts" / "run_test_blog" / "keyword-brief.md").exists()
-    assert (repo_root / "artifacts" / "run_test_blog" / "draft.md").exists()
-    assert (repo_root / "artifacts" / "run_test_blog" / "review.json").exists()
+    artifacts_dir = repo_root / "artifacts" / "run_test_blog"
+    assert (artifacts_dir / "context.md").exists()
+    assert (artifacts_dir / "keyword-brief.md").exists()
+    # Content, not just existence: the offline LocalAdapter sentinel and a real gate status.
+    draft = (artifacts_dir / "draft.md").read_text("utf-8")
+    assert "Local deterministic adapter completed." in draft
+    review = (artifacts_dir / "review.json").read_text("utf-8")
+    assert '"status":' in review
 
     with closing(sqlite3.connect(db_path)) as connection, connection:
         steps = connection.execute(

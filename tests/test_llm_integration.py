@@ -27,7 +27,7 @@ class CapturingAdapter:
 class VerdictAdapter:
     verdict: str
 
-    def generate(self, request: AgentRequest) -> AgentResult:  # noqa: ARG002
+    def generate(self, _request: AgentRequest) -> AgentResult:
         return AgentResult(text=self.verdict, ok=True)
 
 

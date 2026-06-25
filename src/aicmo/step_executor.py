@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,10 @@ _REVIEW_CONTRACT = (
     "one-line reason."
 )
 _REVIEW_INPUT_LIMIT = 8000
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,7 +153,9 @@ class WorkflowStepExecutor:
                 if source.exists():
                     texts.append(source.read_text(encoding="utf-8"))
         if not texts:
-            return GateDecision.PASS
+            # Fail closed: an auto gate with no gated artifact text cannot validate
+            # anything, so it must block rather than silently pass.
+            return GateDecision.FAIL
         deterministic = evaluate_artifacts(texts).status
         if deterministic == GateDecision.FAIL or self.review_adapter is None:
             return deterministic
@@ -224,7 +231,11 @@ class WorkflowStepExecutor:
         for output_template in step.outputs:
             target = self._resolve(output_template, context)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content.rstrip() + "\n", encoding="utf-8")
+            # Atomic write: a crash mid-write leaves the previous file (or none),
+            # never a truncated artifact that resume would trust.
+            tmp = target.with_name(target.name + ".tmp")
+            tmp.write_text(content.rstrip() + "\n", encoding="utf-8")
+            tmp.replace(target)
             written.append(str(target.relative_to(self._repo_root)).replace("\\", "/"))
         return written
 
@@ -255,4 +266,20 @@ class WorkflowStepExecutor:
             str(self._resolve(output, context).relative_to(self._repo_root)).replace("\\", "/")
             for output in step.outputs
         ]
-        return all((self._repo_root / path).exists() for path in paths)
+        stored = self._store.get_output_hashes(run_id, step.id)
+        for path in paths:
+            full = self._repo_root / path
+            if not full.exists():
+                return False
+            expected = stored.get(path)
+            if expected is not None and _sha256(full) != expected:
+                return False
+        return True
+
+    def _hash_outputs(self, outputs: list[str]) -> dict[str, str]:
+        hashes: dict[str, str] = {}
+        for path in outputs:
+            full = self._repo_root / path
+            if full.exists():
+                hashes[path] = _sha256(full)
+        return hashes

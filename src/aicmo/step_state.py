@@ -39,6 +39,26 @@ class WorkflowStepStore(WorkflowRunStore):
         loaded = json.loads(row["outputs_json"])
         return [str(value) for value in loaded]
 
+    def record_output_hashes(self: Self, run_id: str, step_id: str, hashes: dict[str, str]) -> None:
+        with self.connect() as connection:
+            for path, digest in hashes.items():
+                connection.execute(
+                    """
+                    insert into step_output_hashes (run_id, step_id, path, sha256)
+                    values (?, ?, ?, ?)
+                    on conflict(run_id, step_id, path) do update set sha256 = excluded.sha256
+                    """,
+                    (run_id, step_id, path, digest),
+                )
+
+    def get_output_hashes(self: Self, run_id: str, step_id: str) -> dict[str, str]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "select path, sha256 from step_output_hashes where run_id = ? and step_id = ?",
+                (run_id, step_id),
+            ).fetchall()
+        return {str(row["path"]): str(row["sha256"]) for row in rows}
+
     def mark_step_running(self: Self, run_id: str, step: WorkflowStep) -> int:
         with self.connect() as connection:
             row = connection.execute(

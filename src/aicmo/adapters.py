@@ -32,7 +32,7 @@ class AgentResult:
 
 
 class StepAdapter(Protocol):
-    def generate(self, request: AgentRequest) -> AgentResult: ...
+    def generate(self, request: AgentRequest, /) -> AgentResult: ...
 
 
 def compose_prompt(request: AgentRequest) -> str:
