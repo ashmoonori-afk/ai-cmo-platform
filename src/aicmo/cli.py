@@ -75,16 +75,51 @@ def adapter_from_cmd(executor_cmd: str | None) -> StepAdapter | None:
     return CommandAdapter(command=tuple(shlex.split(executor_cmd)))
 
 
-def select_adapter(executor_cmd: str | None, use_anthropic: bool) -> StepAdapter | None:
+_EXECUTOR_PRESETS = {
+    "claude": ("claude", "-p"),
+    "codex": ("codex", "exec"),
+}
+
+
+def adapter_for_executor(name: str | None) -> StepAdapter | None:
+    if not name or name == "local":
+        return None
+    if name == "anthropic":
+        return AnthropicAdapter()
+    preset = _EXECUTOR_PRESETS.get(name)
+    if preset is None:
+        allowed = ", ".join(["local", "anthropic", *_EXECUTOR_PRESETS])
+        msg = f"unknown executor '{name}' (use {allowed}, or --executor-cmd)"
+        raise AicmoError(msg)
+    return CommandAdapter(command=preset)
+
+
+def select_adapter(
+    executor: str | None,
+    executor_cmd: str | None,
+    use_anthropic: bool,
+) -> StepAdapter | None:
+    if executor_cmd:
+        return adapter_from_cmd(executor_cmd)
+    if executor:
+        return adapter_for_executor(executor)
     if use_anthropic:
         return AnthropicAdapter()
-    return adapter_from_cmd(executor_cmd)
+    return None
 
 
-def select_review_adapter(review_cmd: str | None, review_anthropic: bool) -> StepAdapter | None:
+def select_review_adapter(
+    review: str | None,
+    review_cmd: str | None,
+    review_anthropic: bool,
+) -> StepAdapter | None:
+    if review_cmd:
+        return adapter_from_cmd(review_cmd)
+    if review:
+        return adapter_for_executor(review)
     if review_anthropic:
         return AnthropicAdapter()
-    return adapter_from_cmd(review_cmd)
+    return None
 
 
 def generated_run_id() -> str:
@@ -109,9 +144,15 @@ def run_workflow(
             "Omit to use the deterministic local adapter.",
         ),
     ] = None,
+    executor: Annotated[
+        str | None, typer.Option("--executor", help="Preset: local|claude|codex|anthropic"),
+    ] = None,
     anthropic: Annotated[
         bool, typer.Option("--anthropic", help="Anthropic API executor"),
     ] = False,
+    review: Annotated[
+        str | None, typer.Option("--review", help="Reviewer preset: claude|codex|anthropic"),
+    ] = None,
     review_cmd: Annotated[
         str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
     ] = None,
@@ -129,8 +170,8 @@ def run_workflow(
     runner = make_runner(
         repo,
         db,
-        select_adapter(executor_cmd, anthropic),
-        select_review_adapter(review_cmd, review_anthropic),
+        select_adapter(executor, executor_cmd, anthropic),
+        select_review_adapter(review, review_cmd, review_anthropic),
     )
     result = runner.run(workflow_id=workflow_id, run_id=run_id or generated_run_id(), inputs=inputs)
     emit_result(result)
@@ -145,9 +186,15 @@ def resume_run(
         str | None,
         typer.Option("--executor-cmd", help="Live executor command (prompt piped on stdin)."),
     ] = None,
+    executor: Annotated[
+        str | None, typer.Option("--executor", help="Preset: local|claude|codex|anthropic"),
+    ] = None,
     anthropic: Annotated[
         bool, typer.Option("--anthropic", help="Anthropic API executor"),
     ] = False,
+    review: Annotated[
+        str | None, typer.Option("--review", help="Reviewer preset: claude|codex|anthropic"),
+    ] = None,
     review_cmd: Annotated[
         str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
     ] = None,
@@ -158,8 +205,8 @@ def resume_run(
     runner = make_runner(
         repo,
         db,
-        select_adapter(executor_cmd, anthropic),
-        select_review_adapter(review_cmd, review_anthropic),
+        select_adapter(executor, executor_cmd, anthropic),
+        select_review_adapter(review, review_cmd, review_anthropic),
     )
     result = runner.resume(run_id)
     emit_result(result)
