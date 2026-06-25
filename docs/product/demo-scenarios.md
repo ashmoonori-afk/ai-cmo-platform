@@ -1,6 +1,6 @@
 # Demo Scenarios
 
-Use these scenarios to show the platform in a sales conversation.
+Use these scenarios to demonstrate what the platform does.
 
 ## Scenario 1: New Client Onboarding
 

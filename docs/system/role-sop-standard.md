@@ -80,6 +80,6 @@ records; Reporter remains the canonical durable KB writer.
 ## Handoff
 
 Every role SOP must name the next downstream role or owner. For final
-buyer-facing artifacts, the handoff is always `source role -> Reviewer ->
-Reporter/CMO delivery`. Internal drafts may skip buyer delivery, but cannot be
+client-facing artifacts, the handoff is always `source role -> Reviewer ->
+Reporter/CMO delivery`. Internal drafts may skip client delivery, but cannot be
 called final until Reviewer has passed or explicitly warned on them.

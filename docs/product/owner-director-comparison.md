@@ -3,7 +3,7 @@
 Use this table when explaining the upgrade to a founder, clinic director,
 funeral-home director, school director, or local business operator.
 
-| Workflow layer | Current owner-led work | Current AI CMO behavior | Upgraded owner/director behavior | Evidence path | Sellable proof |
+| Workflow layer | Current owner-led work | Current AI CMO behavior | Upgraded owner/director behavior | Evidence path | Benefit |
 |----------------|------------------------|-------------------------|----------------------------------|---------------|----------------|
 | Intake | Owner repeats background in chat or meetings. | Agent asks for enough context to start. | Reusable intake captures goal, buyer, offer, constraints, assets, and approval owner. | `docs/system/user-pipeline.md` | Faster start with less repeated context. |
 | Clarification | Owner discovers missing details after drafts arrive. | Agent may guess if the request is vague. | Neurosis-style gate asks one question at a time before execution. | `integrations/birkin/neurosis.md` | Fewer generic outputs and fewer restarts. |

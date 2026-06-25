@@ -1,6 +1,6 @@
 # AI CMO Platform Handoff Package
 
-This folder packages the sellable AI CMO Platform upgrade for downstream agents.
+This folder packages the shareable AI CMO Platform upgrade for downstream agents.
 It is intentionally small, explicit, and safe to hand to another coding or
 operations agent without exposing local run logs.
 
@@ -23,7 +23,7 @@ operations agent without exposing local run logs.
 | `docs/system/user-pipeline.md` | Detailed intake-to-delivery pipeline. |
 | `docs/system/workflow-engine.md` | Executable workflow engine contract, CLI, state tables, and adapter boundary. |
 | `docs/system/dogfooding-procedure.md` | Dogfooding procedure for running this platform against its own workflow. |
-| `docs/dogfooding/2026-06-24-ai-cmo-platform-run.md` | Completed dogfooding run for this sellable upgrade. |
+| `docs/dogfooding/2026-06-24-ai-cmo-platform-run.md` | Completed dogfooding run for this shareable upgrade. |
 | `docs/dogfooding/2026-06-24-workflow-engine-run.md` | Completed dogfooding run for the executable workflow engine. |
 | `docs/product/owner-director-comparison.md` | Original owner workflow vs upgraded director workflow comparison. |
 | `integrations/birkin/README.md` | Birkin skill placement and approval-gated handoff contracts. |
@@ -35,7 +35,7 @@ operations agent without exposing local run logs.
 ## Non-Transfer Local State
 
 `.omo/` contains local planning and review evidence from this workspace. It is
-ignored by Git and should not be treated as part of the sellable product
+ignored by Git and should not be treated as part of the shareable product
 package. The durable product-facing references live in `docs/`, `playbooks/`,
 `integrations/`, `skills/`, `templates/`, `agents/`, and `prompts/`.
 

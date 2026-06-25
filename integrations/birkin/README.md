@@ -25,4 +25,4 @@ All consequential actions remain approval-gated:
 - running external tools
 - generating or downloading images
 - changing SOPs or memory
-- publishing or sending buyer-facing assets
+- publishing or sending client-facing assets

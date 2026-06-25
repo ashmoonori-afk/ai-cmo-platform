@@ -3,8 +3,8 @@
 ## Verdict
 
 The reviewed recommendation is correct for this repository: the product should
-not start by building an n8n-style visual automation system. The sellable first
-product is a thin compiler/executor around the existing Markdown operating
+not start by building an n8n-style visual automation system. The first
+version is a thin compiler/executor around the existing Markdown operating
 system:
 
 ```text

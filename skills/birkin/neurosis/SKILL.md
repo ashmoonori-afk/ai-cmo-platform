@@ -19,7 +19,7 @@ brief before any specialist role starts work.
 - The client, goal, audience, output, success metric, owner, or constraint is
   missing.
 - The request may affect price, legal, compliance, private data, brand risk, or
-  a buyer-facing decision.
+  a client-facing decision.
 - The user asks for deep clarification, interview, requirements, or "do not
   assume."
 
