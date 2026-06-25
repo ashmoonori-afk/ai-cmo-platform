@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from typing import Self
 
 from aicmo.errors import StepTransitionError
 from aicmo.models import ApprovalDecision, RunStatus, StepStatus, WorkflowStep
 from aicmo.run_state import WorkflowRunStore
+
+_DEFAULT_LEASE_TTL = 300.0
+
+
+def _stale_threshold(lease_ttl_seconds: float) -> str:
+    moment = datetime.now(UTC) - timedelta(seconds=lease_ttl_seconds)
+    return moment.strftime("%Y-%m-%d %H:%M:%S")
 
 
 class WorkflowStepStore(WorkflowRunStore):
@@ -59,29 +67,52 @@ class WorkflowStepStore(WorkflowRunStore):
             ).fetchall()
         return {str(row["path"]): str(row["sha256"]) for row in rows}
 
-    def mark_step_running(self: Self, run_id: str, step: WorkflowStep) -> int:
+    def mark_step_running(
+        self: Self,
+        run_id: str,
+        step: WorkflowStep,
+        owner: str = "runner",
+        lease_ttl_seconds: float = _DEFAULT_LEASE_TTL,
+    ) -> bool:
+        """Compare-and-swap claim. Returns True if this owner won the step.
+
+        Claimable when the step is not RUNNING, OR its lease owner is NULL (a crash
+        cleared it), OR its lease is older than the TTL (a crashed runner stopped
+        renewing). A RUNNING step with a fresh foreign lease is NOT claimable, so a
+        concurrent runner fails predictably instead of double-executing.
+        """
+        threshold = _stale_threshold(lease_ttl_seconds)
         with self.connect() as connection:
-            row = connection.execute(
-                "select attempt from steps where run_id = ? and step_id = ?",
-                (run_id, step.id),
-            ).fetchone()
-            attempt = 1 if row is None else int(row["attempt"]) + 1
-            connection.execute(
+            cursor = connection.execute(
                 """
                 update steps set
                     status = ?,
-                    attempt = ?,
+                    attempt = attempt + 1,
                     started_at = current_timestamp,
                     completed_at = null,
                     error_json = null,
                     locked_by = ?,
                     locked_at = current_timestamp
                 where run_id = ? and step_id = ?
+                  and (status != 'running' or locked_by is null or locked_at <= ?)
                 """,
-                (StepStatus.RUNNING.value, attempt, "runner", run_id, step.id),
+                (StepStatus.RUNNING.value, owner, run_id, step.id, threshold),
             )
-            self._mark_run(connection, run_id, RunStatus.RUNNING, step.id)
-        return attempt
+            claimed = cursor.rowcount == 1
+            if claimed:
+                self._mark_run(connection, run_id, RunStatus.RUNNING, step.id)
+        return claimed
+
+    def renew_lease(self: Self, run_id: str, step_id: str, owner: str) -> None:
+        """Heartbeat: refresh a live lease so a long step is not falsely reclaimed."""
+        with self.connect() as connection:
+            connection.execute(
+                """
+                update steps set locked_at = current_timestamp
+                where run_id = ? and step_id = ? and locked_by = ? and status = 'running'
+                """,
+                (run_id, step_id, owner),
+            )
 
     def mark_step_success(self: Self, run_id: str, step_id: str, outputs: list[str]) -> None:
         with self.connect() as connection:

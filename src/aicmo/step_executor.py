@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import assert_never
+from uuid import uuid4
 
 from aicmo.adapters import AgentRequest, LocalAdapter, StepAdapter
 from aicmo.errors import WorkflowExecutionError
@@ -37,6 +41,9 @@ class WorkflowStepExecutor:
     store: WorkflowStore
     adapter: StepAdapter = field(default_factory=LocalAdapter)
     review_adapter: StepAdapter | None = None
+    runner_token: str = field(default_factory=lambda: uuid4().hex)
+    lease_ttl_seconds: float = 30.0
+    heartbeat_interval_seconds: float = 10.0
 
     @property
     def _repo_root(self) -> Path:
@@ -53,19 +60,41 @@ class WorkflowStepExecutor:
         context: dict[str, str],
         status: StepStatus,
     ) -> list[str]:
-        if status != StepStatus.WAITING_APPROVAL:
-            self._store.mark_step_running(run_id, step)
-        match step.type:
-            case StepType.FILE_LOAD:
-                return self._run_file_load(step, context)
-            case StepType.AGENT:
-                return self._run_agent(step, context)
-            case StepType.GATE:
-                return self._run_gate(run_id, step, context)
-            case StepType.KB_UPDATE:
-                return self._run_kb_update(run_id, step, context)
-            case unreachable:
-                assert_never(unreachable)
+        if status != StepStatus.WAITING_APPROVAL and not self._store.mark_step_running(
+            run_id,
+            step,
+            self.runner_token,
+            self.lease_ttl_seconds,
+        ):
+            raise WorkflowExecutionError(step.id, "step is held by another live runner")
+        with self._lease_heartbeat(run_id, step.id):
+            match step.type:
+                case StepType.FILE_LOAD:
+                    return self._run_file_load(step, context)
+                case StepType.AGENT:
+                    return self._run_agent(step, context)
+                case StepType.GATE:
+                    return self._run_gate(run_id, step, context)
+                case StepType.KB_UPDATE:
+                    return self._run_kb_update(run_id, step, context)
+                case unreachable:
+                    assert_never(unreachable)
+
+    @contextmanager
+    def _lease_heartbeat(self, run_id: str, step_id: str) -> Iterator[None]:
+        stop = threading.Event()
+
+        def beat() -> None:
+            while not stop.wait(self.heartbeat_interval_seconds):
+                self._store.renew_lease(run_id, step_id, self.runner_token)
+
+        thread = threading.Thread(target=beat, daemon=True)
+        thread.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            thread.join(timeout=self.heartbeat_interval_seconds + 1.0)
 
     def _run_file_load(self, step: WorkflowStep, context: dict[str, str]) -> list[str]:
         loaded: list[str] = []
