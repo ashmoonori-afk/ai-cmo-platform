@@ -55,3 +55,13 @@ class StepTransitionError(AicmoError):
 
     def __str__(self) -> str:
         return f"invalid transition for {self.run_id}/{self.step_id}: {self.reason}"
+
+
+class OnboardingError(AicmoError):
+    def __init__(self, client: str, reason: str) -> None:
+        self.client = client
+        self.reason = reason
+        super().__init__(str(self))
+
+    def __str__(self) -> str:
+        return f"onboarding error for {self.client}: {self.reason}"

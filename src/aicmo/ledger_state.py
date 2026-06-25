@@ -84,6 +84,27 @@ class WorkflowLedgerStore(WorkflowStepStore):
                 (run_id, step_id, client, path, "queued", content),
             )
 
+    def pending_kb_updates(self: Self, client: str | None = None) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            if client is None:
+                rows = connection.execute(
+                    "select * from kb_updates where status = 'queued' order by kb_update_id",
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "select * from kb_updates where status = 'queued' and client = ? "
+                    "order by kb_update_id",
+                    (client,),
+                ).fetchall()
+        return list(rows)
+
+    def mark_kb_update_consumed(self: Self, kb_update_id: int) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "update kb_updates set status = 'consumed' where kb_update_id = ?",
+                (kb_update_id,),
+            )
+
     def _require_waiting_gate(
         self: Self,
         connection: sqlite3.Connection,

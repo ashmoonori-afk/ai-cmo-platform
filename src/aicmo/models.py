@@ -63,6 +63,7 @@ class WorkflowStep(BaseModel):
     prompt: str | None = None
     pass_if: str | None = None
     requires_approval: bool = False
+    model: str | None = None
 
     @field_validator("id")
     @classmethod
