@@ -117,6 +117,14 @@ uv run aicmo resume run_20260624_001
 uv run aicmo run approval-demo --client sample-client-a --run-id run_approval_001
 uv run aicmo approve run_approval_001 owner_gate --reviewer owner --notes "Approved"
 uv run aicmo retry run_20260624_001 draft
+
+# Value-layer commands
+uv run aicmo onboard --client moms-candles --from answers.json
+uv run aicmo evaluate --from landing-copy.md --out scorecard.md
+uv run aicmo mockup --from answers.json --out mockup.html
+uv run aicmo serve --port 8765
+uv run aicmo kb-flush --client moms-candles
+uv run aicmo run blog-article --client sample-client-a --topic "..." --executor claude
 ```
 
 The default state database is `.aicmo/runs.sqlite3`, and step outputs go to

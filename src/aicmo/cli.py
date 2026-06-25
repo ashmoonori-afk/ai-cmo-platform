@@ -25,6 +25,7 @@ from aicmo.web import run_server
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 console = Console()
+err_console = Console(stderr=True)
 
 EXIT_FAILED = 1
 EXIT_WAITING_APPROVAL = 75  # EX_TEMPFAIL: paused for approval; resume after the gate is approved
@@ -342,6 +343,10 @@ def evaluate_cmd(
     console.print(f"score: {result.total}/100 — {result.band}")
     for dim in result.dimensions:
         console.print(f"  {dim.name}: {dim.score}/{dim.max}")
+    if result.improvements:
+        console.print("개선 우선순위 (낮은 점수 먼저):")
+        for item in result.improvements:
+            console.print(f"  - {item}")
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(render_report(result, title or source.stem), encoding="utf-8")
@@ -368,8 +373,8 @@ def main() -> None:
     try:
         app()
     except AicmoError as exc:
-        console.print(f"error: {exc}")
+        err_console.print(f"error: {exc}")
         raise SystemExit(1) from None
     except Exception as exc:  # noqa: BLE001 — top-level CLI guard: surface a clean message
-        console.print(f"unexpected error: {exc}")
+        err_console.print(f"unexpected error: {exc}")
         raise SystemExit(1) from None

@@ -162,8 +162,10 @@ def test_main_reports_unexpected_error_without_traceback(
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert excinfo.value.code == 1
-    assert "error:" in captured.out
-    assert "boom from deep in the stack" in captured.out
+    # Diagnostics go to stderr (POSIX), not stdout.
+    assert "error:" in captured.err
+    assert "boom from deep in the stack" in captured.err
+    assert captured.out == ""
     # the contract: a clean message, not a leaked traceback or internal frames
     assert "Traceback (most recent call last)" not in combined
     assert "RuntimeError" not in combined
