@@ -21,6 +21,7 @@ class AgentRequest:
     role_contract: str
     prompt_source: str
     inputs_json: str
+    model: str = ""
 
 
 @dataclass(frozen=True, slots=True)

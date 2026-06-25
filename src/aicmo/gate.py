@@ -52,3 +52,31 @@ def allowed_statuses(pass_if: str | None) -> frozenset[str]:
         return _DEFAULT_ALLOWED
     found = frozenset(_STATUS_TOKEN.findall(pass_if))
     return found or _DEFAULT_ALLOWED
+
+
+_VERDICT_ORDER = ("FAIL", "ESCALATE", "WARN", "PASS")
+_SEVERITY = {
+    GateDecision.PASS: 0,
+    GateDecision.WARN: 1,
+    GateDecision.WAITING_APPROVAL: 2,
+    GateDecision.ESCALATE: 3,
+    GateDecision.FAIL: 3,
+}
+
+
+def parse_verdict(text: str) -> GateDecision:
+    """Extract a PASS/WARN/FAIL/ESCALATE verdict from a reviewer's free text.
+
+    Severity order wins (FAIL before PASS), so a mixed reply is read cautiously.
+    Returns WARN when no verdict token is present.
+    """
+    upper = text.upper()
+    for token in _VERDICT_ORDER:
+        if token in upper:
+            return GateDecision(token)
+    return GateDecision.WARN
+
+
+def stricter(left: GateDecision, right: GateDecision) -> GateDecision:
+    """Return the harsher of two gate decisions (FAIL/ESCALATE beat WARN beat PASS)."""
+    return left if _SEVERITY[left] >= _SEVERITY[right] else right

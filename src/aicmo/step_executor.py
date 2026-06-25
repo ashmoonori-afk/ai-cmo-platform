@@ -7,7 +7,7 @@ from typing import assert_never
 
 from aicmo.adapters import AgentRequest, LocalAdapter, StepAdapter
 from aicmo.errors import WorkflowExecutionError
-from aicmo.gate import allowed_statuses, evaluate_artifacts
+from aicmo.gate import allowed_statuses, evaluate_artifacts, parse_verdict, stricter
 from aicmo.models import (
     ApprovalDecision,
     GateDecision,
@@ -18,12 +18,20 @@ from aicmo.models import (
 from aicmo.paths import resolve_inside_repo
 from aicmo.store import WorkflowStore
 
+_REVIEW_CONTRACT = (
+    "Judge the artifact against the quality gate: clarity, completeness, accuracy, brand "
+    "fit, and safety. Reply with exactly one verdict word — PASS, WARN, or FAIL — then a "
+    "one-line reason."
+)
+_REVIEW_INPUT_LIMIT = 8000
+
 
 @dataclass(frozen=True, slots=True)
 class WorkflowStepExecutor:
     repo_root: Path
     store: WorkflowStore
     adapter: StepAdapter = field(default_factory=LocalAdapter)
+    review_adapter: StepAdapter | None = None
 
     @property
     def _repo_root(self) -> Path:
@@ -78,6 +86,7 @@ class WorkflowStepExecutor:
             role_contract=role_text or "[no role contract configured]",
             prompt_source=prompt_text or "[no prompt configured]",
             inputs_json=json.dumps(context, ensure_ascii=False, indent=2),
+            model=step.model or "",
         )
         result = self.adapter.generate(request)
         if not result.ok:
@@ -113,7 +122,7 @@ class WorkflowStepExecutor:
         status = (
             GateDecision.PASS
             if approval == ApprovalDecision.APPROVED
-            else self._evaluate_gate(run_id, step)
+            else self._evaluate_gate(run_id, step, context)
         )
         payload = self._gate_payload(step, status, context)
         outputs = self._write_outputs(
@@ -126,7 +135,12 @@ class WorkflowStepExecutor:
             raise WorkflowExecutionError(step.id, msg)
         return outputs
 
-    def _evaluate_gate(self, run_id: str, step: WorkflowStep) -> GateDecision:
+    def _evaluate_gate(
+        self,
+        run_id: str,
+        step: WorkflowStep,
+        context: dict[str, str],
+    ) -> GateDecision:
         texts: list[str] = []
         for dependency in step.depends_on:
             for relative in self._store.get_step_outputs(run_id, dependency):
@@ -135,7 +149,33 @@ class WorkflowStepExecutor:
                     texts.append(source.read_text(encoding="utf-8"))
         if not texts:
             return GateDecision.PASS
-        return evaluate_artifacts(texts).status
+        deterministic = evaluate_artifacts(texts).status
+        if deterministic == GateDecision.FAIL or self.review_adapter is None:
+            return deterministic
+        return stricter(deterministic, self._semantic_review(step, context, texts))
+
+    def _semantic_review(
+        self,
+        step: WorkflowStep,
+        context: dict[str, str],
+        texts: list[str],
+    ) -> GateDecision:
+        if self.review_adapter is None:
+            return GateDecision.PASS
+        request = AgentRequest(
+            step_id=step.id,
+            run_id=context["run_id"],
+            workflow_id=context["workflow_id"],
+            role="reviewer",
+            role_contract=_REVIEW_CONTRACT,
+            prompt_source="\n\n---\n\n".join(texts)[:_REVIEW_INPUT_LIMIT],
+            inputs_json="{}",
+            model=step.model or "",
+        )
+        result = self.review_adapter.generate(request)
+        if not result.ok:
+            return GateDecision.WARN
+        return parse_verdict(result.text)
 
     def _run_kb_update(
         self,

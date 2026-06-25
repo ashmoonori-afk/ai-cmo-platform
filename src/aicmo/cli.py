@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from aicmo.adapters import CommandAdapter, StepAdapter
+from aicmo.anthropic_adapter import AnthropicAdapter
 from aicmo.errors import AicmoError
 from aicmo.evaluate import evaluate_asset, render_report
 from aicmo.mockup import brief_from_answers, render_landing_mockup, render_png
@@ -50,18 +51,40 @@ def default_db(repo: Path) -> Path:
     return repo / ".aicmo" / "runs.sqlite3"
 
 
-def make_runner(repo: Path, db: Path | None, adapter: StepAdapter | None = None) -> WorkflowRunner:
+def make_runner(
+    repo: Path,
+    db: Path | None,
+    adapter: StepAdapter | None = None,
+    review_adapter: StepAdapter | None = None,
+) -> WorkflowRunner:
     repo_root = repo.resolve()
     store = WorkflowStore(db or default_db(repo_root))
     if adapter is None:
-        return WorkflowRunner(repo_root=repo_root, store=store)
-    return WorkflowRunner(repo_root=repo_root, store=store, adapter=adapter)
+        return WorkflowRunner(repo_root=repo_root, store=store, review_adapter=review_adapter)
+    return WorkflowRunner(
+        repo_root=repo_root,
+        store=store,
+        adapter=adapter,
+        review_adapter=review_adapter,
+    )
 
 
 def adapter_from_cmd(executor_cmd: str | None) -> StepAdapter | None:
     if not executor_cmd:
         return None
     return CommandAdapter(command=tuple(shlex.split(executor_cmd)))
+
+
+def select_adapter(executor_cmd: str | None, use_anthropic: bool) -> StepAdapter | None:
+    if use_anthropic:
+        return AnthropicAdapter()
+    return adapter_from_cmd(executor_cmd)
+
+
+def select_review_adapter(review_cmd: str | None, review_anthropic: bool) -> StepAdapter | None:
+    if review_anthropic:
+        return AnthropicAdapter()
+    return adapter_from_cmd(review_cmd)
 
 
 def generated_run_id() -> str:
@@ -86,6 +109,15 @@ def run_workflow(
             "Omit to use the deterministic local adapter.",
         ),
     ] = None,
+    anthropic: Annotated[
+        bool, typer.Option("--anthropic", help="Anthropic API executor"),
+    ] = False,
+    review_cmd: Annotated[
+        str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
+    ] = None,
+    review_anthropic: Annotated[
+        bool, typer.Option("--review-anthropic", help="Anthropic as gate reviewer"),
+    ] = False,
 ) -> None:
     inputs = compact_inputs(
         {
@@ -94,7 +126,12 @@ def run_workflow(
             "target_keyword": target_keyword,
         },
     )
-    runner = make_runner(repo, db, adapter_from_cmd(executor_cmd))
+    runner = make_runner(
+        repo,
+        db,
+        select_adapter(executor_cmd, anthropic),
+        select_review_adapter(review_cmd, review_anthropic),
+    )
     result = runner.run(workflow_id=workflow_id, run_id=run_id or generated_run_id(), inputs=inputs)
     emit_result(result)
 
@@ -108,8 +145,23 @@ def resume_run(
         str | None,
         typer.Option("--executor-cmd", help="Live executor command (prompt piped on stdin)."),
     ] = None,
+    anthropic: Annotated[
+        bool, typer.Option("--anthropic", help="Anthropic API executor"),
+    ] = False,
+    review_cmd: Annotated[
+        str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
+    ] = None,
+    review_anthropic: Annotated[
+        bool, typer.Option("--review-anthropic", help="Anthropic as gate reviewer"),
+    ] = False,
 ) -> None:
-    result = make_runner(repo, db, adapter_from_cmd(executor_cmd)).resume(run_id)
+    runner = make_runner(
+        repo,
+        db,
+        select_adapter(executor_cmd, anthropic),
+        select_review_adapter(review_cmd, review_anthropic),
+    )
+    result = runner.resume(run_id)
     emit_result(result)
 
 
