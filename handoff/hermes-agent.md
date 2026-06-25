@@ -2,7 +2,7 @@
 
 ## Mission
 
-Operate this repository as a sellable AI CMO workflow system. Route a user's
+Operate this repository as a shareable AI CMO workflow system. Route a user's
 natural-language marketing request into the correct client context, role SOP,
 playbook chain, reviewer gate, and Reporter knowledge-base record.
 
@@ -26,7 +26,7 @@ playbook chain, reviewer gate, and Reporter knowledge-base record.
    intermediate artifacts using `skills/birkin/odyssey/SKILL.md`.
 6. If a visual asset is requested, use the codex-image-gen contract only after
    approval using `skills/birkin/codex-image-gen/SKILL.md`.
-7. Run Reviewer before any buyer-facing, owner-facing, sent, published, or final
+7. Run Reviewer before any client-facing, owner-facing, sent, published, or final
    artifact is accepted.
 8. Send durable-learning candidates to Reporter. Reporter owns durable
    knowledge-base records.

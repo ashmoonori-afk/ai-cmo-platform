@@ -1,11 +1,11 @@
 # AI CMO Role SOP Playbook
 
-This document is the sellable operating layer above the existing agent prompts.
+This document is the shared operating layer above the existing agent prompts.
 It does not replace `agents/*.md` or any existing playbook. It standardizes how
 each role is run, reviewed, and improved.
 
 Individual executable role SOP playbooks live in `playbooks/08-role-sops/`.
-Related sellable system docs live in `docs/system/`, product docs live in
+Related system docs live in `docs/system/`, product docs live in
 `docs/product/`, embedded skill protocols live in `skills/birkin/`, and
 approval-gated handoff contracts live in `integrations/birkin/`.
 
@@ -14,7 +14,7 @@ approval-gated handoff contracts live in `integrations/birkin/`.
 | Rule | Platform decision | Evidence |
 |------|-------------------|----------|
 | SOPs document recurring work and should be concise enough to run consistently. | Keep each role SOP to purpose, trigger, inputs, steps, evidence, and review. | EPA SOP guidance: <https://www.epa.gov/sites/default/files/2015-06/documents/g6-final.pdf> |
-| A sellable SOP needs uniform context, ownership, and operating method. | Every role has owner, trigger, required references, output, and gate. | Asana SOP template: <https://asana.com/resources/sop-template> |
+| A shared SOP needs uniform context, ownership, and operating method. | Every role has owner, trigger, required references, output, and gate. | Asana SOP template: <https://asana.com/resources/sop-template> |
 | Cross-role work needs explicit responsibility and decision authority. | Use Driver, Approver, Contributor, Informed for complex client decisions. | Atlassian DACI: <https://www.atlassian.com/team-playbook/plays/daci> |
 | Workflows should be mapped so bottlenecks and handoffs are visible. | Use a single role registry plus a gate matrix instead of scattered prose. | Asana process mapping: <https://asana.com/resources/process-mapping> |
 | Checklists are the executable surface, separate from reference documentation. | Each role produces an artifact plus evidence fields for reviewer and reporter. | Process Street workflow guidance: <https://www.process.st/standard-operating-procedure-software/> |
@@ -90,7 +90,7 @@ hub.
 
 ## Owner/Director Comparison Table
 
-Use this in onboarding and sales conversations when the buyer is a founder,
+Use this when onboarding or explaining the platform to a founder,
 clinic director, funeral-home director, school director, or local business
 operator.
 

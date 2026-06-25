@@ -1,12 +1,12 @@
-# Sellable Positioning
+# Positioning
 
-AI CMO Platform sells an operating system for small teams that need marketing
+AI CMO Platform is a shared operating system for small teams that need marketing
 work to become repeatable, reviewed, and evidence-backed without hiring a full
-marketing department.
+marketing department. It is shared for others to use and adapt, not sold.
 
-## Offer
+## What It Provides
 
-| Buyer problem | Platform answer | Proof path |
+| Problem | Platform answer | Proof path |
 |---------------|-----------------|------------|
 | The owner repeats context to every marketer. | Client config, brand files, and knowledge base become reusable context. | `clients/`, `knowledge-base/` |
 | Work quality depends on who remembered what. | Role SOPs define required inputs, evidence, and review gates. | `playbooks/08-role-sops/` |
@@ -28,13 +28,13 @@ marketing department.
 ## What It Is Not
 
 - not an unattended execution service
-- not a replacement for buyer approval
+- not a replacement for owner approval
 - not dependent on a separate Birkin installation
 - not a claim that images, analytics, or integrations ran without proof
 
-## Sales Narrative
+## How It Works
 
 The platform turns vague owner requests into an executable brief, routes the
 work to the right specialist role, checks the output, and records what should
-improve next time. The buyer is not purchasing "AI prompts"; the buyer is
-purchasing a controlled marketing workflow.
+improve next time. It is not a set of "AI prompts"; it is a controlled
+marketing workflow.

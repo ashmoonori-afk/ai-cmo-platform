@@ -79,6 +79,6 @@ owner:
 
 ## Handoff
 
-- Send final artifacts to Reviewer before buyer-facing delivery.
+- Send final artifacts to Reviewer before client-facing delivery.
 - Send durable learning candidates to Reporter for non-destructive KB handling.
 - Route KB candidates to Reporter under `prompts/shared/knowledge-update.md`.

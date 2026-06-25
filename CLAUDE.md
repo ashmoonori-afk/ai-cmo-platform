@@ -563,15 +563,15 @@ CMO: config.md 존재 확인 → 없으면 온보딩 (Lite: config + brand만)
 
 ## 부록: 빠른 참조
 
-### Sellable Operating Layer
+### Shared Operating Layer
 
-The repository includes a self-contained sellable operating layer. Users do not
+The repository includes a self-contained, shareable operating layer. Users do not
 need a separate Birkin checkout to use the embedded skill protocols.
 
 | Layer | Path | Purpose |
 |-------|------|---------|
 | System docs | `docs/system/` | Baseline inventory, role SOP standard, upgraded user pipeline, dogfooding procedure |
-| Product docs | `docs/product/` | Sellable positioning, owner/director comparison, demo scenarios |
+| Product docs | `docs/product/` | Positioning, owner/director comparison, demo scenarios |
 | Role SOP hub | `docs/role-sop/README.md` | Role registry, gate matrix, KB handoff, owner/director comparison |
 | Role SOP playbooks | `playbooks/08-role-sops/` | Executable SOP for specialist roles |
 | User pipeline | `playbooks/00-chains/ai-cmo-operating-system.md` | Intake, Neurosis clarity gate, triage, Odyssey-style execution, reviewer, reporter, Morpheus-style maintenance |

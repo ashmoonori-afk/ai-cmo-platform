@@ -3,7 +3,7 @@
 ## Mission
 
 Inspect, maintain, and package the upgraded AI CMO Platform without weakening
-the operating rules that make it sellable: role SOPs, reviewer gates, privacy
+the operating rules that make it shareable: role SOPs, reviewer gates, privacy
 controls, Birkin integration contracts, and owner/director positioning.
 
 ## Repository State To Preserve
@@ -24,7 +24,7 @@ controls, Birkin integration contracts, and owner/director positioning.
 ## Change Discipline
 
 1. Keep `CLAUDE.md` as the routing authority.
-2. Keep Reviewer as the final gate for buyer-facing, owner-facing, sent,
+2. Keep Reviewer as the final gate for client-facing, owner-facing, sent,
    published, or final artifacts.
 3. Keep Reporter as the canonical writer for durable KB records.
 4. Do not bypass approval gates for Birkin handoffs, publishing, sending,
@@ -67,7 +67,7 @@ Expected result:
 
 ## Review Checklist
 
-- Owner/director comparison still frames the buyer value clearly.
+- Owner/director comparison still frames the owner value clearly.
 - User pipeline still starts with intake and clarity, then routes to role SOPs.
 - Birkin placements remain: Neurosis for clarity, Odyssey for complex
   execution, codex-image-gen for approved visuals, Morpheus for maintenance.

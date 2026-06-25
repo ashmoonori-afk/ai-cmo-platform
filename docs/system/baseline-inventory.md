@@ -1,7 +1,7 @@
 # Baseline Inventory
 
-This repository is a Markdown-first AI CMO operating system. The sellable layer
-must preserve the existing operating surface while adding clearer buyer-facing
+This repository is a Markdown-first AI CMO operating system. The shareable layer
+must preserve the existing operating surface while adding clearer client-facing
 contracts.
 
 ## Current Counts
@@ -24,13 +24,13 @@ Do not overwrite or revert these paths without explicit user approval:
 - `AI-CMO-Platform-카톡공유용.md`
 - existing `.omo/` state
 
-## Sellable Additions
+## Shareable Additions
 
 | Addition | Path | Purpose |
 |----------|------|---------|
 | Role SOP standard | `docs/system/role-sop-standard.md` | Defines the minimum standard for every role SOP. |
 | User pipeline | `docs/system/user-pipeline.md` | Explains the upgraded request-to-delivery pipeline. |
-| Product positioning | `docs/product/sellable-positioning.md` | Explains what the platform sells. |
+| Product positioning | `docs/product/sellable-positioning.md` | Explains what the platform offers. |
 | Owner/director comparison | `docs/product/owner-director-comparison.md` | Shows the business operator before/after model. |
 | Role SOP playbooks | `playbooks/08-role-sops/` | Gives each role an executable SOP surface. |
 | Embedded skill protocols | `skills/birkin/` | Provides standalone Neurosis, Odyssey, Morpheus, and codex-image-gen instructions. |

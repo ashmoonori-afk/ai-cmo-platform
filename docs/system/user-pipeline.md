@@ -1,6 +1,6 @@
 # User Pipeline
 
-This is the sellable request-to-delivery pipeline for AI CMO Platform.
+This is the request-to-delivery pipeline for AI CMO Platform.
 It is implemented by `playbooks/00-chains/ai-cmo-operating-system.md`.
 
 ## Pipeline
