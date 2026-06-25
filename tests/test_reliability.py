@@ -42,7 +42,8 @@ def test_kb_flush_idempotent_under_replay(tmp_path: Path) -> None:
     with runner.store.connect() as connection:
         connection.execute("update kb_updates set status = 'queued'")
 
-    flush_kb_updates(tmp_path, runner.store, "acme")
+    # The replay appends nothing (marker already present), so the count is 0.
+    assert flush_kb_updates(tmp_path, runner.store, "acme") == 0
 
     insights = (tmp_path / "knowledge-base" / "acme" / "insights.md").read_text("utf-8")
     assert insights.count("KB Update Queue") == 1, "replay duplicated the KB block"

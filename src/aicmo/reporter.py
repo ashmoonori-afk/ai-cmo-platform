@@ -28,13 +28,15 @@ def flush_kb_updates(repo_root: Path, store: WorkflowStore, client: str | None =
         target = (root / "knowledge-base" / slug / "insights.md").resolve()
         if not target.is_relative_to(root):
             continue
-        _append_insight(target, row)
+        appended = _append_insight(target, row)
         store.mark_kb_update_consumed(int(row["kb_update_id"]))
-        flushed += 1
+        if appended:
+            flushed += 1
     return flushed
 
 
-def _append_insight(target: Path, row: sqlite3.Row) -> None:
+def _append_insight(target: Path, row: sqlite3.Row) -> bool:
+    """Append the row's KB block; return True if written, False if already present."""
     run_id = str(row["run_id"])
     step_id = str(row["step_id"])
     path = str(row["path"])
@@ -43,7 +45,7 @@ def _append_insight(target: Path, row: sqlite3.Row) -> None:
     marker = f"<!-- kb:{run_id}:{step_id}:{path} -->"
     existing = target.read_text(encoding="utf-8") if target.exists() else _INSIGHTS_HEADER
     if marker in existing:
-        return
+        return False
     created = str(row["created_at"])[:10]
     content = str(row["content"])
     block = f"\n{marker}\n### [{created} / {run_id} / {step_id}]\n\n{content}\n\n---\n"
@@ -52,3 +54,4 @@ def _append_insight(target: Path, row: sqlite3.Row) -> None:
     tmp = target.with_name(target.name + ".tmp")
     tmp.write_text(existing + block, encoding="utf-8")
     tmp.replace(target)
+    return True

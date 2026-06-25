@@ -27,7 +27,7 @@ truth and adds only the state machine needed to make runs repeatable.
 | Workflow specs | `workflows/*.workflow.yaml` | Declare step order, inputs, dependencies, outputs, and gates. |
 | Runner | `src/aicmo/runner.py` | Execute the DAG, skip successful steps, resume failed runs, and stop at gates. |
 | Store | `src/aicmo/store.py` | Keep SQLite state for workflows, runs, steps, artifacts, events, approvals, and KB update queues. |
-| CLI | `src/aicmo/cli.py` | Provide `run`, `status`, `resume`, `approve`, `reject`, `retry`, and `list-runs`. |
+| CLI | `src/aicmo/cli.py` | Provide `run`, `status`, `resume`, `approve`, `reject`, `retry`, `list-runs`, plus the value-layer commands `onboard`, `evaluate`, `mockup`, `serve`, and `kb-flush`. `run`/`resume` also take `--executor` (local/claude/codex/anthropic) and `--review` for the gate's semantic reviewer. |
 | Playbooks and agents | `playbooks/`, `agents/`, `prompts/shared/` | Remain the human-readable SOP source. |
 | Artifacts | `artifacts/{run_id}/` | Store deterministic step outputs and gate payloads. |
 | Local state | `.aicmo/runs.sqlite3` | Store resumable execution state. |
