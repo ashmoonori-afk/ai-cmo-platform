@@ -1,5 +1,71 @@
 # AI CMO Platform
 
+## Agent Link Runbook
+
+Use this sequence when an operating agent receives only the repository link.
+
+1. Clone and verify the runtime:
+
+```powershell
+git clone <repo-url> ai-cmo-platform
+cd ai-cmo-platform
+uv sync
+uv run aicmo --help
+uv run pytest -q
+```
+
+2. Create or upload per-client onboarding data before any workflow run. A
+   workflow with `client` input must not start until
+   `clients/{client}/config.md` and `clients/{client}/brand-guidelines.md`
+   exist.
+
+```powershell
+uv run aicmo onboard --client <client-slug> --from answers.json
+```
+
+3. Ask the user for the required artifact format before generation. Pass the
+   exact answer through `--artifact-format`, for example `markdown`, `json`,
+   `html`, `docx`, or a user-defined format label.
+
+4. Announce phase deliverables before each phase starts. The CLI prints
+   `phase <step_id> deliverables:` followed by the artifact paths that will be
+   created.
+
+5. Run the workflow. Feedback is mandatory after a purposeful artifact is
+   produced; pass it with `--feedback` so it is persisted under
+   `knowledge-base/_engine-improvements/artifact-feedback.md`.
+
+```powershell
+uv run aicmo run blog-article `
+  --client <client-slug> `
+  --topic "<topic>" `
+  --artifact-format markdown `
+  --feedback "<user feedback>" `
+  --phase-git dry-run
+```
+
+6. Use `--phase-git` for per-phase commit automation. The hook runs after
+   each completed phase and again after feedback persistence when feedback is
+   provided:
+
+| mode | behavior |
+|------|----------|
+| `off` | No git action. |
+| `dry-run` | Print the commit/push/merge plan without changing git state. |
+| `commit` | `git add -A` and commit the phase with `chore(phase): <phase_id> for <run_id>`. |
+| `push` | Commit the phase, then push the current branch. |
+| `merge` | Commit and push the phase, merge the current non-default branch into the remote default branch, then push the default branch. |
+
+7. For research-heavy phases, invoke the embedded
+   `skills/birkin/ultraresearch-swarm/SKILL.md` contract. It mirrors a forced
+   `$omo:ultraresearch` operating swarm and requires a research artifact before
+   downstream generation.
+
+8. For UI or design image generation, use
+   `skills/birkin/codex-image-gen/SKILL.md`. It includes prompt-assist patterns
+   from GPT-Image2-Skill and Evolink, and still requires a real generated file
+   path before claiming visual completion.
+
 Claude Code에서 실행하는 공유용 AI CMO 운영체계입니다. 판매용 제품이 아니라
 누구나 가져다 쓰고 고칠 수 있도록 공유하는 저장소입니다. 사용자의 자연어
 마케팅 요청을 intake, triage, role SOP, reviewer gate, Reporter knowledge

@@ -31,6 +31,12 @@ class VerdictAdapter:
         return AgentResult(text=self.verdict, ok=True)
 
 
+@dataclass(frozen=True, slots=True)
+class UnavailableReviewAdapter:
+    def generate(self, _request: AgentRequest) -> AgentResult:
+        return AgentResult(text="", ok=False, detail="reviewer unavailable")
+
+
 def make_request(**overrides: str) -> AgentRequest:
     base = {
         "step_id": "draft",
@@ -169,6 +175,23 @@ def test_semantic_review_pass_passes_the_run(repo_root: Path) -> None:
     )
 
     assert result.status == "success"
+
+
+def test_configured_reviewer_unavailable_fails_closed(repo_root: Path) -> None:
+    runner = WorkflowRunner(
+        repo_root=repo_root,
+        store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
+        review_adapter=UnavailableReviewAdapter(),
+    )
+
+    result = runner.run(
+        workflow_id="blog-article",
+        run_id="run_review_down",
+        inputs={"client": "sample-client-a", "topic": "x"},
+    )
+
+    assert result.status == "failed"
+    assert result.failed_step_id == "review"
 
 
 def test_no_review_adapter_is_deterministic(repo_root: Path) -> None:

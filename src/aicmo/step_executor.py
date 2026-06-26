@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +29,8 @@ _REVIEW_CONTRACT = (
     "one-line reason."
 )
 _REVIEW_INPUT_LIMIT = 8000
+PhaseAnnouncer = Callable[[WorkflowStep, tuple[str, ...]], None]
+PhaseCompletionHook = Callable[[WorkflowStep, tuple[str, ...]], None]
 
 
 def _sha256(path: Path) -> str:
@@ -44,6 +46,8 @@ class WorkflowStepExecutor:
     runner_token: str = field(default_factory=lambda: uuid4().hex)
     lease_ttl_seconds: float = 30.0
     heartbeat_interval_seconds: float = 10.0
+    phase_announcer: PhaseAnnouncer | None = None
+    phase_completed: PhaseCompletionHook | None = None
 
     @property
     def _repo_root(self) -> Path:
@@ -60,6 +64,8 @@ class WorkflowStepExecutor:
         context: dict[str, str],
         status: StepStatus,
     ) -> list[str]:
+        if self.phase_announcer is not None:
+            self.phase_announcer(step, self._declared_outputs(step, context))
         if status != StepStatus.WAITING_APPROVAL and not self._store.mark_step_running(
             run_id,
             step,
@@ -141,7 +147,13 @@ class WorkflowStepExecutor:
                 context,
                 json.dumps(payload, ensure_ascii=False, indent=2),
             )
-            self._store.mark_step_waiting(run_id, step.id, outputs)
+            if not self._store.mark_step_waiting(
+                run_id,
+                step.id,
+                outputs,
+                owner=self.runner_token,
+            ):
+                raise WorkflowExecutionError(step.id, "step lease lost before gate wait")
             self._store.record_event(
                 run_id,
                 step.id,
@@ -210,7 +222,7 @@ class WorkflowStepExecutor:
         )
         result = self.review_adapter.generate(request)
         if not result.ok:
-            return GateDecision.WARN
+            return GateDecision.FAIL
         return parse_verdict(result.text)
 
     def _run_kb_update(
@@ -257,7 +269,7 @@ class WorkflowStepExecutor:
         content: str,
     ) -> list[str]:
         written: list[str] = []
-        for output_template in step.outputs:
+        for output_template in self._output_templates(step):
             target = self._resolve(output_template, context)
             target.parent.mkdir(parents=True, exist_ok=True)
             # Atomic write: a crash mid-write leaves the previous file (or none),
@@ -267,6 +279,17 @@ class WorkflowStepExecutor:
             tmp.replace(target)
             written.append(str(target.relative_to(self._repo_root)).replace("\\", "/"))
         return written
+
+    def _output_templates(self, step: WorkflowStep) -> tuple[str, ...]:
+        if step.outputs:
+            return step.outputs
+        return (f"artifacts/${{run_id}}/{step.id}.md",)
+
+    def _declared_outputs(self, step: WorkflowStep, context: dict[str, str]) -> tuple[str, ...]:
+        return tuple(
+            str(self._resolve(template, context).relative_to(self._repo_root)).replace("\\", "/")
+            for template in self._output_templates(step)
+        )
 
     def _read_optional(self, step: WorkflowStep, path_template: str | None) -> str:
         if path_template is None:
@@ -289,11 +312,9 @@ class WorkflowStepExecutor:
         context: dict[str, str],
     ) -> bool:
         recorded_outputs = self._store.get_step_outputs(run_id, step.id)
-        if not recorded_outputs and not step.outputs:
-            return True
         paths = recorded_outputs or [
             str(self._resolve(output, context).relative_to(self._repo_root)).replace("\\", "/")
-            for output in step.outputs
+            for output in self._output_templates(step)
         ]
         stored = self._store.get_output_hashes(run_id, step.id)
         for path in paths:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,9 +16,11 @@ from aicmo.adapters import CommandAdapter, StepAdapter
 from aicmo.anthropic_adapter import AnthropicAdapter
 from aicmo.errors import AicmoError
 from aicmo.evaluate import evaluate_asset, render_report
+from aicmo.feedback import record_artifact_feedback
 from aicmo.mockup import brief_from_answers, render_landing_mockup, render_png
-from aicmo.models import RunResult, RunStatus
+from aicmo.models import RunResult, RunStatus, WorkflowStep
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
+from aicmo.phase_git import PhaseGitMode, run_phase_git
 from aicmo.reporter import flush_kb_updates
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
@@ -29,6 +32,7 @@ err_console = Console(stderr=True)
 
 EXIT_FAILED = 1
 EXIT_WAITING_APPROVAL = 75  # EX_TEMPFAIL: paused for approval; resume after the gate is approved
+type PhaseAnnouncer = Callable[[WorkflowStep, tuple[str, ...]], None]
 
 
 def exit_code_for(status: str) -> int:
@@ -48,6 +52,27 @@ def emit_result(result: RunResult) -> None:
         raise typer.Exit(code)
 
 
+def emit_phase_deliverables(step: WorkflowStep, deliverables: tuple[str, ...]) -> None:
+    console.print(f"phase {step.id} deliverables:")
+    for deliverable in deliverables:
+        console.print(f"  {deliverable}")
+
+
+def phase_git_callback(
+    repo_root: Path,
+    mode: PhaseGitMode,
+    run_id: str,
+) -> PhaseAnnouncer | None:
+    if mode == PhaseGitMode.OFF:
+        return None
+
+    def completed(step: WorkflowStep, _deliverables: tuple[str, ...]) -> None:
+        for line in run_phase_git(repo_root, mode, run_id, step.id):
+            console.print(line)
+
+    return completed
+
+
 def default_db(repo: Path) -> Path:
     return repo / ".aicmo" / "runs.sqlite3"
 
@@ -57,16 +82,26 @@ def make_runner(
     db: Path | None,
     adapter: StepAdapter | None = None,
     review_adapter: StepAdapter | None = None,
+    phase_announcer: PhaseAnnouncer | None = None,
+    phase_completed: PhaseAnnouncer | None = None,
 ) -> WorkflowRunner:
     repo_root = repo.resolve()
     store = WorkflowStore(db or default_db(repo_root))
     if adapter is None:
-        return WorkflowRunner(repo_root=repo_root, store=store, review_adapter=review_adapter)
+        return WorkflowRunner(
+            repo_root=repo_root,
+            store=store,
+            review_adapter=review_adapter,
+            phase_announcer=phase_announcer,
+            phase_completed=phase_completed,
+        )
     return WorkflowRunner(
         repo_root=repo_root,
         store=store,
         adapter=adapter,
         review_adapter=review_adapter,
+        phase_announcer=phase_announcer,
+        phase_completed=phase_completed,
     )
 
 
@@ -134,6 +169,18 @@ def run_workflow(
     client: Annotated[str | None, typer.Option("--client")] = None,
     topic: Annotated[str | None, typer.Option("--topic")] = None,
     target_keyword: Annotated[str | None, typer.Option("--target-keyword")] = None,
+    artifact_format: Annotated[
+        str | None,
+        typer.Option("--artifact-format", help="Requested artifact format, e.g. markdown, json."),
+    ] = None,
+    feedback: Annotated[
+        str | None,
+        typer.Option("--feedback", help="Artifact feedback to persist for engine improvement."),
+    ] = None,
+    phase_git: Annotated[
+        PhaseGitMode,
+        typer.Option("--phase-git", help="Phase git automation: off|dry-run|commit|push|merge."),
+    ] = PhaseGitMode.OFF,
     run_id: Annotated[str | None, typer.Option("--run-id")] = None,
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
     db: Annotated[Path | None, typer.Option("--db")] = None,
@@ -166,15 +213,34 @@ def run_workflow(
             "client": client,
             "topic": topic,
             "target_keyword": target_keyword,
+            "artifact_format": artifact_format,
         },
     )
+    run_id_value = run_id or generated_run_id()
+    repo_root = repo.resolve()
     runner = make_runner(
-        repo,
+        repo_root,
         db,
         select_adapter(executor, executor_cmd, anthropic),
         select_review_adapter(review, review_cmd, review_anthropic),
+        emit_phase_deliverables,
+        phase_git_callback(repo_root, phase_git, run_id_value),
     )
-    result = runner.run(workflow_id=workflow_id, run_id=run_id or generated_run_id(), inputs=inputs)
+    result = runner.run(workflow_id=workflow_id, run_id=run_id_value, inputs=inputs)
+    if feedback and client:
+        path = record_artifact_feedback(
+            repo_root,
+            client,
+            run_id_value,
+            artifact_format or "unspecified",
+            feedback,
+        )
+        console.print(f"feedback: {path.relative_to(repo_root)}")
+        for line in run_phase_git(repo_root, phase_git, run_id_value, "feedback"):
+            console.print(line)
+    elif phase_git != PhaseGitMode.OFF:
+        for line in run_phase_git(repo_root, phase_git, run_id_value, "workflow"):
+            console.print(line)
     emit_result(result)
 
 
@@ -208,6 +274,7 @@ def resume_run(
         db,
         select_adapter(executor, executor_cmd, anthropic),
         select_review_adapter(review, review_cmd, review_anthropic),
+        emit_phase_deliverables,
     )
     result = runner.resume(run_id)
     emit_result(result)

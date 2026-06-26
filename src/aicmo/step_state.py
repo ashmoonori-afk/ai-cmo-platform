@@ -114,66 +114,148 @@ class WorkflowStepStore(WorkflowRunStore):
                 (run_id, step_id, owner),
             )
 
-    def mark_step_success(self: Self, run_id: str, step_id: str, outputs: list[str]) -> None:
+    def mark_step_success(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        outputs: list[str],
+        owner: str | None = None,
+    ) -> bool:
         with self.connect() as connection:
-            connection.execute(
-                """
-                update steps set
-                    status = ?,
-                    outputs_json = ?,
-                    completed_at = current_timestamp,
-                    error_json = null,
-                    locked_by = null,
-                    locked_at = null
-                where run_id = ? and step_id = ?
-                """,
-                (
-                    StepStatus.SUCCESS.value,
-                    json.dumps(outputs, ensure_ascii=False),
-                    run_id,
-                    step_id,
-                ),
-            )
+            if owner is None:
+                cursor = connection.execute(
+                    """
+                    update steps set
+                        status = ?,
+                        outputs_json = ?,
+                        completed_at = current_timestamp,
+                        error_json = null,
+                        locked_by = null,
+                        locked_at = null
+                    where run_id = ? and step_id = ?
+                    """,
+                    (
+                        StepStatus.SUCCESS.value,
+                        json.dumps(outputs, ensure_ascii=False),
+                        run_id,
+                        step_id,
+                    ),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    update steps set
+                        status = ?,
+                        outputs_json = ?,
+                        completed_at = current_timestamp,
+                        error_json = null,
+                        locked_by = null,
+                        locked_at = null
+                    where run_id = ? and step_id = ? and locked_by = ? and status = 'running'
+                    """,
+                    (
+                        StepStatus.SUCCESS.value,
+                        json.dumps(outputs, ensure_ascii=False),
+                        run_id,
+                        step_id,
+                        owner,
+                    ),
+                )
+            if cursor.rowcount != 1:
+                return False
             self._record_artifacts(connection, run_id, step_id, outputs, "markdown")
+        return True
 
-    def mark_step_waiting(self: Self, run_id: str, step_id: str, outputs: list[str]) -> None:
+    def mark_step_waiting(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        outputs: list[str],
+        owner: str | None = None,
+    ) -> bool:
         with self.connect() as connection:
-            connection.execute(
-                """
-                update steps set
-                    status = ?,
-                    outputs_json = ?,
-                    completed_at = current_timestamp,
-                    locked_by = null,
-                    locked_at = null
-                where run_id = ? and step_id = ?
-                """,
-                (
-                    StepStatus.WAITING_APPROVAL.value,
-                    json.dumps(outputs, ensure_ascii=False),
-                    run_id,
-                    step_id,
-                ),
-            )
+            if owner is None:
+                cursor = connection.execute(
+                    """
+                    update steps set
+                        status = ?,
+                        outputs_json = ?,
+                        completed_at = current_timestamp,
+                        locked_by = null,
+                        locked_at = null
+                    where run_id = ? and step_id = ?
+                    """,
+                    (
+                        StepStatus.WAITING_APPROVAL.value,
+                        json.dumps(outputs, ensure_ascii=False),
+                        run_id,
+                        step_id,
+                    ),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    update steps set
+                        status = ?,
+                        outputs_json = ?,
+                        completed_at = current_timestamp,
+                        locked_by = null,
+                        locked_at = null
+                    where run_id = ? and step_id = ? and locked_by = ? and status = 'running'
+                    """,
+                    (
+                        StepStatus.WAITING_APPROVAL.value,
+                        json.dumps(outputs, ensure_ascii=False),
+                        run_id,
+                        step_id,
+                        owner,
+                    ),
+                )
+            if cursor.rowcount != 1:
+                return False
             self._record_artifacts(connection, run_id, step_id, outputs, "gate")
             self._mark_run(connection, run_id, RunStatus.WAITING_APPROVAL, step_id)
+        return True
 
-    def mark_step_failed(self: Self, run_id: str, step_id: str, message: str) -> None:
+    def mark_step_failed(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        message: str,
+        owner: str | None = None,
+    ) -> bool:
         payload = json.dumps({"message": message}, ensure_ascii=False)
         with self.connect() as connection:
-            connection.execute(
-                """
-                update steps set
-                    status = ?,
-                    error_json = ?,
-                    completed_at = current_timestamp,
-                    locked_by = null,
-                    locked_at = null
-                where run_id = ? and step_id = ?
-                """,
-                (StepStatus.FAILED.value, payload, run_id, step_id),
-            )
+            if owner is None:
+                cursor = connection.execute(
+                    """
+                    update steps set
+                        status = ?,
+                        error_json = ?,
+                        completed_at = current_timestamp,
+                        locked_by = null,
+                        locked_at = null
+                    where run_id = ? and step_id = ?
+                    """,
+                    (StepStatus.FAILED.value, payload, run_id, step_id),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    update steps set
+                        status = ?,
+                        error_json = ?,
+                        completed_at = current_timestamp,
+                        locked_by = null,
+                        locked_at = null
+                    where run_id = ? and step_id = ? and locked_by = ? and status = 'running'
+                    """,
+                    (StepStatus.FAILED.value, payload, run_id, step_id, owner),
+                )
+            if cursor.rowcount != 1:
+                return False
             self._mark_run(connection, run_id, RunStatus.FAILED, step_id, step_id)
+        return True
 
     def mark_run_success(self: Self, run_id: str) -> None:
         with self.connect() as connection:

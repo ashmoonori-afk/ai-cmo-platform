@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import sqlite3
+import threading
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 
+from aicmo import reporter
 from aicmo.errors import WorkflowExecutionError
 from aicmo.reporter import flush_kb_updates
 from aicmo.runner import WorkflowRunner
+from aicmo.spec import load_workflow_spec
 from aicmo.store import WorkflowStore
 from tests.conftest import lines, write_text
 
@@ -26,6 +31,8 @@ def _seed_kb(tmp_path: Path) -> WorkflowRunner:
             "      - artifacts/${run_id}/kb.md",
         ),
     )
+    write_text(tmp_path / "clients" / "acme" / "config.md", "client config")
+    write_text(tmp_path / "clients" / "acme" / "brand-guidelines.md", "brand rules")
     runner = WorkflowRunner(
         repo_root=tmp_path,
         store=WorkflowStore(tmp_path / ".aicmo" / "runs.sqlite3"),
@@ -47,6 +54,71 @@ def test_kb_flush_idempotent_under_replay(tmp_path: Path) -> None:
 
     insights = (tmp_path / "knowledge-base" / "acme" / "insights.md").read_text("utf-8")
     assert insights.count("KB Update Queue") == 1, "replay duplicated the KB block"
+
+
+def test_stale_lease_owner_cannot_mark_success_after_reclaim(repo_root: Path) -> None:
+    db_path = repo_root / ".aicmo" / "runs.sqlite3"
+    store = WorkflowStore(db_path)
+    store.initialize()
+    spec = load_workflow_spec(repo_root, "blog-article")
+    store.ensure_run(
+        spec=spec,
+        run_id="run_stale_owner",
+        inputs={"client": "sample-client-a", "topic": "x"},
+    )
+    step = spec.steps[0]
+
+    assert store.mark_step_running("run_stale_owner", step, "old", 300) is True
+    with store.connect() as connection:
+        connection.execute(
+            "update steps set locked_at = '2000-01-01 00:00:00' "
+            "where run_id = ? and step_id = ?",
+            ("run_stale_owner", step.id),
+        )
+    assert store.mark_step_running("run_stale_owner", step, "new", 1) is True
+
+    assert store.mark_step_success("run_stale_owner", step.id, ["old.md"], owner="old") is False
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        row = connection.execute(
+            "select status, locked_by, outputs_json from steps where run_id = ? and step_id = ?",
+            ("run_stale_owner", step.id),
+        ).fetchone()
+    assert row == ("running", "new", "[]")
+    assert store.mark_step_success("run_stale_owner", step.id, ["new.md"], owner="new") is True
+
+
+def test_concurrent_kb_appends_preserve_distinct_blocks(tmp_path: Path) -> None:
+    runner = _seed_kb(tmp_path)
+    runner.store.record_kb_update(
+        "run_kb",
+        "kb",
+        "acme",
+        "artifacts/run_kb/kb-extra.md",
+        "CONTENT_TWO",
+    )
+    rows = runner.store.pending_kb_updates("acme")
+    target = tmp_path / "knowledge-base" / "acme" / "insights.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# header\n", encoding="utf-8")
+    errors: list[BaseException] = []
+
+    def append(row: sqlite3.Row) -> None:
+        try:
+            reporter.append_insight(target, row)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=append, args=(row,)) for row in rows]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    text = target.read_text(encoding="utf-8")
+    assert errors == []
+    assert "CONTENT_TWO" in text
+    assert text.count("<!-- kb:") == 2
 
 
 def test_resume_rejects_tampered_output(repo_root: Path) -> None:
