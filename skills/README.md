@@ -12,6 +12,7 @@ without a separate Birkin installation.
 | Odyssey | `birkin/odyssey/SKILL.md` | Plan and verify complex multi-step work. |
 | Morpheus | `birkin/morpheus/SKILL.md` | Capture maintenance notes after delivery. |
 | codex-image-gen | `birkin/codex-image-gen/SKILL.md` | Route approved real-image generation requests. |
+| ultraresearch-swarm | `birkin/ultraresearch-swarm/SKILL.md` | Force evidence-bound research swarms before risky phases. |
 
 These protocols are adapted into AI CMO operating language. They do not require
 Birkin CLI commands, Birkin MCP tools, or a Birkin local repository.

@@ -75,6 +75,39 @@ approval_owner:
 reviewer_notes:
 ```
 
+## UI And Design Prompt Assist
+
+When the requested visual is a design mockup, dashboard, app screen, UI concept,
+or marketing layout, help the operator build the prompt before image generation.
+Use these reference patterns:
+
+- GPT-Image2-Skill prompt gallery and skill:
+  https://github.com/wuyoscar/GPT-Image2-Skill
+- Evolink GPT image prompt examples:
+  https://evolink.ai/gpt-image-2-prompts
+
+For UI prompts, keep this order so the generator receives a precise brief:
+
+```yaml
+background_or_scene:
+screen_or_subject:
+layout_structure:
+core_components:
+content_density:
+brand_constraints:
+typography:
+color_and_lighting:
+interaction_cues:
+must_include:
+must_avoid:
+output_path:
+```
+
+Prefer concrete UI details over vague style words. State the actual product,
+screen state, data modules, navigation, cards/tables/charts, and any mobile or
+desktop viewport constraints. If the user has not chosen a format, ask for the
+desired artifact format before generation and produce that exact format.
+
 ## Completion Rule
 
 Reviewer must fail any artifact that claims visual completion without

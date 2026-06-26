@@ -100,6 +100,8 @@ def test_kb_flush_appends_and_is_idempotent(tmp_path: Path) -> None:
             "      - artifacts/${run_id}/kb.md",
         ),
     )
+    write_text(tmp_path / "clients" / "acme" / "config.md", "client config")
+    write_text(tmp_path / "clients" / "acme" / "brand-guidelines.md", "brand rules")
     runner = WorkflowRunner(
         repo_root=tmp_path,
         store=WorkflowStore(tmp_path / ".aicmo" / "runs.sqlite3"),
