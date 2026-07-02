@@ -1,5 +1,88 @@
 # AI CMO Platform
 
+**An AI Chief Marketing Officer operating system for Korean small businesses.**
+One consultation → agency-grade, paste-ready marketing: strategy, channel mix,
+hooking copy, brand kit, homepage, and ads — native to Naver, Kakao, Daangn,
+and Baemin, where global marketing tools fall short.
+
+## Why this exists
+
+- **AI tools stop at advice; owners need finished work.** Every deliverable
+  here ships publish-ready (a quality gate FAILs anything you couldn't paste
+  as-is), opens with a plain-language one-page summary, and ends with "next
+  steps" — modeled on what Korean agencies actually sell for ₩300k–1M/month.
+- **Korea runs on different rails.** Search = Naver, retention = KakaoTalk,
+  neighborhood = Daangn, food = Baemin. 66 playbooks cover them with cited,
+  current (2024–2026) research — sources preserved in `docs/research/`.
+- **It's an engine, not a prompt pile.** A resumable workflow runner (SQLite
+  state, approval gates, lease-based concurrency, content-hash resume,
+  100 passing tests) executes the playbooks as reproducible DAGs. No API key
+  needed — live generation pipes through the `claude` CLI you already run.
+
+## 60-second try
+
+```powershell
+git clone <this-repo> && cd ai-cmo-platform
+uv sync && uv run pytest -q          # 100 tests
+uv run aicmo run launch-pack --client sample-client-a --run-id demo1
+uv run aicmo approve demo1 owner_gate --reviewer owner --notes ok
+uv run aicmo resume demo1            # 12 linear steps -> 5 deliverables + HTML
+```
+
+Or open the repo in Claude Code and just say: `런치팩 해줘 — 새 클라이언트: {회사명}`
+
+| At a glance | |
+|---|---|
+| Deliverable pipeline | consultation → strategy → channel mix → hooking copy → brand kit → homepage → channel execution packs |
+| Coverage | 11 specialist agents · 66 playbooks · 12 modules (incl. Naver search ads, Meta ads, GEO/AI-search) |
+| Engine | `aicmo` CLI — run/resume/approve, artifact ledger, evaluation scorer, HTML mockup, local web form |
+| Quality bar | umbrella deliverable standard + reviewer gate + scam-guard (anti "guaranteed ranking" patterns) |
+
+---
+
+Claude Code에서 실행하는 공유용 AI CMO 운영체계입니다. 판매용 제품이 아니라
+누구나 가져다 쓰고 고칠 수 있도록 공유하는 저장소입니다. 사용자의 자연어
+마케팅 요청을 intake, triage, role SOP, reviewer gate, Reporter knowledge
+record로 연결해서 반복 가능한 산출물로 만듭니다.
+
+## What This Is
+
+AI CMO Platform은 한 명의 마케터가 머릿속으로 처리하던 업무 흐름을
+문서화된 운영체계로 바꾼 저장소입니다.
+
+- 자연어 요청을 워크플로우 매핑으로 분류합니다.
+- 11개 specialist role과 66개 playbook으로 실행합니다 (로컬 실행 SOP 7개 +
+  유료 광고 SOP 2개 포함 — 네이버 플레이스·카톡채널·당근·배달앱·오프라인·
+  네이버 검색광고·메타광고. 근거 리서치: `docs/research/` 다이제스트 5종, 2026-07).
+- 역할별 SOP, Reviewer gate, Reporter KB 기록으로 품질을 고정합니다.
+- `src/aicmo/` 의 실행형 워크플로우 엔진(SQLite 상태, 승인 게이트, 재개)으로
+  선택한 playbook을 재현 가능한 DAG 실행으로 돌립니다.
+- Neurosis, Odyssey, Morpheus, codex-image-gen 패턴을 `skills/birkin/`에
+  내장하고 승인 기반 handoff로 배치합니다.
+
+> **핵심 설계**: Markdown SOP(사람이 읽는 운영 지식) + Python 엔진(재현 가능한
+> 상태 머신) + 대화형 CMO(Claude Code가 CLAUDE.md 라우팅으로 자연어를 실행).
+> 실제 생성은 **API 키가 아니라 이 저장소를 띄운 CLI**(`--executor claude`)로 돌립니다.
+
+## Start Here
+
+| 목적 | 읽을 파일 |
+|------|-----------|
+| 처음 쓰는 사람 (간단 안내 + 명령 메뉴판) | `docs/사용설명서.md` |
+| 산출물 품질 기준 (대행 수준 표준) | `prompts/shared/deliverable-standard.md` |
+| 카톡 등으로 공유 | `docs/카톡공유용.md` |
+| 전체 사용법 + 특이점 + SOP별 튜닝 | `README.md` (이 파일) |
+| Claude Code 운영/라우팅 규칙 | `CLAUDE.md` |
+| 메인 사용자 파이프라인 | `playbooks/00-chains/ai-cmo-operating-system.md` |
+| 실행형 workflow 엔진 | `docs/system/workflow-engine.md` |
+| 역할별 SOP | `docs/role-sop/README.md` |
+| 감사 + 로드맵 (2026-06-25 시점 스냅샷 — 현 상태 아님) | `docs/system/pipeline-audit-and-roadmap-2026-06-25.md` |
+| 선형 런치팩 체인 (상담 → 5대 산출물) | `playbooks/00-chains/launch-pack.md` |
+| Dogfooding 절차 / 최신 실행 기록 | `docs/system/dogfooding-procedure.md`, `docs/dogfooding/2026-06-26-full-sop-dogfooding.md` |
+| Hermes / OpenClaw 전달 | `handoff/README.md` |
+
+---
+
 ## Agent Link Runbook
 
 Use this sequence when an operating agent receives only the repository link.
@@ -65,47 +148,6 @@ uv run aicmo run blog-article `
    `skills/birkin/codex-image-gen/SKILL.md`. It includes prompt-assist patterns
    from GPT-Image2-Skill and Evolink, and still requires a real generated file
    path before claiming visual completion.
-
-Claude Code에서 실행하는 공유용 AI CMO 운영체계입니다. 판매용 제품이 아니라
-누구나 가져다 쓰고 고칠 수 있도록 공유하는 저장소입니다. 사용자의 자연어
-마케팅 요청을 intake, triage, role SOP, reviewer gate, Reporter knowledge
-record로 연결해서 반복 가능한 산출물로 만듭니다.
-
-## What This Is
-
-AI CMO Platform은 한 명의 마케터가 머릿속으로 처리하던 업무 흐름을
-문서화된 운영체계로 바꾼 저장소입니다.
-
-- 자연어 요청을 워크플로우 매핑으로 분류합니다.
-- 11개 specialist role과 66개 playbook으로 실행합니다 (로컬 실행 SOP 7개 +
-  유료 광고 SOP 2개 포함 — 네이버 플레이스·카톡채널·당근·배달앱·오프라인·
-  네이버 검색광고·메타광고. 근거 리서치: `docs/research/` 다이제스트 5종, 2026-07).
-- 역할별 SOP, Reviewer gate, Reporter KB 기록으로 품질을 고정합니다.
-- `src/aicmo/` 의 실행형 워크플로우 엔진(SQLite 상태, 승인 게이트, 재개)으로
-  선택한 playbook을 재현 가능한 DAG 실행으로 돌립니다.
-- Neurosis, Odyssey, Morpheus, codex-image-gen 패턴을 `skills/birkin/`에
-  내장하고 승인 기반 handoff로 배치합니다.
-
-> **핵심 설계**: Markdown SOP(사람이 읽는 운영 지식) + Python 엔진(재현 가능한
-> 상태 머신) + 대화형 CMO(Claude Code가 CLAUDE.md 라우팅으로 자연어를 실행).
-> 실제 생성은 **API 키가 아니라 이 저장소를 띄운 CLI**(`--executor claude`)로 돌립니다.
-
-## Start Here
-
-| 목적 | 읽을 파일 |
-|------|-----------|
-| 처음 쓰는 사람 (간단 안내 + 명령 메뉴판) | `docs/사용설명서.md` |
-| 산출물 품질 기준 (대행 수준 표준) | `prompts/shared/deliverable-standard.md` |
-| 카톡 등으로 공유 | `docs/카톡공유용.md` |
-| 전체 사용법 + 특이점 + SOP별 튜닝 | `README.md` (이 파일) |
-| Claude Code 운영/라우팅 규칙 | `CLAUDE.md` |
-| 메인 사용자 파이프라인 | `playbooks/00-chains/ai-cmo-operating-system.md` |
-| 실행형 workflow 엔진 | `docs/system/workflow-engine.md` |
-| 역할별 SOP | `docs/role-sop/README.md` |
-| 감사 + 로드맵 (2026-06-25 시점 스냅샷 — 현 상태 아님) | `docs/system/pipeline-audit-and-roadmap-2026-06-25.md` |
-| 선형 런치팩 체인 (상담 → 5대 산출물) | `playbooks/00-chains/launch-pack.md` |
-| Dogfooding 절차 / 최신 실행 기록 | `docs/system/dogfooding-procedure.md`, `docs/dogfooding/2026-06-26-full-sop-dogfooding.md` |
-| Hermes / OpenClaw 전달 | `handoff/README.md` |
 
 ---
 
