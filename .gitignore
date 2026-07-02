@@ -1,6 +1,7 @@
 outputs/
 .omo/
 .aicmo/
+.playwright-mcp/
 .venv/
 artifacts/
 .ulw/

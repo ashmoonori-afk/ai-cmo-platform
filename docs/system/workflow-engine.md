@@ -62,6 +62,17 @@ for failed non-terminal steps after the source artifact is fixed. A rejected
 manual gate keeps its decision immutable; start a new run when the owner wants
 to reverse a rejection.
 
+Run the linear launch pack (consultation to five deliverables — strategy,
+channel mix, hooking copy, brand kit, homepage; see
+`playbooks/00-chains/launch-pack.md`):
+
+```powershell
+uv run aicmo onboard --client my-client --from answers.json
+uv run aicmo run launch-pack --client my-client --run-id run_launch_001
+uv run aicmo approve run_launch_001 owner_gate --reviewer owner --notes "Briefed"
+uv run aicmo resume run_launch_001
+```
+
 ## SQLite Tables
 
 | Table | Purpose |
@@ -101,16 +112,22 @@ Reviewer gates use the same vocabulary as `prompts/shared/gate-check.md`:
 | `ESCALATE` | Stop and ask the user or decision owner. |
 | `WAITING_APPROVAL` | Stop until `aicmo approve` or `aicmo reject`. |
 
-The MVP gate writes deterministic local payloads. Live review by Hermes,
-Claude, OpenAI, or Codex should be added behind an adapter, not by weakening
-the state machine.
+Auto gates (no `requires_approval`) evaluate the gated artifacts
+deterministically and fail closed: empty content, TODO/TBD markers, or unfilled
+template tokens are `FAIL`; offline-stub output and unusually thin content are
+`WARN`; a gate with nothing to evaluate is `FAIL`. When a semantic reviewer is
+configured (`--review claude|codex|anthropic` or `--review-cmd`), its verdict is
+combined with the deterministic result and the stricter decision wins. Manual
+gates (`requires_approval: true`) always stop at `WAITING_APPROVAL`, and an
+approved manual gate passes on the human's authority.
 
 ## Adapter Boundary
 
-The first adapter is intentionally local and deterministic. It reads role files
-and prompt files, then writes an artifact that records what would be handed to a
-live executor. This proves the runner before adding costly or risky external
-calls.
+The default adapter is local and deterministic: it reads role and prompt files
+and writes a stub artifact marked as offline output (gates report it as `WARN`,
+never as a live deliverable). Live executors are selected per run with
+`--executor claude|codex|anthropic` (or a raw `--executor-cmd`), and each agent
+step may pin a `model:` alias (opus/sonnet/haiku) in the spec.
 
 Future adapters should preserve the same contract:
 
@@ -120,6 +137,26 @@ Future adapters should preserve the same contract:
 - return a typed success, warning, failure, escalation, or approval-needed
   result;
 - record enough source paths for Reviewer and Reporter.
+
+## Reliability Internals
+
+These behaviors exist in code and matter when operating runs; they were
+previously undocumented:
+
+- **Atomic artifact writes** — outputs are written to a `.tmp` file and renamed,
+  so a crash never leaves a truncated artifact that resume would trust
+  (`step_executor.py`).
+- **Output hashing + reopen** — successful step outputs are SHA-256 hashed
+  (`step_output_hashes` table). On resume, a missing or tampered artifact
+  reopens the step (`reopen_step`) and regenerates it instead of trusting file
+  existence.
+- **Lease heartbeat** — a running step holds a lease (`locked_by`/`locked_at`)
+  renewed by a background heartbeat. A concurrent runner cannot claim a step
+  with a live foreign lease; a crashed runner's stale lease is reclaimable after
+  the TTL. Terminal updates are guarded by the lease owner, so a runner that
+  lost its lease cannot overwrite another runner's result.
+- **`kb.update` step type** — queues a durable-learning entry in SQLite for
+  Reporter (`aicmo kb-flush`) instead of writing to `knowledge-base/` directly.
 
 ## KB Rule
 

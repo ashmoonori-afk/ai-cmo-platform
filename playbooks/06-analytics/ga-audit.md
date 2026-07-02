@@ -3,7 +3,7 @@
 ## 목적
 
 GA4 설정을 속성 / 스트림 / 이벤트 / 전환 / 잠재고객 기준으로 진단하여 100점 스코어카드와 우선순위 개선 로드맵을 생성한다.
-참조: `ga-optimizer/CLAUDE.md` — GA4 전문 엔지니어 관점의 Measurement Plan First 원칙 적용.
+원칙: **Measurement Plan First** — 비즈니스 목표에서 측정 계획을 먼저 세우고, 그 계획에 맞춰 GA4 설정을 진단한다.
 
 ## 에이전트 조합
 
@@ -26,7 +26,6 @@ SCREENSHOTS: {paths}         # GA4 Admin 스크린샷 경로 목록 (선택)
 
 ## 참조 문서
 
-- `ga-optimizer/CLAUDE.md` — GA4 전문 엔지니어 행동 원칙 및 스킬 아키텍처
 - `clients/{client}/config.md` — 비즈니스 목표, KPI, ICP
 - `knowledge-base/{client}/insights.md` — 이전 GA4 감사 기록
 

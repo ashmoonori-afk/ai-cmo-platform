@@ -49,14 +49,6 @@ class WorkflowStepExecutor:
     phase_announcer: PhaseAnnouncer | None = None
     phase_completed: PhaseCompletionHook | None = None
 
-    @property
-    def _repo_root(self) -> Path:
-        return self.repo_root
-
-    @property
-    def _store(self) -> WorkflowStore:
-        return self.store
-
     def _execute_step(
         self,
         run_id: str,
@@ -66,7 +58,7 @@ class WorkflowStepExecutor:
     ) -> list[str]:
         if self.phase_announcer is not None:
             self.phase_announcer(step, self._declared_outputs(step, context))
-        if status != StepStatus.WAITING_APPROVAL and not self._store.mark_step_running(
+        if status != StepStatus.WAITING_APPROVAL and not self.store.mark_step_running(
             run_id,
             step,
             self.runner_token,
@@ -92,7 +84,7 @@ class WorkflowStepExecutor:
 
         def beat() -> None:
             while not stop.wait(self.heartbeat_interval_seconds):
-                self._store.renew_lease(run_id, step_id, self.runner_token)
+                self.store.renew_lease(run_id, step_id, self.runner_token)
 
         thread = threading.Thread(target=beat, daemon=True)
         thread.start()
@@ -108,7 +100,7 @@ class WorkflowStepExecutor:
             source = self._resolve(path_template, context)
             if not source.exists():
                 raise WorkflowExecutionError(step.id, f"required file missing: {source}")
-            relative_source = source.relative_to(self._repo_root)
+            relative_source = source.relative_to(self.repo_root)
             source_text = source.read_text(encoding="utf-8")
             loaded.append(f"## Source: {relative_source}\n\n{source_text}")
         return self._write_outputs(step, context, "\n\n---\n\n".join(loaded))
@@ -139,7 +131,7 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         context: dict[str, str],
     ) -> list[str]:
-        approval = self._store.approval_for(run_id, step.id)
+        approval = self.store.approval_for(run_id, step.id)
         if step.requires_approval and approval is None:
             payload = self._gate_payload(step, GateDecision.WAITING_APPROVAL, context)
             outputs = self._write_outputs(
@@ -147,14 +139,14 @@ class WorkflowStepExecutor:
                 context,
                 json.dumps(payload, ensure_ascii=False, indent=2),
             )
-            if not self._store.mark_step_waiting(
+            if not self.store.mark_step_waiting(
                 run_id,
                 step.id,
                 outputs,
                 owner=self.runner_token,
             ):
                 raise WorkflowExecutionError(step.id, "step lease lost before gate wait")
-            self._store.record_event(
+            self.store.record_event(
                 run_id,
                 step.id,
                 "gate.waiting",
@@ -189,8 +181,8 @@ class WorkflowStepExecutor:
     ) -> GateDecision:
         texts: list[str] = []
         for dependency in step.depends_on:
-            for relative in self._store.get_step_outputs(run_id, dependency):
-                source = self._repo_root / relative
+            for relative in self.store.get_step_outputs(run_id, dependency):
+                source = self.repo_root / relative
                 if source.exists():
                     texts.append(source.read_text(encoding="utf-8"))
         if not texts:
@@ -245,7 +237,7 @@ class WorkflowStepExecutor:
         )
         outputs = self._write_outputs(step, context, body)
         for output in outputs:
-            self._store.record_kb_update(run_id, step.id, context.get("client", ""), output, body)
+            self.store.record_kb_update(run_id, step.id, context.get("client", ""), output, body)
         return outputs
 
     def _gate_payload(
@@ -277,7 +269,7 @@ class WorkflowStepExecutor:
             tmp = target.with_name(target.name + ".tmp")
             tmp.write_text(content.rstrip() + "\n", encoding="utf-8")
             tmp.replace(target)
-            written.append(str(target.relative_to(self._repo_root)).replace("\\", "/"))
+            written.append(str(target.relative_to(self.repo_root)).replace("\\", "/"))
         return written
 
     def _output_templates(self, step: WorkflowStep) -> tuple[str, ...]:
@@ -287,7 +279,7 @@ class WorkflowStepExecutor:
 
     def _declared_outputs(self, step: WorkflowStep, context: dict[str, str]) -> tuple[str, ...]:
         return tuple(
-            str(self._resolve(template, context).relative_to(self._repo_root)).replace("\\", "/")
+            str(self._resolve(template, context).relative_to(self.repo_root)).replace("\\", "/")
             for template in self._output_templates(step)
         )
 
@@ -303,7 +295,7 @@ class WorkflowStepExecutor:
         return path.read_text(encoding="utf-8")
 
     def _resolve(self, path_template: str, context: dict[str, str]) -> Path:
-        return resolve_inside_repo(self._repo_root, path_template, context)
+        return resolve_inside_repo(self.repo_root, path_template, context)
 
     def _successful_outputs_present(
         self,
@@ -311,14 +303,14 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         context: dict[str, str],
     ) -> bool:
-        recorded_outputs = self._store.get_step_outputs(run_id, step.id)
+        recorded_outputs = self.store.get_step_outputs(run_id, step.id)
         paths = recorded_outputs or [
-            str(self._resolve(output, context).relative_to(self._repo_root)).replace("\\", "/")
+            str(self._resolve(output, context).relative_to(self.repo_root)).replace("\\", "/")
             for output in self._output_templates(step)
         ]
-        stored = self._store.get_output_hashes(run_id, step.id)
+        stored = self.store.get_output_hashes(run_id, step.id)
         for path in paths:
-            full = self._repo_root / path
+            full = self.repo_root / path
             if not full.exists():
                 return False
             expected = stored.get(path)
@@ -329,7 +321,7 @@ class WorkflowStepExecutor:
     def _hash_outputs(self, outputs: list[str]) -> dict[str, str]:
         hashes: dict[str, str] = {}
         for path in outputs:
-            full = self._repo_root / path
+            full = self.repo_root / path
             if full.exists():
                 hashes[path] = _sha256(full)
         return hashes

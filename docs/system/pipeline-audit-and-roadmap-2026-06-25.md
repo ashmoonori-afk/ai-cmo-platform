@@ -1,5 +1,7 @@
 # AI CMO Platform — Pipeline Audit & Feature Roadmap
 
+> **STATUS (2026-07-02): HISTORICAL SNAPSHOT.** Sections 0–6 describe the repository **as of the 2026-06-25 audit**, before the roadmap was built. The P0–P3 items were shipped on the same date (see §7 and the commit history: live executor presets, evaluated gates, KB flush, onboarding wizard, mockup/serve). For the **current** engine behavior, read `docs/system/workflow-engine.md`; do not cite §0–§6 as the present state.
+
 **Date:** 2026-06-25
 **Method:** 8 parallel auditors — 4 internal (code + SOP, evidence cited as `file:line`) and 4 external (web research, cited as source URLs). Claims were verified against the repository, not taken from `CLAUDE.md`.
 **North-star this audit measures against (owner's stated vision):** *A complete novice — "my mom, who knows nothing about marketing" — can start a brand and automatically receive (1) marketing proposals, (2) design mockups (시안), (3) working prototypes, and have any existing assets (4) coldly and objectively evaluated with (5) derived improvement points, plus good strategies, methods, and examples.*

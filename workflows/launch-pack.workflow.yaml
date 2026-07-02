@@ -1,0 +1,108 @@
+id: launch-pack
+name: New Business Launch Pack (consultation to five deliverables)
+inputs:
+  client: required
+steps:
+  - id: load_context
+    type: file.load
+    paths:
+      - clients/${client}/config.md
+      - clients/${client}/brand-guidelines.md
+    outputs:
+      - artifacts/${run_id}/context.md
+
+  - id: market_research
+    type: agent
+    role: researcher
+    model: opus
+    depends_on: [load_context]
+    prompt: playbooks/02-intelligence/industry-trends.md
+    outputs:
+      - artifacts/${run_id}/market-research.md
+
+  - id: competitor_scan
+    type: agent
+    role: competitor
+    model: opus
+    depends_on: [load_context]
+    prompt: playbooks/02-intelligence/competitor-monitoring.md
+    outputs:
+      - artifacts/${run_id}/competitor-analysis.md
+
+  - id: launch_strategy
+    type: agent
+    role: strategist
+    model: opus
+    depends_on: [market_research, competitor_scan]
+    prompt: playbooks/01-strategy/gtm-motion-analysis.md
+    outputs:
+      - artifacts/${run_id}/launch-strategy.md
+
+  - id: channel_mix
+    type: agent
+    role: strategist
+    model: opus
+    depends_on: [launch_strategy]
+    prompt: playbooks/01-strategy/channel-strategy.md
+    outputs:
+      - artifacts/${run_id}/channel-mix.md
+
+  - id: hooking_copy
+    type: agent
+    role: copywriter
+    depends_on: [channel_mix]
+    prompt: playbooks/03-content/hooking-copy.md
+    outputs:
+      - artifacts/${run_id}/hooking-copy.md
+
+  - id: brand_kit
+    type: agent
+    role: designer
+    depends_on: [launch_strategy]
+    prompt: playbooks/08-design/design-direction.md
+    outputs:
+      - artifacts/${run_id}/brand-asset-kit.md
+
+  - id: homepage_copy
+    type: agent
+    role: copywriter
+    depends_on: [hooking_copy, brand_kit]
+    prompt: playbooks/08-design/landing-page.md
+    outputs:
+      - artifacts/${run_id}/landing-page-copy.md
+
+  - id: homepage_html
+    type: agent
+    role: designer
+    depends_on: [homepage_copy, brand_kit]
+    prompt: playbooks/08-design/landing-page.md
+    outputs:
+      - artifacts/${run_id}/landing-page.html
+
+  - id: quality_gate
+    type: gate
+    role: reviewer
+    depends_on: [launch_strategy, channel_mix, hooking_copy, brand_kit, homepage_copy, homepage_html]
+    pass_if: "status in ['PASS','WARN']"
+    outputs:
+      - artifacts/${run_id}/quality-review.json
+
+  - id: owner_gate
+    type: gate
+    requires_approval: true
+    depends_on: [quality_gate]
+    outputs:
+      - artifacts/${run_id}/owner-approval.json
+
+  - id: kb_queue
+    type: kb.update
+    depends_on: [owner_gate]
+    outputs:
+      - artifacts/${run_id}/kb-queue.md
+
+  - id: report
+    type: agent
+    role: reporter
+    depends_on: [kb_queue]
+    outputs:
+      - artifacts/${run_id}/launch-pack-report.md

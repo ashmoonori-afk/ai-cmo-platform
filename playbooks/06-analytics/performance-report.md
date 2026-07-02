@@ -28,7 +28,7 @@ CURRENCY: KRW              # 통화 (기본: KRW)
 
 - `clients/{client}/config.md` — KPI 목표, 비즈니스 컨텍스트
 - `knowledge-base/{client}/insights.md` — 이전 리포트 인사이트
-- `ga-optimizer/CLAUDE.md` — GA4 데이터 해석 기준
+- GA4 데이터 해석 기준: `playbooks/06-analytics/ga-audit.md`의 Measurement Plan First 원칙을 따른다
 
 ## 프레임워크
 

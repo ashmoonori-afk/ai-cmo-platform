@@ -3,7 +3,7 @@
 ## 목적
 
 기술적 SEO + 콘텐츠 SEO + GEO(AI 검색 최적화)를 종합 진단하여 100점 스코어카드와 우선순위 개선 로드맵을 생성한다.
-참조: `Sample Client A-GEO-실행가이드.md` 패턴 활용.
+참조: `references/sample-client-a-geo-guide.md` 패턴 활용.
 
 ## 에이전트 조합
 
@@ -24,7 +24,7 @@ FOCUS: {focus}          # 중점 영역 (technical/content/geo/all, 기본: all)
 
 ## 참조 문서
 
-- `Sample Client A-GEO-실행가이드.md` — GEO 감사 항목 및 채점 기준
+- `references/sample-client-a-geo-guide.md` — GEO 감사 항목 및 채점 기준
 - `clients/{client}/config.md` — 브랜드 컨텍스트, ICP
 - `knowledge-base/{client}/insights.md` — 이전 감사 기록
 
