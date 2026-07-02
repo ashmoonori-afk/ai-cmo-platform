@@ -2,6 +2,8 @@ outputs/
 .omo/
 .aicmo/
 .playwright-mcp/
+clients/gyeongjo-b2b/
+knowledge-base/gyeongjo-b2b/
 .venv/
 artifacts/
 .ulw/
