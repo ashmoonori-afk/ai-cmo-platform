@@ -31,6 +31,7 @@ seo-specialist → copywriter → reviewer
 
 - `clients/{client}/config.md`, `brand-guidelines.md`, `consultation-notes.md`
 - `outputs/{client}/seo/*keyword*` — 키워드 리서치 결과 (있으면 재사용)
+- **`playbooks/10-ads/ad-strategy-library.md`** — 실험 설계(실험1 킬 룰·실험4 동일비중 소재 A/B)·지표 해석(지표2 판단 유예·지표3 진단 트리) 검증 전략 사전
 - `prompts/shared/deliverable-standard.md`
 
 ## 프레임워크

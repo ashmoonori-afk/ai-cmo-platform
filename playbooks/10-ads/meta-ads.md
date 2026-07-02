@@ -32,6 +32,7 @@ strategist → copywriter → reviewer
 
 - `clients/{client}/config.md`, `brand-guidelines.md`, `consultation-notes.md`
 - `outputs/{client}/content/*hooking-copy*` — 후킹문안 재사용
+- **`playbooks/10-ads/ad-strategy-library.md`** — 실험 설계·지표 해석·컨텐츠·후킹 검증 전략 사전 (소재 브리프에 적용 전략명 명시 필수)
 - `prompts/shared/deliverable-standard.md`
 
 ## 프레임워크
@@ -100,6 +101,9 @@ strategist → copywriter → reviewer
 ### Step 4: 소재 브리프 6컨셉 + 카피 (copywriter)
 
 서로 다른 6컨셉: UGC 후기형 / 문제-해결형 / 데모형 / 오퍼형 / 비교형 / 브랜드형
+
+- 제작 전 **앵글 맵** 작성 + 각 브리프에 적용 전략명 기록 (예: "컨텐츠1(비포-애프터) + 후킹2(결과 먼저)") — `ad-strategy-library.md` 제3·4부
+- 훅은 **모듈식**으로: 본체 고정 + 훅 3~5종 (후킹4) — hook rate 25% 미달 시 첫 3초만 교체 (후킹1)
 
 - 규격: **9:16 세로 영상 우선** (릴스 지면 이미지 대비 결과당 비용 34.5%↓ — Meta 공식), 세이프존(상단 ~14%·하단 ~20-35%·좌우 ~6% 텍스트 금지)
 - 카피: 기본 문구 첫 125자 안에 훅 (한국어는 더 짧게 [추정]) / 헤드라인 27~40자
