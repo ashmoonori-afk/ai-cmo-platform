@@ -12,3 +12,5 @@ __pycache__/
 *.tmp
 *.lock
 .DS_Store
+docs/research/
+knowledge-base/_platform/

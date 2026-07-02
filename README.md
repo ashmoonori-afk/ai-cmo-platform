@@ -13,7 +13,7 @@ and Baemin, where global marketing tools fall short.
   steps" — modeled on what Korean agencies actually sell for ₩300k–1M/month.
 - **Korea runs on different rails.** Search = Naver, retention = KakaoTalk,
   neighborhood = Daangn, food = Baemin. 67 playbooks cover them with cited,
-  current (2024–2026) research — sources preserved in `docs/research/`.
+  current (2024–2026) research — every claim carries its source inline.
 - **It's an engine, not a prompt pile.** A resumable workflow runner (SQLite
   state, approval gates, lease-based concurrency, content-hash resume,
   100 passing tests) executes the playbooks as reproducible DAGs. No API key
@@ -53,8 +53,8 @@ AI CMO Platform은 한 명의 마케터가 머릿속으로 처리하던 업무 �
 - 자연어 요청을 워크플로우 매핑으로 분류합니다.
 - 11개 specialist role과 67개 playbook으로 실행합니다 (로컬 실행 SOP 7개 +
   유료 광고 SOP 3개 포함 — 네이버 플레이스·카톡채널·당근·배달앱·오프라인·
-  네이버 검색광고·메타광고·광고 전략 라이브러리. 근거 리서치: `docs/research/`
-  다이제스트 6종, 2026-07).
+  네이버 검색광고·메타광고·광고 전략 라이브러리. 근거 리서치 다이제스트는
+  운영자 비공개 레이어 `docs/research/`에 유지 — SOP 본문에 핵심 출처 인라인 인용).
 - 역할별 SOP, Reviewer gate, Reporter KB 기록으로 품질을 고정합니다.
 - `src/aicmo/` 의 실행형 워크플로우 엔진(SQLite 상태, 승인 게이트, 재개)으로
   선택한 playbook을 재현 가능한 DAG 실행으로 돌립니다.
