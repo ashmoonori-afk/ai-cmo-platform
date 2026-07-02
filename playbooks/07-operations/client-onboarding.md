@@ -61,7 +61,8 @@ CMO가 **한 번에 하나씩, 쉬운 말로** 묻는다. 전문용어를 쓰지
 10) 손님이 주로 오는 곳은 어디인가요 — 가게(오프라인), 온라인, 둘 다? — 채널믹스 입력
 
 8~10번 답은 `answers.json`에 넣지 않고 `clients/{slug}/consultation-notes.md`에 기록한다
-(형식 자유, 날짜 + 3문항 답 + 특이사항). 이후 channel-strategy·launch-pack 실행 시 반드시 참조한다.
+(템플릿: `clients/_template/consultation-notes.md` 복사 — 날짜 + 3문항 답 + 특이사항).
+이후 channel-strategy·launch-pack 실행 시 반드시 참조한다.
 
 ### 답을 파일로 — config.md를 먼저 생성
 

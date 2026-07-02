@@ -394,6 +394,11 @@ outputs/sample-client-a/strategy/20260318_gtm-motion-analysis.md     ← strateg
 
 **모든 최종 산출물은 reviewer 에이전트를 통과해야 합니다.** 예외 없음.
 
+산출물 형식·품질의 우산 기준은 `prompts/shared/deliverable-standard.md`:
+- 공통 형식 5개 (첫머리 "한 장 요약", 경로 규칙, 언어, 정직성 태그, "다음 단계") — 전 산출물
+- 대행 수준 10대 기준 — 운영형 산출물(콘텐츠·SNS·플레이스·광고·리뷰)
+- 유형별 적용 매트릭스로 어떤 산출물에 무엇을 적용할지 판단
+
 ### 6.2 검증 체크리스트
 
 reviewer 에이전트는 `prompts/shared/gate-check.md`의 체크리스트를 따릅니다:
