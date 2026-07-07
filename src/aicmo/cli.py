@@ -12,7 +12,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from aicmo.adapters import CommandAdapter, StepAdapter
+from aicmo.adapters import CommandAdapter, LocalAdapter, StepAdapter
 from aicmo.anthropic_adapter import AnthropicAdapter
 from aicmo.errors import AicmoError
 from aicmo.evaluate import evaluate_asset, render_report
@@ -100,18 +100,10 @@ def make_runner(
 ) -> WorkflowRunner:
     repo_root = repo.resolve()
     store = WorkflowStore(db or default_db(repo_root))
-    if adapter is None:
-        return WorkflowRunner(
-            repo_root=repo_root,
-            store=store,
-            review_adapter=review_adapter,
-            phase_announcer=phase_announcer,
-            phase_completed=phase_completed,
-        )
     return WorkflowRunner(
         repo_root=repo_root,
         store=store,
-        adapter=adapter,
+        adapter=adapter or LocalAdapter(),
         review_adapter=review_adapter,
         phase_announcer=phase_announcer,
         phase_completed=phase_completed,
