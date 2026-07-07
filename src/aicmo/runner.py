@@ -39,10 +39,49 @@ class WorkflowRunner(WorkflowStepExecutor):
         self.store.record_event(run_id, None, "run.resumed", f"Resumed {run_id}")
         return self._execute(spec, run_id, inputs)
 
-    def approve(self: Self, run_id: str, step_id: str, reviewer: str, notes: str) -> None:
+    def approve(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        reviewer: str,
+        notes: str,
+        accept_edits: bool = False,
+    ) -> list[str]:
+        """Record a manual approval. With accept_edits, bless human edits made to
+        successful steps' artifacts while the gate was waiting: their hashes are
+        recomputed so resume keeps the edited files instead of regenerating them.
+        Returns the list of artifact paths whose content changed since generation."""
         self.store.initialize()
         self.store.approve(run_id, step_id, ApprovalDecision.APPROVED, reviewer, notes)
         self.store.record_event(run_id, step_id, "gate.approved", notes, {"reviewer": reviewer})
+        if not accept_edits:
+            return []
+        changed = self._accept_artifact_edits(run_id)
+        self.store.record_event(
+            run_id,
+            step_id,
+            "gate.edits_accepted",
+            ", ".join(changed) if changed else "no artifact changes",
+            {"files": changed},
+        )
+        return changed
+
+    def _accept_artifact_edits(self: Self, run_id: str) -> list[str]:
+        changed: list[str] = []
+        for row in self.store.list_steps(run_id):
+            if row["status"] != StepStatus.SUCCESS.value:
+                continue
+            step_id = str(row["step_id"])
+            outputs = self.store.get_step_outputs(run_id, step_id)
+            if not outputs:
+                continue
+            previous = self.store.get_output_hashes(run_id, step_id)
+            current = self._hash_outputs(outputs)
+            changed.extend(
+                path for path, digest in current.items() if previous.get(path) != digest
+            )
+            self.store.record_output_hashes(run_id, step_id, current)
+        return changed
 
     def reject(self: Self, run_id: str, step_id: str, reviewer: str, notes: str) -> None:
         self.store.initialize()

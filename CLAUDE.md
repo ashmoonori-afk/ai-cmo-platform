@@ -236,6 +236,7 @@ gtm-motion-analysis → positioning-map → channel-strategy → funnel-design �
 | 61 | "네이버 광고", "파워링크", "검색광고", "네이버 검색 광고 해줘" | `playbooks/10-ads/naver-search-ads.md` | seo-specialist → copywriter → reviewer | sonnet |
 | 62 | "메타 광고", "페이스북 광고", "인스타 광고", "인스타그램 광고 돌려줘" | `playbooks/10-ads/meta-ads.md` | strategist → copywriter → reviewer | sonnet |
 | 63 | "광고 실험", "광고 테스트 어떻게", "광고 지표 해석", "광고 전략 라이브러리", "훅 테스트" | `playbooks/10-ads/ad-strategy-library.md` (참조 사전 — 실험 설계·지표 해석·컨텐츠·후킹 검증 전략 20종) | strategist (참조) | sonnet |
+| 64 | "이 링크로 포스트 만들어줘", "이 기사로 SNS 올려줘", "콘텐츠 엔진", "이 영상 소개해줘" | `playbooks/03-content/content-engine.md` (소스 URL → 검증 → 리포트 → 채널 포스트 → 승인·수정 학습 → 발행 큐. CLI: `aicmo run content-engine --input source_url=...`, 승인 시 `--accept-edits`) | researcher → copywriter → designer → reviewer → reporter | sonnet |
 
 ### 3.9 매핑 우선순위 규칙
 
@@ -634,11 +635,11 @@ ai-cmo-platform/
 │   ├── _template/               ← 신규 클라이언트 온보딩 템플릿
 │   ├── sample-client-a/              ← Sample Client A 설정
 │   └── sample-client-b/                    ← Sample Client B 설정
-├── playbooks/                   ← 실행 가능한 SOP (12개 모듈, 67개 플레이북)
+├── playbooks/                   ← 실행 가능한 SOP (12개 모듈, 68개 플레이북)
 │   ├── 00-chains/               ← 복합 체인 (5개, launch-pack 포함)
 │   ├── 01-strategy/             ← 전략 기획 (7개)
 │   ├── 02-intelligence/         ← 인텔리전스 (5개)
-│   ├── 03-content/              ← 콘텐츠 (10개)
+│   ├── 03-content/              ← 콘텐츠 (11개)
 │   ├── 04-sales/                ← 세일즈 (5개)
 │   ├── 05-seo/                  ← SEO (4개)
 │   ├── 06-analytics/            ← 분석 (3개)

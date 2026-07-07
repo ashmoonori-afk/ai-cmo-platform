@@ -72,7 +72,7 @@ class WorkflowStepExecutor:
                 case StepType.AGENT:
                     return self._run_agent(step, context)
                 case StepType.GATE:
-                    return self._run_gate(run_id, step, context)
+                    return self._run_gate(run_id, step, context, status)
                 case StepType.KB_UPDATE:
                     return self._run_kb_update(run_id, step, context)
                 case unreachable:
@@ -130,9 +130,16 @@ class WorkflowStepExecutor:
         run_id: str,
         step: WorkflowStep,
         context: dict[str, str],
+        status: StepStatus,
     ) -> list[str]:
         approval = self.store.approval_for(run_id, step.id)
         if step.requires_approval and approval is None:
+            if status == StepStatus.WAITING_APPROVAL:
+                # Idempotent re-wait: the step already holds its waiting state and
+                # outputs; a resume without an approval decision changes nothing
+                # (and must not re-snapshot files the owner may be editing).
+                return self.store.get_step_outputs(run_id, step.id)
+            self._snapshot_gate_inputs(run_id, step, context)
             payload = self._gate_payload(step, GateDecision.WAITING_APPROVAL, context)
             outputs = self._write_outputs(
                 step,
@@ -172,6 +179,36 @@ class WorkflowStepExecutor:
             msg = f"gate {status.value}: artifact failed quality check"
             raise WorkflowExecutionError(step.id, msg)
         return outputs
+
+    def _snapshot_gate_inputs(
+        self,
+        run_id: str,
+        step: WorkflowStep,
+        context: dict[str, str],
+    ) -> None:
+        """Write-once copies of the gated artifacts, taken when an approval gate first
+        waits. Human edits happen after this point, so the snapshot is the diff base
+        for reflection steps. Existing snapshots are never overwritten — a resumed
+        wait must not capture already-edited files as the original."""
+        snapshot_dir = (
+            self._resolve("artifacts/${run_id}/_pre_edit", context)
+            if context.get("run_id")
+            else None
+        )
+        if snapshot_dir is None:
+            return
+        for dependency in step.depends_on:
+            for relative in self.store.get_step_outputs(run_id, dependency):
+                source = self.repo_root / relative
+                if not source.exists():
+                    continue
+                target = snapshot_dir / f"{dependency}__{Path(relative).name}"
+                if target.exists():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                tmp = target.with_name(target.name + ".tmp")
+                tmp.write_bytes(source.read_bytes())
+                tmp.replace(target)
 
     def _evaluate_gate(
         self,

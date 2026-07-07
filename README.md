@@ -12,7 +12,7 @@ and Baemin, where global marketing tools fall short.
   as-is), opens with a plain-language one-page summary, and ends with "next
   steps" — modeled on what Korean agencies actually sell for ₩300k–1M/month.
 - **Korea runs on different rails.** Search = Naver, retention = KakaoTalk,
-  neighborhood = Daangn, food = Baemin. 67 playbooks cover them with cited,
+  neighborhood = Daangn, food = Baemin. 68 playbooks cover them with cited,
   current (2024–2026) research — every claim carries its source inline.
 - **It's an engine, not a prompt pile.** A resumable workflow runner (SQLite
   state, approval gates, lease-based concurrency, content-hash resume,
@@ -34,7 +34,7 @@ Or open the repo in Claude Code and just say: `런치팩 해줘 — 새 클라�
 | At a glance | |
 |---|---|
 | Deliverable pipeline | consultation → strategy → channel mix → hooking copy → brand kit → homepage → channel execution packs |
-| Coverage | 11 specialist agents · 67 playbooks · 12 modules (incl. Naver search ads, Meta ads, ad strategy library, GEO/AI-search) |
+| Coverage | 11 specialist agents · 68 playbooks · 12 modules (incl. Naver search ads, Meta ads, ad strategy library, GEO/AI-search) |
 | Engine | `aicmo` CLI — run/resume/approve, artifact ledger, evaluation scorer, HTML mockup, local web form |
 | Quality bar | umbrella deliverable standard + reviewer gate + scam-guard (anti "guaranteed ranking" patterns) |
 
@@ -51,7 +51,7 @@ AI CMO Platform은 한 명의 마케터가 머릿속으로 처리하던 업무 �
 문서화된 운영체계로 바꾼 저장소입니다.
 
 - 자연어 요청을 워크플로우 매핑으로 분류합니다.
-- 11개 specialist role과 67개 playbook으로 실행합니다 (로컬 실행 SOP 7개 +
+- 11개 specialist role과 68개 playbook으로 실행합니다 (로컬 실행 SOP 7개 +
   유료 광고 SOP 3개 포함 — 네이버 플레이스·카톡채널·당근·배달앱·오프라인·
   네이버 검색광고·메타광고·광고 전략 라이브러리. 근거 리서치 다이제스트는
   운영자 비공개 레이어 `docs/research/`에 유지 — SOP 본문에 핵심 출처 인라인 인용).

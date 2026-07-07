@@ -32,6 +32,28 @@ def test_launch_pack_spec_is_linear() -> None:
     assert tuple(step.id for step in spec.execution_order()) == LAUNCH_PACK_ORDER
 
 
+CONTENT_ENGINE_ORDER = (
+    "load_context",
+    "verify_source",
+    "source_report",
+    "posts_generate",
+    "image_pack",
+    "quality_gate",
+    "owner_gate",
+    "reflection",
+    "kb_queue",
+    "publish_pack",
+)
+
+
+def test_content_engine_spec_is_linear() -> None:
+    spec = load_workflow_spec(REPO_ROOT, "content-engine")
+    assert spec.inputs == {"client": "required", "source_url": "required", "channels": "optional"}
+    assert tuple(step.id for step in spec.execution_order()) == CONTENT_ENGINE_ORDER
+    steps = {step.id: step for step in spec.steps}
+    assert steps["owner_gate"].requires_approval
+
+
 def test_launch_pack_owner_gate_requires_approval() -> None:
     spec = load_workflow_spec(REPO_ROOT, "launch-pack")
     steps = {step.id: step for step in spec.steps}

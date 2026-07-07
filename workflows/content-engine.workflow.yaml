@@ -1,0 +1,83 @@
+id: content-engine
+name: Content Engine (source URL to approved channel posts)
+inputs:
+  client: required
+  source_url: required
+  channels: optional
+steps:
+  - id: load_context
+    type: file.load
+    paths:
+      - clients/${client}/config.md
+      - clients/${client}/brand-guidelines.md
+    outputs:
+      - artifacts/${run_id}/context.md
+
+  - id: verify_source
+    type: agent
+    role: researcher
+    depends_on: [load_context]
+    prompt: playbooks/03-content/content-engine.md
+    outputs:
+      - artifacts/${run_id}/source-verdict.md
+
+  - id: source_report
+    type: agent
+    role: researcher
+    depends_on: [verify_source]
+    prompt: playbooks/03-content/content-engine.md
+    outputs:
+      - artifacts/${run_id}/source-report.md
+
+  - id: posts_generate
+    type: agent
+    role: copywriter
+    depends_on: [source_report]
+    prompt: playbooks/03-content/social-post.md
+    outputs:
+      - artifacts/${run_id}/channel-posts.md
+
+  - id: image_pack
+    type: agent
+    role: designer
+    depends_on: [posts_generate]
+    prompt: playbooks/03-content/content-engine.md
+    outputs:
+      - artifacts/${run_id}/image-pack.md
+
+  - id: quality_gate
+    type: gate
+    role: reviewer
+    depends_on: [source_report, posts_generate, image_pack]
+    pass_if: "status in ['PASS','WARN']"
+    outputs:
+      - artifacts/${run_id}/quality-review.json
+
+  - id: owner_gate
+    type: gate
+    requires_approval: true
+    depends_on: [quality_gate]
+    outputs:
+      - artifacts/${run_id}/owner-approval.json
+
+  - id: reflection
+    type: agent
+    role: reporter
+    depends_on: [owner_gate]
+    prompt: playbooks/03-content/content-engine.md
+    outputs:
+      - artifacts/${run_id}/reflection.md
+
+  - id: kb_queue
+    type: kb.update
+    depends_on: [reflection]
+    outputs:
+      - artifacts/${run_id}/kb-queue.md
+
+  - id: publish_pack
+    type: agent
+    role: reporter
+    depends_on: [kb_queue]
+    prompt: playbooks/03-content/content-engine.md
+    outputs:
+      - artifacts/${run_id}/publish-queue.md

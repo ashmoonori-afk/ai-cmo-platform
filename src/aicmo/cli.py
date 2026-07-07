@@ -77,6 +77,18 @@ def default_db(repo: Path) -> Path:
     return repo / ".aicmo" / "runs.sqlite3"
 
 
+def parse_input_pairs(pairs: list[str]) -> dict[str, str]:
+    """Parse repeated --input key=value options. The workflow spec still decides
+    which keys are declared; malformed pairs fail fast here with a clear message."""
+    parsed: dict[str, str] = {}
+    for pair in pairs:
+        key, separator, value = pair.partition("=")
+        if not separator or not key.strip():
+            raise typer.BadParameter(f"expected key=value, got: {pair!r}")
+        parsed[key.strip()] = value
+    return parsed
+
+
 def make_runner(
     repo: Path,
     db: Path | None,
@@ -173,6 +185,14 @@ def run_workflow(
         str | None,
         typer.Option("--artifact-format", help="Requested artifact format, e.g. markdown, json."),
     ] = None,
+    extra_inputs: Annotated[
+        list[str],
+        typer.Option(
+            "--input",
+            help="Extra workflow input as key=value (repeatable), e.g. "
+            "--input source_url=https://example.com/article",
+        ),
+    ] = [],
     feedback: Annotated[
         str | None,
         typer.Option("--feedback", help="Artifact feedback to persist for engine improvement."),
@@ -208,14 +228,17 @@ def run_workflow(
         bool, typer.Option("--review-anthropic", help="Anthropic as gate reviewer"),
     ] = False,
 ) -> None:
-    inputs = compact_inputs(
-        {
-            "client": client,
-            "topic": topic,
-            "target_keyword": target_keyword,
-            "artifact_format": artifact_format,
-        },
-    )
+    inputs = {
+        **parse_input_pairs(extra_inputs),
+        **compact_inputs(
+            {
+                "client": client,
+                "topic": topic,
+                "target_keyword": target_keyword,
+                "artifact_format": artifact_format,
+            },
+        ),
+    }
     run_id_value = run_id or generated_run_id()
     repo_root = repo.resolve()
     runner = make_runner(
@@ -326,11 +349,33 @@ def approve_gate(
     step_id: Annotated[str, typer.Argument()],
     reviewer: Annotated[str, typer.Option("--reviewer")] = "owner",
     notes: Annotated[str, typer.Option("--notes")] = "Approved",
+    accept_edits: Annotated[
+        bool,
+        typer.Option(
+            "--accept-edits",
+            help="Keep human edits made to generated artifacts while the gate was "
+            "waiting: re-hash them so resume does not regenerate over the edits. "
+            "Originals stay under artifacts/<run_id>/_pre_edit/ for reflection diffs.",
+        ),
+    ] = False,
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
     db: Annotated[Path | None, typer.Option("--db")] = None,
 ) -> None:
-    make_runner(repo, db).approve(run_id, step_id, reviewer, notes)
+    changed = make_runner(repo, db).approve(
+        run_id,
+        step_id,
+        reviewer,
+        notes,
+        accept_edits=accept_edits,
+    )
     console.print(f"{run_id}/{step_id}: approved")
+    if accept_edits:
+        if changed:
+            console.print(f"edits accepted ({len(changed)} file(s)):")
+            for path in changed:
+                console.print(f"  {path}")
+        else:
+            console.print("edits accepted: no artifact changes detected")
 
 
 @app.command("reject")
