@@ -84,11 +84,18 @@ uv run aicmo approve {run_id} owner_gate --reviewer owner --accept-edits
 ## 자동 실행 (CLI)
 
 ```powershell
-uv run aicmo run content-engine --client {slug} --source-url "{URL}" --executor claude
+# 단건:
+uv run aicmo run content-engine --client {slug} --input source_url="{URL}" --executor claude
 # 수정 후 승인:
 uv run aicmo approve {run_id} owner_gate --reviewer owner --accept-edits
 uv run aicmo resume {run_id} --executor claude
+
+# 일괄 (inbox 인제스트): inbox/{slug}/에 URL 파일(.txt/.md, 한 줄에 하나)을 넣고
+uv run aicmo ingest --client {slug} --executor claude    # 각 URL이 owner_gate까지 자동 진행
+uv run aicmo ingest --client {slug} --dry-run            # 계획만 확인
 ```
+
+주기 실행은 Claude Code 예약 세션(cron)에서 `aicmo ingest`를 호출하면 된다. 자동 발행(API) 어댑터는 의도적으로 보류 — X API 유료·인스타 앱 심사 등 시니어 온보딩 장벽 대비 실익 검토 후 (기획서 §4).
 
 ## 산출물 (묶음)
 

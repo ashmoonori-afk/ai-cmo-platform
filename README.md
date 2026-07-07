@@ -235,6 +235,8 @@ uv run aicmo run blog-article --client sample-client-a --topic "..." --executor 
 | `mockup --from <json> --out <html>` | 랜딩 시안 HTML 생성 | `--png` (Playwright 필요) |
 | `serve` | 로컬 웹 폼 서버 | `--host --port` |
 | `kb-flush --client <c>` | KB 큐 → `knowledge-base/<c>/insights.md` | `--repo --db` |
+| `ingest --client <c>` | `inbox/<c>/`의 URL 파일 → content-engine 런 일괄 시작 (처리 후 processed/ 이동) | `--dry-run --executor --db` |
+| `approve ... --accept-edits` | 승인 대기 중 사람이 고친 아티팩트를 보존 (원본은 `_pre_edit/`) | run/gate 인자 동일 |
 
 ### 실행기(executor) 선택
 

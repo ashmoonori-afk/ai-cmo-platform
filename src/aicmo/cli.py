@@ -17,6 +17,7 @@ from aicmo.anthropic_adapter import AnthropicAdapter
 from aicmo.errors import AicmoError
 from aicmo.evaluate import evaluate_asset, render_report
 from aicmo.feedback import record_artifact_feedback
+from aicmo.ingest import archive_item, scan_inbox
 from aicmo.mockup import brief_from_answers, render_landing_mockup, render_png
 from aicmo.models import RunResult, RunStatus, WorkflowStep
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
@@ -265,6 +266,82 @@ def run_workflow(
         for line in run_phase_git(repo_root, phase_git, run_id_value, "workflow"):
             console.print(line)
     emit_result(result)
+
+
+@app.command("ingest")
+def ingest_inbox(
+    client: Annotated[str, typer.Option("--client", help="Client slug (inbox/<client>/)")],
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="List inbox URLs and planned runs without executing."),
+    ] = False,
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+    executor_cmd: Annotated[
+        str | None,
+        typer.Option("--executor-cmd", help="Live executor command (prompt piped on stdin)."),
+    ] = None,
+    executor: Annotated[
+        str | None, typer.Option("--executor", help="Preset: local|claude|codex|anthropic"),
+    ] = None,
+    anthropic: Annotated[
+        bool, typer.Option("--anthropic", help="Anthropic API executor"),
+    ] = False,
+    review: Annotated[
+        str | None, typer.Option("--review", help="Reviewer preset: claude|codex|anthropic"),
+    ] = None,
+    review_cmd: Annotated[
+        str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
+    ] = None,
+) -> None:
+    """Turn URL files under inbox/<client>/ into content-engine runs.
+
+    One .txt/.md file per source, one URL per line (# comments allowed). Each URL
+    starts a content-engine run that stops at owner_gate for approval. Files whose
+    URLs all reached waiting/success are archived to inbox/<client>/processed/;
+    files with any failed run stay in the inbox for the next pass.
+    """
+    repo_root = repo.resolve()
+    items = scan_inbox(repo_root, client)
+    if not items:
+        console.print(f"inbox empty: inbox/{client}/ (drop .txt/.md files with one URL per line)")
+        return
+    if dry_run:
+        for item in items:
+            console.print(f"{item.source_file.name}: {len(item.urls)} url(s)")
+            for url in item.urls:
+                console.print(f"  would run content-engine --input source_url={url}")
+        return
+    runner = make_runner(
+        repo_root,
+        db,
+        select_adapter(executor, executor_cmd, anthropic),
+        select_review_adapter(review, review_cmd, False),
+        emit_phase_deliverables,
+    )
+    for item in items:
+        ok = True
+        for url in item.urls:
+            run_id = generated_run_id()
+            console.print(f"{item.source_file.name} -> {run_id}: {url}")
+            try:
+                result = runner.run(
+                    workflow_id="content-engine",
+                    run_id=run_id,
+                    inputs={"client": client, "source_url": url},
+                )
+            except Exception as exc:  # noqa: BLE001 — keep ingesting the remaining URLs
+                console.print(f"  failed: {type(exc).__name__}: {exc}")
+                ok = False
+                continue
+            console.print(f"  {result.status}")
+            if result.status not in ("success", "waiting_approval"):
+                ok = False
+        if ok and item.urls:
+            archived = archive_item(item)
+            console.print(f"archived: {archived.relative_to(repo_root)}")
+        elif not item.urls:
+            console.print(f"skipped (no urls): {item.source_file.name}")
 
 
 @app.command("resume")

@@ -1,6 +1,7 @@
 # 기획: 콘텐츠 엔진 파이프라인 (langchain-ai/social-media-agent 이식)
 
-> 상태: 기획안 (구현 전) | 작성: 2026-07-07
+> 상태: **P0·P1·P2 구현 완료 (2026-07-07)** — 엔진 `--accept-edits`+`_pre_edit` 스냅샷, `content-engine` 워크플로우·플레이북, `prompts/shared/reflection-diff.md`, `aicmo ingest`(inbox 인제스트, `--dry-run`). API 자동 발행 어댑터는 계획대로 보류 (§4 근거). 구현 중 발견·수정한 기존 결함 1건: 승인 대기 중 resume 시 게이트가 lease 가드로 FAILED 되던 문제 → 멱등 재대기로 수정.
+> 작성: 2026-07-07
 > 원본: github.com/langchain-ai/social-media-agent (LangGraph/TS — URL 하나로 SNS 포스트를 생성·검수·예약 발행하는 에이전트)
 
 ## 한 장 요약
