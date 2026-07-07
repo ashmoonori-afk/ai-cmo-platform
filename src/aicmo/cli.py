@@ -176,6 +176,35 @@ def generated_run_id() -> str:
     return f"run_{timestamp}_{uuid4().hex}"
 
 
+# Shared executor/reviewer option definitions, reused across run/ingest/resume. run's
+# --executor-cmd help diverges (mentions the local-adapter fallback), so it keeps its own.
+ExecutorCmdRunOpt = Annotated[
+    str | None,
+    typer.Option(
+        "--executor-cmd",
+        help="Live executor; the prompt is piped on stdin (e.g. 'claude -p'). "
+        "Omit to use the deterministic local adapter.",
+    ),
+]
+ExecutorCmdOpt = Annotated[
+    str | None,
+    typer.Option("--executor-cmd", help="Live executor command (prompt piped on stdin)."),
+]
+ExecutorOpt = Annotated[
+    str | None, typer.Option("--executor", help="Preset: local|claude|codex|anthropic"),
+]
+AnthropicOpt = Annotated[bool, typer.Option("--anthropic", help="Anthropic API executor")]
+ReviewOpt = Annotated[
+    str | None, typer.Option("--review", help="Reviewer preset: claude|codex|anthropic"),
+]
+ReviewCmdOpt = Annotated[
+    str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
+]
+ReviewAnthropicOpt = Annotated[
+    bool, typer.Option("--review-anthropic", help="Anthropic as gate reviewer"),
+]
+
+
 @app.command("run")
 def run_workflow(
     workflow_id: Annotated[str, typer.Argument(help="Workflow id under workflows/*.workflow.yaml")],
@@ -205,29 +234,12 @@ def run_workflow(
     run_id: Annotated[str | None, typer.Option("--run-id")] = None,
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
     db: Annotated[Path | None, typer.Option("--db")] = None,
-    executor_cmd: Annotated[
-        str | None,
-        typer.Option(
-            "--executor-cmd",
-            help="Live executor; the prompt is piped on stdin (e.g. 'claude -p'). "
-            "Omit to use the deterministic local adapter.",
-        ),
-    ] = None,
-    executor: Annotated[
-        str | None, typer.Option("--executor", help="Preset: local|claude|codex|anthropic"),
-    ] = None,
-    anthropic: Annotated[
-        bool, typer.Option("--anthropic", help="Anthropic API executor"),
-    ] = False,
-    review: Annotated[
-        str | None, typer.Option("--review", help="Reviewer preset: claude|codex|anthropic"),
-    ] = None,
-    review_cmd: Annotated[
-        str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
-    ] = None,
-    review_anthropic: Annotated[
-        bool, typer.Option("--review-anthropic", help="Anthropic as gate reviewer"),
-    ] = False,
+    executor_cmd: ExecutorCmdRunOpt = None,
+    executor: ExecutorOpt = None,
+    anthropic: AnthropicOpt = False,
+    review: ReviewOpt = None,
+    review_cmd: ReviewCmdOpt = None,
+    review_anthropic: ReviewAnthropicOpt = False,
 ) -> None:
     inputs = {
         **parse_input_pairs(extra_inputs),
@@ -277,22 +289,11 @@ def ingest_inbox(
     ] = False,
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
     db: Annotated[Path | None, typer.Option("--db")] = None,
-    executor_cmd: Annotated[
-        str | None,
-        typer.Option("--executor-cmd", help="Live executor command (prompt piped on stdin)."),
-    ] = None,
-    executor: Annotated[
-        str | None, typer.Option("--executor", help="Preset: local|claude|codex|anthropic"),
-    ] = None,
-    anthropic: Annotated[
-        bool, typer.Option("--anthropic", help="Anthropic API executor"),
-    ] = False,
-    review: Annotated[
-        str | None, typer.Option("--review", help="Reviewer preset: claude|codex|anthropic"),
-    ] = None,
-    review_cmd: Annotated[
-        str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
-    ] = None,
+    executor_cmd: ExecutorCmdOpt = None,
+    executor: ExecutorOpt = None,
+    anthropic: AnthropicOpt = False,
+    review: ReviewOpt = None,
+    review_cmd: ReviewCmdOpt = None,
 ) -> None:
     """Turn URL files under inbox/<client>/ into content-engine runs.
 
@@ -365,25 +366,12 @@ def resume_run(
     run_id: Annotated[str, typer.Argument()],
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
     db: Annotated[Path | None, typer.Option("--db")] = None,
-    executor_cmd: Annotated[
-        str | None,
-        typer.Option("--executor-cmd", help="Live executor command (prompt piped on stdin)."),
-    ] = None,
-    executor: Annotated[
-        str | None, typer.Option("--executor", help="Preset: local|claude|codex|anthropic"),
-    ] = None,
-    anthropic: Annotated[
-        bool, typer.Option("--anthropic", help="Anthropic API executor"),
-    ] = False,
-    review: Annotated[
-        str | None, typer.Option("--review", help="Reviewer preset: claude|codex|anthropic"),
-    ] = None,
-    review_cmd: Annotated[
-        str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
-    ] = None,
-    review_anthropic: Annotated[
-        bool, typer.Option("--review-anthropic", help="Anthropic as gate reviewer"),
-    ] = False,
+    executor_cmd: ExecutorCmdOpt = None,
+    executor: ExecutorOpt = None,
+    anthropic: AnthropicOpt = False,
+    review: ReviewOpt = None,
+    review_cmd: ReviewCmdOpt = None,
+    review_anthropic: ReviewAnthropicOpt = False,
 ) -> None:
     runner = make_runner(
         repo,
