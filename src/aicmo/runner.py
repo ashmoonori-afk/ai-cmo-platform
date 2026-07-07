@@ -182,7 +182,7 @@ class WorkflowRunner(WorkflowStepExecutor):
             raise WorkflowExecutionError(step_id, f"undeclared inputs: {', '.join(undeclared)}")
         client = inputs.get("client")
         if "client" in spec.inputs and client:
-            slug = parse_safe_id("client", client).value
+            slug = parse_safe_id("client", client)
             required = (
                 self.repo_root / "clients" / slug / "config.md",
                 self.repo_root / "clients" / slug / "brand-guidelines.md",

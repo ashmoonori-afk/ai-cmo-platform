@@ -14,7 +14,7 @@ SPEC_SUFFIXES = (".workflow.yaml", ".workflow.yml", ".workflow.json")
 
 
 def load_workflow_spec(repo_root: Path, workflow_id: str) -> WorkflowSpec:
-    safe_workflow = parse_safe_id("workflow_id", workflow_id).value
+    safe_workflow = parse_safe_id("workflow_id", workflow_id)
     workflows_dir = repo_root / "workflows"
     for suffix in SPEC_SUFFIXES:
         candidate = workflows_dir / f"{safe_workflow}{suffix}"

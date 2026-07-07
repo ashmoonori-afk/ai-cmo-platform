@@ -104,7 +104,7 @@ def scaffold_client(
     *,
     force: bool = False,
 ) -> OnboardingResult:
-    slug = parse_safe_id("client", answers.client).value
+    slug = parse_safe_id("client", answers.client)
     if answers.market_type not in _VALID_MARKET_TYPES:
         allowed = ", ".join(sorted(_VALID_MARKET_TYPES))
         raise OnboardingError(slug, f"market_type must be one of: {allowed}")
