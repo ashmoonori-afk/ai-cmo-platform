@@ -66,11 +66,7 @@ uv run aicmo approve {run_id} owner_gate --reviewer owner --accept-edits
 
 ### Step 6: Reflection — 수정에서 배우기 (reporter → reflection)
 
-원본 파이프라인의 최고 가치 노드. `_pre_edit/` 원본과 승인된 최종본을 diff:
-1. 바뀐 것을 유형화: 톤(존댓말↔반말) / 표현(금지어·선호어) / 구조(길이·이모지·CTA) / 사실 정정
-2. **2회 이상 반복된 패턴만** `clients/{client}/copy-patterns.md` 승격 후보로 제안 (일회성 수정의 오학습 방지)
-3. 사실 정정은 즉시 KB 후보 (다음 생성부터 반영)
-4. 결과를 reflection.md에 기록 → kb_queue로 전달 (KB 직접 쓰기 금지 — Reporter 원칙)
+원본 파이프라인의 최고 가치 노드. **상세 계약: `prompts/shared/reflection-diff.md`** (중복 정의 금지 — 그 문서가 원본). 요지: `_pre_edit/` 원본 vs 승인 최종본 diff → 4유형 분류(톤/표현/구조/사실 정정) → 사실 정정은 즉시 KB 후보, 패턴은 **2회 이상 반복 시에만** copy-patterns 승격 제안 → KB 직접 쓰기 금지 (kb_queue 경유).
 
 ### Step 7: 발행 큐 (reporter → publish-queue)
 

@@ -39,6 +39,8 @@
 이 구성은 시장에서 월 30만~100만 원에 거래되는 운영 대행 상품과 등가다
 (출처: 트리플아이 pricing https://tripleiii.co.kr/pricing , 크몽 SNS 견적 https://kmong.com/prices/sns-광고 , 로카포스팅 시세 https://locaposting.com/blog/blog-marketing-cost — 2026 열람).
 
+**발행 큐 표준 형식**: 케이던스 캘린더는 "발행 큐" 표로 납품한다 — `| 발행일시 | 채널 | 문안(복붙용 전문) | 이미지 | 상태 ☐ |`. 발행 시각 기본값은 social-calendar.md, 템플릿 예시는 content-engine.md Step 7.
+
 ## 10대 기준
 
 1. **건수·주기 명시**: "이번 달 X건, 주 Y회, 무슨 요일"이 캘린더로 나온다. 시장의 모든 월 대행 상품은 건수로 정의된다.

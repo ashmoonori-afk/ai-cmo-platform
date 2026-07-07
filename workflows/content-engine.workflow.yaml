@@ -64,7 +64,7 @@ steps:
     type: agent
     role: reporter
     depends_on: [owner_gate]
-    prompt: playbooks/03-content/content-engine.md
+    prompt: prompts/shared/reflection-diff.md
     outputs:
       - artifacts/${run_id}/reflection.md
 
