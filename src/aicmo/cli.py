@@ -17,7 +17,7 @@ from aicmo.anthropic_adapter import AnthropicAdapter
 from aicmo.errors import AicmoError
 from aicmo.evaluate import evaluate_asset, render_report
 from aicmo.feedback import record_artifact_feedback
-from aicmo.ingest import archive_item, scan_inbox
+from aicmo.ingest import archive_item, retain_failed_urls, scan_inbox
 from aicmo.mockup import brief_from_answers, render_landing_mockup, render_png
 from aicmo.models import RunResult, RunStatus, WorkflowStep
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
@@ -308,9 +308,9 @@ def ingest_inbox(
         return
     if dry_run:
         for item in items:
-            console.print(f"{item.source_file.name}: {len(item.urls)} url(s)")
+            console.print(f"{item.source_file.name}: {len(item.urls)} url(s)", markup=False)
             for url in item.urls:
-                console.print(f"  would run content-engine --input source_url={url}")
+                console.print(f"  would run content-engine --input source_url={url}", markup=False)
         return
     runner = make_runner(
         repo_root,
@@ -319,11 +319,12 @@ def ingest_inbox(
         select_review_adapter(review, review_cmd, False),
         emit_phase_deliverables,
     )
+    any_failed = False
     for item in items:
-        ok = True
+        failed_urls: list[str] = []
         for url in item.urls:
             run_id = generated_run_id()
-            console.print(f"{item.source_file.name} -> {run_id}: {url}")
+            console.print(f"{item.source_file.name} -> {run_id}: {url}", markup=False)
             try:
                 result = runner.run(
                     workflow_id="content-engine",
@@ -331,17 +332,32 @@ def ingest_inbox(
                     inputs={"client": client, "source_url": url},
                 )
             except Exception as exc:  # noqa: BLE001 — keep ingesting the remaining URLs
-                console.print(f"  failed: {type(exc).__name__}: {exc}")
-                ok = False
+                console.print(f"  failed: {type(exc).__name__}: {exc}", markup=False)
+                failed_urls.append(url)
                 continue
-            console.print(f"  {result.status}")
+            console.print(f"  {result.status}", markup=False)
             if result.status not in ("success", "waiting_approval"):
-                ok = False
-        if ok and item.urls:
+                failed_urls.append(url)
+        if not item.urls:
+            console.print(f"skipped (no urls): {item.source_file.name}", markup=False)
+        elif not failed_urls:
             archived = archive_item(item)
-            console.print(f"archived: {archived.relative_to(repo_root)}")
-        elif not item.urls:
-            console.print(f"skipped (no urls): {item.source_file.name}")
+            console.print(f"archived: {archived.relative_to(repo_root)}", markup=False)
+        else:
+            any_failed = True
+            if len(failed_urls) < len(item.urls):
+                # Keep only the failed URLs so the next pass never duplicates
+                # runs that already reached the owner gate.
+                retain_failed_urls(item, failed_urls)
+                console.print(
+                    f"retained {len(failed_urls)} failed url(s) in "
+                    f"{item.source_file.name} for retry",
+                    markup=False,
+                )
+            else:
+                console.print(f"kept for retry: {item.source_file.name}", markup=False)
+    if any_failed:
+        raise typer.Exit(EXIT_FAILED)
 
 
 @app.command("resume")
@@ -562,8 +578,8 @@ def main() -> None:
     try:
         app()
     except AicmoError as exc:
-        err_console.print(f"error: {exc}")
+        err_console.print(f"error: {exc}", markup=False)
         raise SystemExit(1) from None
     except Exception as exc:  # noqa: BLE001 — top-level CLI guard: surface a clean message
-        err_console.print(f"unexpected error: {exc}")
+        err_console.print(f"unexpected error: {exc}", markup=False)
         raise SystemExit(1) from None

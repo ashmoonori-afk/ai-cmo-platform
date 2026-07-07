@@ -244,7 +244,7 @@ outputs/
 | 10 | **ICP Analysis** | "ICP 분석해줘" | data-analyst + researcher → strategist | ICP 프로필 카드 (인구통계/행동/심리/구매동기) + 현재 vs 제안 비교 |
 | 11 | **Customer Feedback** | "고객 피드백 분석해줘" | data-analyst | 테마별 분류 + 빈도 분석 + 감성 분석 + 우선순위 매트릭스 |
 
-### 모듈 03: Content (콘텐츠) — 8개
+### 모듈 03: Content (콘텐츠) — 10개
 
 | # | 플레이북 | 명령어 예시 | 에이전트 조합 | 산출물 |
 |---|---------|-----------|-------------|--------|
@@ -257,6 +257,7 @@ outputs/
 | 18 | **Social Calendar** | "이번달 SNS 일정 짜줘" | strategist → copywriter → reviewer | 월간 캘린더 (주차별 표) + 포스트별 카피 초안 |
 | 19 | **A/B Copy** | "카피 변형 만들어줘" | copywriter (2-3개 병렬) → reviewer | 같은 메시지의 3개 버전 (톤/앵글 차이) + 추천 버전 |
 | 19-1 | **Hooking Copy (후킹문안)** | "후킹문안 만들어줘", "문안집" | copywriter → reviewer | 채널별 후킹문안 리스트 (홈페이지/검색/SNS/오프라인/문자·카톡) + Top 5 + 사용법 한 줄 |
+| 19-2 | **Content Engine (콘텐츠 엔진)** | "이 링크로 포스트 만들어줘" | researcher → copywriter → designer → reviewer → reporter | 소스 검증 + 채널별 포스트 + 발행 큐 + 수정 학습(reflection) — 승인 전 직접 고치면 `--accept-edits`로 보존·학습 |
 
 ### 모듈 04: Sales (세일즈) — 5개
 

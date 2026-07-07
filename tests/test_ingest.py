@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from aicmo.ingest import InboxItem, archive_item, parse_urls, scan_inbox
+from aicmo.ingest import InboxItem, archive_item, parse_urls, retain_failed_urls, scan_inbox
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 
@@ -54,6 +54,24 @@ def test_archive_item_is_collision_safe(tmp_path: Path) -> None:
     archived_again = archive_item(InboxItem(source_file=first, urls=("https://b.example",)))
     assert archived_again.name == "same-1.txt"
     assert not first.exists()
+
+
+def test_scan_inbox_survives_cp949_files(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox" / "sample-client-a"
+    inbox.mkdir(parents=True)
+    (inbox / "memo.txt").write_bytes(
+        "# 오늘 본 기사\nhttps://a.example/one\n".encode("cp949"),
+    )
+    items = scan_inbox(tmp_path, "sample-client-a")
+    assert items[0].urls == ("https://a.example/one",)
+
+
+def test_retain_failed_urls_rewrites_only_failures(tmp_path: Path) -> None:
+    source = tmp_path / "inbox" / "c" / "mixed.txt"
+    _write(source, "https://ok.example\nhttps://bad.example\n")
+    item = InboxItem(source_file=source, urls=("https://ok.example", "https://bad.example"))
+    retain_failed_urls(item, ["https://bad.example"])
+    assert parse_urls(source.read_text(encoding="utf-8")) == ["https://bad.example"]
 
 
 @pytest.fixture

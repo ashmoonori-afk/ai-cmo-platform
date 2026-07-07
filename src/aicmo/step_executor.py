@@ -139,7 +139,7 @@ class WorkflowStepExecutor:
                 # outputs; a resume without an approval decision changes nothing
                 # (and must not re-snapshot files the owner may be editing).
                 return self.store.get_step_outputs(run_id, step.id)
-            self._snapshot_gate_inputs(run_id, step, context)
+            self._snapshot_run_artifacts(run_id, context)
             payload = self._gate_payload(step, GateDecision.WAITING_APPROVAL, context)
             outputs = self._write_outputs(
                 step,
@@ -180,35 +180,45 @@ class WorkflowStepExecutor:
             raise WorkflowExecutionError(step.id, msg)
         return outputs
 
-    def _snapshot_gate_inputs(
-        self,
-        run_id: str,
-        step: WorkflowStep,
-        context: dict[str, str],
-    ) -> None:
-        """Write-once copies of the gated artifacts, taken when an approval gate first
-        waits. Human edits happen after this point, so the snapshot is the diff base
-        for reflection steps. Existing snapshots are never overwritten — a resumed
-        wait must not capture already-edited files as the original."""
-        snapshot_dir = (
-            self._resolve("artifacts/${run_id}/_pre_edit", context)
-            if context.get("run_id")
-            else None
-        )
-        if snapshot_dir is None:
+    def _snapshot_run_artifacts(self, run_id: str, context: dict[str, str]) -> None:
+        """Write-once copies of every successful step's outputs, taken when an
+        approval gate first waits. Human edits happen after this point, so the
+        snapshot is the diff base for reflection steps. The scope deliberately
+        matches what approve --accept-edits blesses (all successful steps), and
+        each file mirrors its full relative path under _pre_edit/ so same-named
+        outputs can never collide. Existing snapshots are never overwritten — a
+        resumed wait must not capture already-edited files as the original."""
+        if not context.get("run_id"):
             return
-        for dependency in step.depends_on:
-            for relative in self.store.get_step_outputs(run_id, dependency):
-                source = self.repo_root / relative
-                if not source.exists():
+        snapshot_root = self._resolve("artifacts/${run_id}/_pre_edit", context)
+        for row in self.store.list_steps(run_id):
+            if row["status"] != StepStatus.SUCCESS.value:
+                continue
+            for relative in self.store.get_step_outputs(run_id, str(row["step_id"])):
+                source = self._stored_artifact_path(relative)
+                if source is None or not source.exists():
                     continue
-                target = snapshot_dir / f"{dependency}__{Path(relative).name}"
+                target = snapshot_root / relative
                 if target.exists():
                     continue
                 target.parent.mkdir(parents=True, exist_ok=True)
                 tmp = target.with_name(target.name + ".tmp")
                 tmp.write_bytes(source.read_bytes())
                 tmp.replace(target)
+
+    def _stored_artifact_path(self, relative: str) -> Path | None:
+        """Containment re-check for output paths read back from the store.
+
+        Paths are validated at write time, so this is defense in depth: a row
+        tampered directly in SQLite must not let the engine read or copy files
+        outside the repository."""
+        candidate = Path(relative)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            return None
+        resolved = (self.repo_root / candidate).resolve()
+        if not resolved.is_relative_to(self.repo_root.resolve()):
+            return None
+        return resolved
 
     def _evaluate_gate(
         self,
@@ -219,8 +229,8 @@ class WorkflowStepExecutor:
         texts: list[str] = []
         for dependency in step.depends_on:
             for relative in self.store.get_step_outputs(run_id, dependency):
-                source = self.repo_root / relative
-                if source.exists():
+                source = self._stored_artifact_path(relative)
+                if source is not None and source.exists():
                     texts.append(source.read_text(encoding="utf-8"))
         if not texts:
             # Fail closed: an auto gate with no gated artifact text cannot validate
@@ -347,8 +357,8 @@ class WorkflowStepExecutor:
         ]
         stored = self.store.get_output_hashes(run_id, step.id)
         for path in paths:
-            full = self.repo_root / path
-            if not full.exists():
+            full = self._stored_artifact_path(path)
+            if full is None or not full.exists():
                 return False
             expected = stored.get(path)
             if expected is not None and _sha256(full) != expected:
@@ -358,7 +368,7 @@ class WorkflowStepExecutor:
     def _hash_outputs(self, outputs: list[str]) -> dict[str, str]:
         hashes: dict[str, str] = {}
         for path in outputs:
-            full = self.repo_root / path
-            if full.exists():
+            full = self._stored_artifact_path(path)
+            if full is not None and full.exists():
                 hashes[path] = _sha256(full)
         return hashes

@@ -69,7 +69,7 @@ load_context → verify_source(agent: researcher — 소스 본문 추출+가치
 
 **문제**: 현재 resume는 산출물 SHA-256 검증으로 변조를 감지해 스텝을 재실행한다(안전 기능). 사장님이 owner_gate 대기 중에 문안 파일을 고치면 → 재개 시 "변조"로 판정되어 **수정본이 재생성으로 덮인다.**
 
-**해법**: `aicmo approve`에 **--accept-edits 플래그** — 승인 시 게이트가 의존하는 아티팩트의 해시를 재계산해 저장(수정을 "축복"). reflection 스텝을 위해 승인 직전 원본을 `artifacts/{run_id}/_pre_edit/`에 보존. 예상 규모: ~40-60 LOC + 테스트 2-3개. 변조 감지 기본 동작은 그대로 유지(플래그 없으면 기존과 동일 — fail-safe).
+**해법**: `aicmo approve`에 **--accept-edits 플래그** — 승인 시 성공 스텝 아티팩트의 해시를 재계산해 저장(수정을 "축복"). reflection 스텝을 위해 **게이트가 처음 대기에 들어갈 때**(사람 수정이 시작되기 전) 모든 성공 스텝 산출물을 `artifacts/{run_id}/_pre_edit/`에 경로 미러로 write-once 보존. 축복은 승인 행 삽입 **전에** 수행(동시 resume 레이스 차단 — 검증 라운드에서 발견·수정). 변조 감지 기본 동작은 그대로 유지(플래그 없으면 기존과 동일 — fail-safe).
 
 ### 3.3 신규 플레이북: `playbooks/03-content/content-engine.md`
 

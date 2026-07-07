@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Self
 
-from aicmo.errors import WorkflowExecutionError
+from aicmo.errors import StepTransitionError, WorkflowExecutionError
 from aicmo.models import (
     ApprovalDecision,
     RunResult,
@@ -50,23 +50,33 @@ class WorkflowRunner(WorkflowStepExecutor):
         """Record a manual approval. With accept_edits, bless human edits made to
         successful steps' artifacts while the gate was waiting: their hashes are
         recomputed so resume keeps the edited files instead of regenerating them.
+        Blessing happens BEFORE the approval row lands — the approval row is what
+        lets a concurrent resume proceed past the gate, so the reverse order would
+        open a window where that resume regenerates over the owner's edits.
         Returns the list of artifact paths whose content changed since generation."""
         self.store.initialize()
+        changed: list[str] = []
+        if accept_edits:
+            if self.store.get_step_status(run_id, step_id) != StepStatus.WAITING_APPROVAL:
+                raise StepTransitionError(
+                    run_id,
+                    step_id,
+                    "--accept-edits requires a gate in waiting_approval",
+                )
+            changed = self._accept_artifact_edits(run_id, step_id)
         self.store.approve(run_id, step_id, ApprovalDecision.APPROVED, reviewer, notes)
         self.store.record_event(run_id, step_id, "gate.approved", notes, {"reviewer": reviewer})
-        if not accept_edits:
-            return []
-        changed = self._accept_artifact_edits(run_id)
-        self.store.record_event(
-            run_id,
-            step_id,
-            "gate.edits_accepted",
-            ", ".join(changed) if changed else "no artifact changes",
-            {"files": changed},
-        )
+        if accept_edits:
+            self.store.record_event(
+                run_id,
+                step_id,
+                "gate.edits_accepted",
+                ", ".join(changed) if changed else "no artifact changes",
+                {"files": changed},
+            )
         return changed
 
-    def _accept_artifact_edits(self: Self, run_id: str) -> list[str]:
+    def _accept_artifact_edits(self: Self, run_id: str, gate_step_id: str) -> list[str]:
         changed: list[str] = []
         for row in self.store.list_steps(run_id):
             if row["status"] != StepStatus.SUCCESS.value:
@@ -80,6 +90,17 @@ class WorkflowRunner(WorkflowStepExecutor):
             changed.extend(
                 path for path, digest in current.items() if previous.get(path) != digest
             )
+            missing = [path for path in outputs if path not in current]
+            if missing:
+                # A deleted output cannot be blessed; resume will reopen the whole
+                # step and regenerate ALL of its outputs, including blessed siblings.
+                self.store.record_event(
+                    run_id,
+                    gate_step_id,
+                    "gate.edits_missing_artifacts",
+                    f"{step_id}: missing outputs will trigger regeneration on resume",
+                    {"step": step_id, "missing": missing},
+                )
             self.store.record_output_hashes(run_id, step_id, current)
         return changed
 

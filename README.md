@@ -224,7 +224,7 @@ uv run aicmo run blog-article --client sample-client-a --topic "..." --executor 
 
 | 명령 | 하는 일 | 주요 옵션 |
 |------|---------|----------|
-| `run <workflow>` | 워크플로우 DAG 실행 | `--client --topic --target-keyword --run-id --executor --executor-cmd --review --db --repo` |
+| `run <workflow>` | 워크플로우 DAG 실행 | `--client --topic --target-keyword --input key=value(반복, 예: source_url) --run-id --executor --executor-cmd --review --db --repo` |
 | `status <run_id>` | 스텝별 상태/시도 표 | `--db` |
 | `resume <run_id>` | 실패/중단 지점부터 재개 (멱등) | `--executor --review --db` |
 | `retry <run_id> <step>` | 특정 스텝 재시도 | `--db` |
@@ -460,7 +460,7 @@ ai-cmo-platform/
 ├── handoff/                  # Hermes / OpenClaw transfer package
 ├── integrations/birkin/
 ├── knowledge-base/           # Reporter-owned, append-only
-├── playbooks/                # 00-chains, 01-strategy … 08-design, 08-role-sops (55)
+├── playbooks/                # 00-chains, 01-strategy … 08-design, 08-role-sops … (68개)
 ├── prompts/shared/           # gate-check, knowledge-update, boilerplate
 ├── references/
 ├── skills/birkin/            # Neurosis, Odyssey, Morpheus, codex-image-gen

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -74,9 +75,14 @@ def _start_waiting_run(repo_root: Path, run_id: str) -> WorkflowRunner:
 def test_pre_edit_snapshot_captures_original_and_is_write_once(approval_repo: Path) -> None:
     runner = _start_waiting_run(approval_repo, "run_snap")
     draft = approval_repo / "artifacts" / "run_snap" / "draft.md"
-    snapshot = approval_repo / "artifacts" / "run_snap" / "_pre_edit" / "draft__draft.md"
+    pre_edit = approval_repo / "artifacts" / "run_snap" / "_pre_edit"
+    # Snapshots mirror the full relative path and cover EVERY successful step —
+    # the same scope --accept-edits blesses — so reflection always has its diff base.
+    snapshot = pre_edit / "artifacts" / "run_snap" / "draft.md"
+    context_snapshot = pre_edit / "artifacts" / "run_snap" / "context.md"
     original = draft.read_text(encoding="utf-8")
     assert snapshot.read_text(encoding="utf-8") == original
+    assert context_snapshot.exists()
 
     # A crash-resume while still waiting must not re-snapshot (write-once).
     assert runner.resume("run_snap").status == "waiting_approval"
@@ -84,6 +90,46 @@ def test_pre_edit_snapshot_captures_original_and_is_write_once(approval_repo: Pa
     runner.approve("run_snap", "owner_gate", "owner", "ok", accept_edits=True)
     assert runner.resume("run_snap").status == "success"
     assert snapshot.read_text(encoding="utf-8") == original
+
+
+class _OrderProbeStore(WorkflowStore):
+    """Records whether hash blessing happened before the approval row landed.
+
+    The store is a frozen slots dataclass, so the probe log lives on the class."""
+
+    calls: ClassVar[list[str]] = []
+
+    def record_output_hashes(self, run_id: str, step_id: str, hashes: dict[str, str]) -> None:
+        _OrderProbeStore.calls.append("bless")
+        WorkflowStore.record_output_hashes(self, run_id, step_id, hashes)
+
+    def approve(self, run_id: str, step_id: str, decision, reviewer: str, notes: str) -> None:  # noqa: ANN001
+        _OrderProbeStore.calls.append("approve")
+        WorkflowStore.approve(self, run_id, step_id, decision, reviewer, notes)
+
+
+def test_accept_edits_blesses_before_approval_row(approval_repo: Path) -> None:
+    store = _OrderProbeStore(approval_repo / "runs.sqlite3")
+    runner = WorkflowRunner(repo_root=approval_repo, store=store)
+    assert runner.run("approval-edit", "run_order", {"client": "sample-client-a"}).status == (
+        "waiting_approval"
+    )
+    (approval_repo / "artifacts" / "run_order" / "draft.md").write_text(
+        _EDIT_MARKER, encoding="utf-8"
+    )
+    _OrderProbeStore.calls.clear()
+    runner.approve("run_order", "owner_gate", "owner", "ok", accept_edits=True)
+    calls = _OrderProbeStore.calls
+    assert "approve" in calls and "bless" in calls
+    assert calls.index("bless") < calls.index("approve")
+
+
+def test_accept_edits_requires_waiting_gate(approval_repo: Path) -> None:
+    runner = _start_waiting_run(approval_repo, "run_guard")
+    runner.approve("run_guard", "owner_gate", "owner", "ok")
+    assert runner.resume("run_guard").status == "success"
+    with pytest.raises(Exception, match="waiting_approval"):
+        runner.approve("run_guard", "owner_gate", "owner", "again", accept_edits=True)
 
 
 def test_edit_without_accept_edits_is_regenerated(approval_repo: Path) -> None:
