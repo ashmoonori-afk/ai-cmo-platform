@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from pathlib import Path
 
 from aicmo.errors import WorkflowExecutionError
@@ -10,15 +9,10 @@ SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 UNRESOLVED_VARIABLE = re.compile(r"\$\{[^}]+\}")
 
 
-@dataclass(frozen=True, slots=True)
-class SafeId:
-    value: str
-
-
-def parse_safe_id(kind: str, raw: str) -> SafeId:
+def parse_safe_id(kind: str, raw: str) -> str:
     if SAFE_ID_PATTERN.fullmatch(raw) is None:
         raise WorkflowExecutionError(kind, f"unsafe {kind}: {raw}")
-    return SafeId(raw)
+    return raw
 
 
 def resolve_inside_repo(repo_root: Path, path_template: str, context: dict[str, str]) -> Path:

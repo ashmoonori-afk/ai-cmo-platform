@@ -83,28 +83,15 @@ class WorkflowRunStore(StoreDb):
         failed_step_id: str | None = None,
         completed: bool = False,
     ) -> None:
-        if completed:
-            connection.execute(
-                """
-                update runs set
-                    status = ?,
-                    current_step_id = ?,
-                    failed_step_id = ?,
-                    updated_at = current_timestamp,
-                    completed_at = current_timestamp
-                where run_id = ?
-                """,
-                (status.value, current_step_id, failed_step_id, run_id),
-            )
-            return
         connection.execute(
             """
             update runs set
                 status = ?,
                 current_step_id = ?,
                 failed_step_id = ?,
-                updated_at = current_timestamp
+                updated_at = current_timestamp,
+                completed_at = case when ? then current_timestamp else completed_at end
             where run_id = ?
             """,
-            (status.value, current_step_id, failed_step_id, run_id),
+            (status.value, current_step_id, failed_step_id, completed, run_id),
         )

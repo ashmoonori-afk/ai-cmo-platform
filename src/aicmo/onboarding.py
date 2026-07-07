@@ -64,15 +64,7 @@ def load_answers(path: Path) -> OnboardingAnswers:
         joined = ", ".join(missing)
         raise OnboardingError(str(path), f"missing required answers: {joined}")
     return OnboardingAnswers(
-        client=values["client"],
-        company_name=values["company_name"],
-        offer=values["offer"],
-        audience=values["audience"],
-        problem=values["problem"],
-        differentiator=values["differentiator"],
-        channel=values["channel"],
-        proof=values["proof"],
-        cta=values["cta"],
+        **{name: values[name] for name in _REQUIRED_FIELDS},
         website=values.get("website", "미입력"),
         market_type=values.get("market_type", "both"),
         onboarding_date=values.get("onboarding_date", ""),
@@ -104,7 +96,7 @@ def scaffold_client(
     *,
     force: bool = False,
 ) -> OnboardingResult:
-    slug = parse_safe_id("client", answers.client).value
+    slug = parse_safe_id("client", answers.client)
     if answers.market_type not in _VALID_MARKET_TYPES:
         allowed = ", ".join(sorted(_VALID_MARKET_TYPES))
         raise OnboardingError(slug, f"market_type must be one of: {allowed}")

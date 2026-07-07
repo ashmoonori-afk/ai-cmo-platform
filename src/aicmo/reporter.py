@@ -42,7 +42,7 @@ def flush_kb_updates(repo_root: Path, store: WorkflowStore, client: str | None =
         row_client = str(row["client"]).strip()
         if not row_client:
             continue
-        slug = parse_safe_id("client", row_client).value
+        slug = parse_safe_id("client", row_client)
         target = (root / "knowledge-base" / slug / "insights.md").resolve()
         if not target.is_relative_to(root):
             continue

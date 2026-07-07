@@ -35,7 +35,7 @@ def parse_urls(text: str) -> list[str]:
 
 
 def inbox_dir(repo_root: Path, client: str) -> Path:
-    slug = parse_safe_id("client", client).value
+    slug = parse_safe_id("client", client)
     return repo_root / "inbox" / slug
 
 

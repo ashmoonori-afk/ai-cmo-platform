@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
@@ -10,11 +9,11 @@ from aicmo.errors import WorkflowSpecError
 from aicmo.models import WorkflowSpec
 from aicmo.paths import parse_safe_id
 
-SPEC_SUFFIXES = (".workflow.yaml", ".workflow.yml", ".workflow.json")
+SPEC_SUFFIXES = (".workflow.yaml", ".workflow.yml")
 
 
 def load_workflow_spec(repo_root: Path, workflow_id: str) -> WorkflowSpec:
-    safe_workflow = parse_safe_id("workflow_id", workflow_id).value
+    safe_workflow = parse_safe_id("workflow_id", workflow_id)
     workflows_dir = repo_root / "workflows"
     for suffix in SPEC_SUFFIXES:
         candidate = workflows_dir / f"{safe_workflow}{suffix}"
@@ -30,8 +29,8 @@ def load_workflow_spec(repo_root: Path, workflow_id: str) -> WorkflowSpec:
 def parse_workflow_spec(path: Path) -> WorkflowSpec:
     text = path.read_text(encoding="utf-8")
     try:
-        payload = json.loads(text) if path.suffix == ".json" else yaml.safe_load(text)
+        payload = yaml.safe_load(text)
         spec = WorkflowSpec.model_validate(payload)
-    except (OSError, json.JSONDecodeError, TypeError, ValidationError, yaml.YAMLError) as exc:
+    except (OSError, TypeError, ValidationError, yaml.YAMLError) as exc:
         raise WorkflowSpecError(path=path, reason=str(exc)) from exc
     return spec.model_copy(update={"source_path": path})

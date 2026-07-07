@@ -22,8 +22,8 @@ def run_phase_git(
     run_id: str,
     phase_id: str,
 ) -> list[str]:
-    safe_run_id = parse_safe_id("run_id", run_id).value
-    safe_phase_id = parse_safe_id("phase_id", phase_id).value
+    safe_run_id = parse_safe_id("run_id", run_id)
+    safe_phase_id = parse_safe_id("phase_id", phase_id)
     if mode == PhaseGitMode.OFF:
         return []
     if mode == PhaseGitMode.DRY_RUN:

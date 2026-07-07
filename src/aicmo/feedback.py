@@ -18,8 +18,8 @@ def record_artifact_feedback(
     artifact_format: str,
     feedback: str,
 ) -> Path:
-    client_slug = parse_safe_id("client", client).value
-    safe_run_id = parse_safe_id("run_id", run_id).value
+    client_slug = parse_safe_id("client", client)
+    safe_run_id = parse_safe_id("run_id", run_id)
     target = repo_root / "knowledge-base" / "_engine-improvements" / "artifact-feedback.md"
     target.parent.mkdir(parents=True, exist_ok=True)
 

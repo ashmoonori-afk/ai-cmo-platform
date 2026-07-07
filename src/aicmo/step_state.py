@@ -209,22 +209,30 @@ class WorkflowStepStore(WorkflowRunStore):
         with self.connect() as connection:
             self._mark_run(connection, run_id, RunStatus.SUCCESS, None, None, completed=True)
 
+    def _reset_to_pending(
+        self: Self,
+        connection: sqlite3.Connection,
+        run_id: str,
+        step_id: str,
+    ) -> None:
+        connection.execute(
+            """
+            update steps set
+                status = ?,
+                error_json = null,
+                completed_at = null,
+                locked_by = null,
+                locked_at = null
+            where run_id = ? and step_id = ?
+            """,
+            (StepStatus.PENDING.value, run_id, step_id),
+        )
+        self._mark_run(connection, run_id, RunStatus.RUNNING, step_id)
+
     def retry_step(self: Self, run_id: str, step_id: str) -> None:
         with self.connect() as connection:
             self._require_retryable_step(connection, run_id, step_id)
-            connection.execute(
-                """
-                update steps set
-                    status = ?,
-                    error_json = null,
-                    completed_at = null,
-                    locked_by = null,
-                    locked_at = null
-                where run_id = ? and step_id = ?
-                """,
-                (StepStatus.PENDING.value, run_id, step_id),
-            )
-            self._mark_run(connection, run_id, RunStatus.RUNNING, step_id)
+            self._reset_to_pending(connection, run_id, step_id)
 
     def reopen_step(self: Self, run_id: str, step_id: str) -> None:
         """Reset a previously SUCCESS step to PENDING so resume can regenerate lost outputs."""
@@ -237,19 +245,7 @@ class WorkflowStepStore(WorkflowRunStore):
                 raise StepTransitionError(run_id, step_id, "step does not exist")
             if row["status"] != StepStatus.SUCCESS.value:
                 raise StepTransitionError(run_id, step_id, "only successful steps can be reopened")
-            connection.execute(
-                """
-                update steps set
-                    status = ?,
-                    error_json = null,
-                    completed_at = null,
-                    locked_by = null,
-                    locked_at = null
-                where run_id = ? and step_id = ?
-                """,
-                (StepStatus.PENDING.value, run_id, step_id),
-            )
-            self._mark_run(connection, run_id, RunStatus.RUNNING, step_id)
+            self._reset_to_pending(connection, run_id, step_id)
 
     def _record_artifacts(
         self: Self,
