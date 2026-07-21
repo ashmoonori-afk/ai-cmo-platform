@@ -82,6 +82,7 @@ steps:
   - id: quality_gate
     type: gate
     role: reviewer
+    prompt: prompts/shared/gate-check.md
     depends_on: [launch_strategy, channel_mix, hooking_copy, brand_kit, homepage_copy, homepage_html]
     pass_if: "status in ['PASS','WARN']"
     outputs:
@@ -103,6 +104,16 @@ steps:
   - id: report
     type: agent
     role: reporter
-    depends_on: [kb_queue]
+    depends_on: [launch_strategy, channel_mix, hooking_copy, brand_kit, homepage_copy, homepage_html, quality_gate, owner_gate, kb_queue]
     outputs:
       - artifacts/${run_id}/launch-pack-report.md
+
+  - id: delivery_gate
+    type: gate
+    role: reviewer
+    prompt: prompts/shared/gate-check.md
+    terminal_delivery: true
+    depends_on: [report]
+    pass_if: "status in ['PASS','WARN']"
+    outputs:
+      - artifacts/${run_id}/delivery-review.json

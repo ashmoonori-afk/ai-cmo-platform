@@ -146,7 +146,12 @@ def test_semantic_review_fail_fails_the_run(repo_root: Path) -> None:
     runner = WorkflowRunner(
         repo_root=repo_root,
         store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
-        review_adapter=VerdictAdapter(verdict="FAIL: the draft is too thin"),
+        review_adapter=VerdictAdapter(
+            verdict=(
+                '{"schema_version":"aicmo.reviewer-decision.v1",'
+                '"verdict":"FAIL","reason":"machine-readable review"}'
+            ),
+        ),
     )
 
     result = runner.run(
@@ -163,7 +168,12 @@ def test_semantic_review_pass_passes_the_run(repo_root: Path) -> None:
     runner = WorkflowRunner(
         repo_root=repo_root,
         store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
-        review_adapter=VerdictAdapter(verdict="PASS — clear and complete"),
+        review_adapter=VerdictAdapter(
+            verdict=(
+                '{"schema_version":"aicmo.reviewer-decision.v1",'
+                '"verdict":"PASS","reason":"machine-readable review"}'
+            ),
+        ),
     )
 
     result = runner.run(

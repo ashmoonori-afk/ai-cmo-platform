@@ -19,7 +19,12 @@ from aicmo.adapters import (
     StepAdapter,
 )
 from aicmo.errors import WorkflowExecutionError
-from aicmo.gate import allowed_statuses, evaluate_artifacts, parse_verdict, stricter
+from aicmo.gate import (
+    REVIEW_DECISION_SCHEMA_VERSION,
+    allowed_statuses,
+    evaluate_artifacts,
+    stricter,
+)
 from aicmo.models import (
     ApprovalDecision,
     GateDecision,
@@ -29,14 +34,15 @@ from aicmo.models import (
     WorkflowStep,
 )
 from aicmo.paths import resolve_inside_repo
+from aicmo.reviewer_contract import (
+    REVIEW_CLIENT_CRITERIA,
+    REVIEW_CLIENT_CRITERIA_LIMIT,
+    REVIEW_CONTRACT,
+    REVIEW_INPUT_LIMIT,
+    resolve_reviewer_output,
+)
 from aicmo.store import WorkflowStore
 
-_REVIEW_CONTRACT = (
-    "Judge the artifact against the quality gate: clarity, completeness, accuracy, brand "
-    "fit, and safety. Reply with exactly one verdict word — PASS, WARN, or FAIL — then a "
-    "one-line reason."
-)
-_REVIEW_INPUT_LIMIT = 8000
 PhaseAnnouncer = Callable[[WorkflowStep, tuple[str, ...]], None]
 PhaseCompletionHook = Callable[[WorkflowStep, tuple[str, ...]], None]
 
@@ -341,22 +347,80 @@ class WorkflowStepExecutor:
         context: dict[str, str],
         texts: list[str],
     ) -> GateDecision:
-        if self.review_adapter is None:
+        review_adapter = self.review_adapter
+        if review_adapter is None:
             return GateDecision.PASS
+        review_input = "\n\n---\n\n".join(texts)[:REVIEW_INPUT_LIMIT]
+        policy_sources: list[str] = []
+        role_contracts = [REVIEW_CONTRACT]
+        declared_policy_sources = tuple(
+            relative
+            for relative in (
+                f"agents/{step.role}.md" if step.role else None,
+                step.prompt,
+            )
+            if relative is not None
+        )
+        for relative in declared_policy_sources:
+            source = self._resolve(relative, {})
+            if source.is_file():
+                policy_sources.append(relative)
+                role_contracts.append(source.read_text(encoding="utf-8"))
+        client = context.get("client", "")
+        client_criteria: list[dict[str, str]] = []
+        criteria_remaining = REVIEW_CLIENT_CRITERIA_LIMIT
+        for filename in REVIEW_CLIENT_CRITERIA if client else ():
+            relative = f"clients/{client}/{filename}"
+            source = self._resolve(relative, {})
+            if source.is_file() and criteria_remaining:
+                content = source.read_text(encoding="utf-8")[:criteria_remaining]
+                client_criteria.append({"path": relative, "content": content})
+                criteria_remaining -= len(content)
         request = AgentRequest(
             step_id=step.id,
             run_id=context["run_id"],
             workflow_id=context["workflow_id"],
             role="reviewer",
-            role_contract=_REVIEW_CONTRACT,
-            prompt_source="\n\n---\n\n".join(texts)[:_REVIEW_INPUT_LIMIT],
-            inputs_json="{}",
+            role_contract="\n\n---\n\n".join(role_contracts),
+            prompt_source=review_input,
+            inputs_json=json.dumps(
+                {
+                    "policy_version": REVIEW_DECISION_SCHEMA_VERSION,
+                    "policy_sources": policy_sources,
+                    "client": client,
+                    "client_criteria": client_criteria,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
             model=step.model or "",
+            artifact_refs=self._artifact_refs(context["run_id"], step),
         )
-        result = self.review_adapter.generate(request)
-        if not result.ok:
-            return GateDecision.FAIL
-        return parse_verdict(result.text)
+        result = review_adapter.generate(request)
+        resolution = resolve_reviewer_output(review_adapter, request, result)
+        self.store.record_event(
+            context["run_id"],
+            step.id,
+            "gate.reviewer",
+            "Structured reviewer decision evaluated",
+            {
+                "schema_version": REVIEW_DECISION_SCHEMA_VERSION,
+                "adapter": type(review_adapter).__name__,
+                "attempts": str(resolution.attempts),
+                "outcome": resolution.outcome,
+                "effective_decision": resolution.decision.value,
+                "input_sha256": hashlib.sha256(review_input.encode()).hexdigest(),
+                "initial_response_sha256": hashlib.sha256(
+                    resolution.initial_response.encode(),
+                ).hexdigest(),
+                "effective_response_sha256": hashlib.sha256(
+                    resolution.effective_response.encode(),
+                ).hexdigest(),
+                "policy_sources": policy_sources,
+                "artifact_ref_count": str(len(request.artifact_refs)),
+            },
+        )
+        return resolution.decision
 
     def _run_kb_update(
         self,

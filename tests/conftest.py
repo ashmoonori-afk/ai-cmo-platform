@@ -41,6 +41,10 @@ def repo_root(tmp_path: Path) -> Path:
         "# Reporter\n\nRecord delivery and KB queue.\n",
     )
     write_text(
+        tmp_path / "prompts" / "shared" / "gate-check.md",
+        "# Gate Check\n\nApply the declared quality criteria.\n",
+    )
+    write_text(
         tmp_path / "playbooks" / "05-seo" / "keyword-research.md",
         "# Keyword Research\n\nFind target search intent.\n",
     )
@@ -82,6 +86,7 @@ def repo_root(tmp_path: Path) -> Path:
             "  - id: review",
             "    type: gate",
             "    role: reviewer",
+            "    prompt: prompts/shared/gate-check.md",
             "    depends_on: [draft]",
             "    pass_if: \"status in ['PASS','WARN']\"",
             "    outputs:",

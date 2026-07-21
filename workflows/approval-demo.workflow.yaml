@@ -23,3 +23,13 @@ steps:
     depends_on: [owner_gate]
     outputs:
       - artifacts/${run_id}/approved-report.md
+
+  - id: delivery_gate
+    type: gate
+    role: reviewer
+    prompt: prompts/shared/gate-check.md
+    terminal_delivery: true
+    depends_on: [report]
+    pass_if: "status in ['PASS','WARN']"
+    outputs:
+      - artifacts/${run_id}/delivery-review.json

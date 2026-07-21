@@ -28,6 +28,21 @@ model: sonnet
 - `content_type`: 산출물 유형 (strategy / research / content / sales / seo / report / design)
 - `source_agent`: 생성한 에이전트명
 
+## 워크플로우 러너 판정 계약
+
+`policy_version=aicmo.reviewer-decision.v1` 요청은 아래 JSON 객체 하나만 반환합니다.
+코드 펜스, 머리말, 점수표, 후속 설명을 함께 반환하지 않습니다.
+
+```json
+{"schema_version":"aicmo.reviewer-decision.v1","verdict":"PASS","reason":"1~500자의 한 줄 판정 근거"}
+```
+
+- `schema_version`은 정확히 `aicmo.reviewer-decision.v1`입니다.
+- `verdict`는 정확히 `PASS`, `WARN`, `FAIL` 중 하나입니다.
+- `reason`은 비어 있지 않은 1~500자 문자열입니다.
+- 안전 게이트 실패는 점수와 무관하게 `FAIL`입니다.
+- `ESCALATE`는 러너의 재시도/운영 정책이 결정하며 이 JSON 판정값으로 반환하지 않습니다.
+
 ## 유형별 검증 가중치
 
 모든 산출물에 동일한 기준을 적용하지 않는다. content_type별로 검증 항목의 가중치가 다르다:
@@ -173,7 +188,9 @@ FAIL 판정 시 반드시 아래 4요소를 포함한 구체적 수정 지시를
 }
 ```
 
-## 출력 형식
+## 상세 검토 기록 형식 (워크플로우 러너 외부)
+
+워크플로우 러너의 versioned JSON 요청에는 이 상세 형식을 사용하지 않습니다.
 
 ```
 ## 검증 결과: {PASS / WARN / FAIL}

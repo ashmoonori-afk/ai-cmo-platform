@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aicmo.models import StepType
+import pytest
+
+from aicmo.models import StepType, WorkflowSpec
 from aicmo.spec import SPEC_SUFFIXES, load_workflow_spec, parse_workflow_spec
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +25,7 @@ LAUNCH_PACK_ORDER = (
     "owner_gate",
     "kb_queue",
     "report",
+    "delivery_gate",
 )
 
 
@@ -43,6 +46,7 @@ CONTENT_ENGINE_ORDER = (
     "reflection",
     "kb_queue",
     "publish_pack",
+    "delivery_gate",
 )
 
 
@@ -64,9 +68,7 @@ def test_launch_pack_owner_gate_requires_approval() -> None:
 
 def _repo_specs() -> list[Path]:
     return [
-        path
-        for path in (REPO_ROOT / "workflows").iterdir()
-        if path.name.endswith(SPEC_SUFFIXES)
+        path for path in (REPO_ROOT / "workflows").iterdir() if path.name.endswith(SPEC_SUFFIXES)
     ]
 
 
@@ -83,3 +85,123 @@ def test_all_repo_workflow_specs_reference_existing_files() -> None:
             if step.prompt is not None:
                 prompt_file = REPO_ROOT / step.prompt
                 assert prompt_file.exists(), f"{spec_path.name}:{step.id} missing {prompt_file}"
+
+
+_DELIVERY_PRODUCERS = {
+    "approval-demo": ("report",),
+    "blog-article": ("report",),
+    "content-engine": ("publish_pack",),
+    "launch-pack": ("report",),
+}
+
+_HANDOFF_INPUTS = {
+    "approval-demo": ("owner_gate",),
+    "blog-article": ("draft", "review"),
+    "content-engine": (
+        "source_report",
+        "posts_generate",
+        "image_pack",
+        "quality_gate",
+        "owner_gate",
+        "reflection",
+        "kb_queue",
+    ),
+    "launch-pack": (
+        "launch_strategy",
+        "channel_mix",
+        "hooking_copy",
+        "brand_kit",
+        "homepage_copy",
+        "homepage_html",
+        "quality_gate",
+        "owner_gate",
+        "kb_queue",
+    ),
+}
+
+
+def test_all_repo_workflows_have_one_explicit_terminal_delivery_gate() -> None:
+    specs = [parse_workflow_spec(path) for path in _repo_specs()]
+    assert {spec.id for spec in specs} == set(_DELIVERY_PRODUCERS)
+    for spec in specs:
+        terminal = [step for step in spec.steps if step.terminal_delivery]
+        assert len(terminal) == 1, spec.id
+        gate = terminal[0]
+        assert gate.type is StepType.GATE
+        assert gate.depends_on == _DELIVERY_PRODUCERS[spec.id]
+        assert gate == spec.execution_order()[-1]
+        assert all(gate.id not in step.depends_on for step in spec.steps)
+        handoff = next(step for step in spec.steps if step.id == gate.depends_on[0])
+        assert handoff.depends_on == _HANDOFF_INPUTS[spec.id]
+
+
+def test_terminal_delivery_marker_requires_an_automatic_gate() -> None:
+    with pytest.raises(ValueError, match="terminal delivery step must be an automatic gate"):
+        WorkflowSpec.model_validate(
+            {
+                "id": "invalid-delivery",
+                "name": "Invalid Delivery",
+                "steps": [
+                    {
+                        "id": "deliverable",
+                        "type": "agent",
+                        "terminal_delivery": True,
+                    },
+                ],
+            },
+        )
+
+    with pytest.raises(ValueError, match="terminal delivery step must be an automatic gate"):
+        WorkflowSpec.model_validate(
+            {
+                "id": "manual-delivery",
+                "name": "Manual Delivery",
+                "steps": [
+                    {"id": "artifact", "type": "agent"},
+                    {
+                        "id": "delivery_gate",
+                        "type": "gate",
+                        "depends_on": ["artifact"],
+                        "requires_approval": True,
+                        "terminal_delivery": True,
+                    },
+                ],
+            },
+        )
+
+
+def test_terminal_delivery_gate_requires_declared_producers() -> None:
+    with pytest.raises(ValueError, match="terminal delivery gate requires artifact producers"):
+        WorkflowSpec.model_validate(
+            {
+                "id": "missing-producers",
+                "name": "Missing Producers",
+                "steps": [
+                    {
+                        "id": "delivery_gate",
+                        "type": "gate",
+                        "terminal_delivery": True,
+                    },
+                ],
+            },
+        )
+
+
+def test_terminal_delivery_gate_must_be_a_leaf() -> None:
+    with pytest.raises(ValueError, match="terminal delivery gate must be a leaf"):
+        WorkflowSpec.model_validate(
+            {
+                "id": "nonterminal-delivery",
+                "name": "Nonterminal Delivery",
+                "steps": [
+                    {"id": "artifact", "type": "agent"},
+                    {
+                        "id": "delivery_gate",
+                        "type": "gate",
+                        "depends_on": ["artifact"],
+                        "terminal_delivery": True,
+                    },
+                    {"id": "later", "type": "agent", "depends_on": ["delivery_gate"]},
+                ],
+            },
+        )
