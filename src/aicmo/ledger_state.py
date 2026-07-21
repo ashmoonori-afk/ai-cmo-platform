@@ -11,6 +11,60 @@ from aicmo.step_state import WorkflowStepStore
 
 
 class WorkflowLedgerStore(WorkflowStepStore):
+    def complete_step_success(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        outputs: list[str],
+        output_hashes: Mapping[str, str],
+        consumed_ref_digest: str,
+        owner: str | None = None,
+    ) -> bool:
+        """Commit the success ledger for artifacts already written to disk."""
+        if set(outputs) != set(output_hashes):
+            raise StepTransitionError(
+                run_id,
+                step_id,
+                "successful outputs require exactly one hash each",
+            )
+        with self.connect() as connection:
+            done = self._finalize_step(
+                connection,
+                run_id,
+                step_id,
+                owner,
+                "status = ?, outputs_json = ?, completed_at = current_timestamp, error_json = null",
+                (StepStatus.SUCCESS.value, json.dumps(outputs, ensure_ascii=False)),
+            )
+            if not done:
+                return False
+            self._record_artifacts(connection, run_id, step_id, outputs, "markdown")
+            for path in outputs:
+                connection.execute(
+                    """
+                    insert into step_output_hashes (run_id, step_id, path, sha256)
+                    values (?, ?, ?, ?)
+                    on conflict(run_id, step_id, path) do update set sha256 = excluded.sha256
+                    """,
+                    (run_id, step_id, path, output_hashes[path]),
+                )
+            connection.execute(
+                """
+                insert into step_consumed_ref_digests (run_id, step_id, sha256)
+                values (?, ?, ?)
+                on conflict(run_id, step_id) do update set sha256 = excluded.sha256
+                """,
+                (run_id, step_id, consumed_ref_digest),
+            )
+            connection.execute(
+                """
+                insert into events (run_id, step_id, event_type, message, payload_json)
+                values (?, ?, 'step.success', ?, '{}')
+                """,
+                (run_id, step_id, f"Completed {step_id}"),
+            )
+        return True
+
     def approve(
         self: Self,
         run_id: str,

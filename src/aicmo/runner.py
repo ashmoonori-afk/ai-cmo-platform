@@ -90,9 +90,7 @@ class WorkflowRunner(WorkflowStepExecutor):
                 continue
             previous = self.store.get_output_hashes(run_id, step_id)
             current = self._hash_outputs(outputs)
-            changed.extend(
-                path for path, digest in current.items() if previous.get(path) != digest
-            )
+            changed.extend(path for path, digest in current.items() if previous.get(path) != digest)
             missing = [path for path in outputs if path not in current]
             if missing:
                 # A deleted output cannot be blessed; resume will reopen the whole
@@ -124,7 +122,10 @@ class WorkflowRunner(WorkflowStepExecutor):
         for step in spec.execution_order():
             status = self.store.get_step_status(run_id, step.id)
             if status == StepStatus.SUCCESS:
-                if self._successful_outputs_present(run_id, step, context):
+                hash_index_complete = set(self.store.get_step_outputs(run_id, step.id)) == set(
+                    self.store.get_output_hashes(run_id, step.id),
+                )
+                if hash_index_complete and self._successful_outputs_present(run_id, step, context):
                     continue
                 self._reopen_successes_and_dependents(spec, run_id, {step.id})
                 status = StepStatus.PENDING
@@ -240,20 +241,15 @@ class WorkflowRunner(WorkflowStepExecutor):
             if not self._phase_completed(run_id, step, outputs):
                 return self._fail(run_id, step.id, "phase automation failed", owner=None)
             return RunResult(status=StepStatus.WAITING_APPROVAL.value, run_id=run_id)
-        if not self.store.mark_step_success(
+        if not self.store.complete_step_success(
             run_id,
             step.id,
             outputs,
+            self._hash_outputs(outputs),
+            consumed_ref_digest,
             owner=self._owner_for_status(status),
         ):
             return self._lost_lease(run_id, step.id, "step lease lost before success")
-        self.store.record_output_hashes(run_id, step.id, self._hash_outputs(outputs))
-        self.store.record_consumed_ref_digest(
-            run_id,
-            step.id,
-            consumed_ref_digest,
-        )
-        self.store.record_event(run_id, step.id, "step.success", f"Completed {step.id}")
         if not self._phase_completed(run_id, step, outputs):
             return self._fail(run_id, step.id, "phase automation failed", owner=None)
         return None
