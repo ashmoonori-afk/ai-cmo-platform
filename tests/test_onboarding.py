@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
 
-from aicmo.errors import AicmoError
+from aicmo.errors import AicmoError, OnboardingError
 from aicmo.onboarding import OnboardingAnswers, load_answers, scaffold_client
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -98,6 +98,46 @@ def test_load_answers_round_trip(tmp_path: Path) -> None:
     assert answers.client == "moms-candles"
     assert answers.offer == payload["offer"]
     assert answers.market_type == "both"
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["{", '"scalar"', "[]"],
+    ids=["malformed", "scalar", "array"],
+)
+def test_load_answers_rejects_malformed_or_non_object_json(
+    tmp_path: Path,
+    content: str,
+) -> None:
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(
+        OnboardingError,
+        match="answers file must be a JSON object with string or null values",
+    ):
+        load_answers(answers_path)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [42, True, [], {}],
+    ids=["number", "boolean", "array", "object"],
+)
+def test_load_answers_rejects_non_string_values(
+    tmp_path: Path,
+    value: int | bool | list[str] | dict[str, str],
+) -> None:
+    payload = asdict(sample_answers())
+    payload["offer"] = value
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(
+        OnboardingError,
+        match="answers file must be a JSON object with string or null values",
+    ):
+        load_answers(answers_path)
 
 
 def test_unsafe_slug_is_rejected(tmp_path: Path) -> None:

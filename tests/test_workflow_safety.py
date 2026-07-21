@@ -18,6 +18,20 @@ from aicmo.store import WorkflowStore
 from tests.conftest import lines, write_text
 
 
+def _strict_state_runner(repo_root: Path) -> WorkflowRunner:
+    runner = WorkflowRunner(
+        repo_root=repo_root,
+        store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
+    )
+    result = runner.run(
+        workflow_id="blog-article",
+        run_id="run_strict_state",
+        inputs={"client": "sample-client-a", "topic": "strict boundaries"},
+    )
+    assert result.status == "success"
+    return runner
+
+
 def test_generated_run_ids_do_not_collide_with_same_timestamp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -274,3 +288,59 @@ def test_rejected_gate_cannot_be_overwritten(repo_root: Path) -> None:
 
     assert result.status == "failed"
     assert result.failed_step_id == "owner_gate"
+
+
+def test_persisted_string_shapes_round_trip(repo_root: Path) -> None:
+    runner = _strict_state_runner(repo_root)
+
+    inputs = runner.store.get_inputs("run_strict_state")
+    outputs = runner.store.get_step_outputs("run_strict_state", "draft")
+
+    assert inputs == {"client": "sample-client-a", "topic": "strict boundaries"}
+    assert outputs == ["artifacts/run_strict_state/draft.md"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["{", '"scalar"', "[]", '{"client": 7}'],
+    ids=["malformed", "scalar", "array", "object-non-string"],
+)
+def test_get_inputs_rejects_malformed_persisted_shape(
+    repo_root: Path,
+    payload: str,
+) -> None:
+    runner = _strict_state_runner(repo_root)
+    with runner.store.connect() as connection:
+        connection.execute(
+            "update runs set inputs_json = ? where run_id = ?",
+            (payload, "run_strict_state"),
+        )
+
+    with pytest.raises(
+        RunConflictError,
+        match="persisted inputs must be a JSON object with string values; start a new run",
+    ):
+        runner.store.get_inputs("run_strict_state")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ["[", '"artifact.md"', '{"path": "artifact.md"}', "[7]"],
+    ids=["malformed", "scalar", "object", "array-non-string"],
+)
+def test_get_step_outputs_rejects_malformed_persisted_shape(
+    repo_root: Path,
+    payload: str,
+) -> None:
+    runner = _strict_state_runner(repo_root)
+    with runner.store.connect() as connection:
+        connection.execute(
+            "update steps set outputs_json = ? where run_id = ? and step_id = ?",
+            (payload, "run_strict_state", "draft"),
+        )
+
+    with pytest.raises(
+        RunConflictError,
+        match=("persisted outputs for step draft must be a JSON array of strings; start a new run"),
+    ):
+        runner.store.get_step_outputs("run_strict_state", "draft")

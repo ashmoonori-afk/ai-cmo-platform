@@ -7,11 +7,14 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Self
 
-from aicmo.errors import StepTransitionError
+from pydantic import TypeAdapter, ValidationError
+
+from aicmo.errors import RunConflictError, StepTransitionError
 from aicmo.models import ApprovalDecision, RunStatus, StepStatus, WorkflowStep
 from aicmo.run_state import WorkflowRunStore
 
 _DEFAULT_LEASE_TTL = 300.0
+_STEP_OUTPUTS_ADAPTER = TypeAdapter(list[str])
 
 
 def _stale_threshold(lease_ttl_seconds: float) -> str:
@@ -46,8 +49,14 @@ class WorkflowStepStore(WorkflowRunStore):
             ).fetchone()
         if row is None:
             return []
-        loaded = json.loads(row["outputs_json"])
-        return [str(value) for value in loaded]
+        try:
+            return _STEP_OUTPUTS_ADAPTER.validate_json(row["outputs_json"], strict=True)
+        except ValidationError:
+            reason = (
+                f"persisted outputs for step {step_id} must be a JSON array of strings; "
+                "start a new run"
+            )
+            raise RunConflictError(run_id, reason) from None
 
     def record_output_hashes(self: Self, run_id: str, step_id: str, hashes: dict[str, str]) -> None:
         with self.connect() as connection:

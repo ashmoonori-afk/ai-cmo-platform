@@ -4,10 +4,14 @@ import json
 import sqlite3
 from typing import Self
 
+from pydantic import TypeAdapter, ValidationError
+
 from aicmo.db import StoreDb
 from aicmo.errors import RunConflictError, RunNotFoundError
 from aicmo.models import RunStatus, StepStatus, WorkflowSpec
 from aicmo.spec import RUN_SPEC_REVISION, run_spec_digest
+
+_RUN_INPUTS_ADAPTER = TypeAdapter(dict[str, str])
 
 
 class WorkflowRunStore(StoreDb):
@@ -123,8 +127,11 @@ class WorkflowRunStore(StoreDb):
 
     def get_inputs(self: Self, run_id: str) -> dict[str, str]:
         row = self.get_run(run_id)
-        loaded = json.loads(row["inputs_json"])
-        return {str(key): str(value) for key, value in loaded.items()}
+        try:
+            return _RUN_INPUTS_ADAPTER.validate_json(row["inputs_json"], strict=True)
+        except ValidationError:
+            reason = "persisted inputs must be a JSON object with string values; start a new run"
+            raise RunConflictError(run_id, reason) from None
 
     def _mark_run(
         self: Self,

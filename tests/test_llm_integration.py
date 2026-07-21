@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from aicmo.adapters import AgentRequest, AgentResult
 from aicmo.anthropic_adapter import AnthropicAdapter, resolve_model
+from aicmo.errors import AicmoError
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 from tests.conftest import lines, write_text
-
-if TYPE_CHECKING:
-    import pytest
 
 
 @dataclass
@@ -110,9 +109,25 @@ class _FakeClient:
 
 def test_resolve_model_aliases() -> None:
     assert resolve_model("opus") == "claude-opus-4-8"
+    assert resolve_model("sonnet") == "claude-sonnet-4-6"
     assert resolve_model("haiku") == "claude-haiku-4-5-20251001"
+    assert resolve_model("fable") == "claude-fable-5"
+    assert resolve_model("claude-opus-4-8") == "claude-opus-4-8"
     assert resolve_model("claude-sonnet-4-6") == "claude-sonnet-4-6"
+    assert resolve_model("claude-haiku-4-5-20251001") == "claude-haiku-4-5-20251001"
+    assert resolve_model("claude-fable-5") == "claude-fable-5"
     assert resolve_model("") == "claude-sonnet-4-6"
+    assert resolve_model("   ") == "claude-sonnet-4-6"
+
+
+def test_anthropic_adapter_rejects_unknown_model_before_request() -> None:
+    messages = _FakeMessages(text="SHOULD NOT BE REQUESTED")
+    adapter = AnthropicAdapter(client=_FakeClient(messages=messages))
+
+    with pytest.raises(AicmoError, match="unknown Anthropic model alias"):
+        adapter.generate(make_request(model="claude-sonnet-4-6-typo"))
+
+    assert messages.captured == {}
 
 
 def test_anthropic_adapter_with_fake_client() -> None:

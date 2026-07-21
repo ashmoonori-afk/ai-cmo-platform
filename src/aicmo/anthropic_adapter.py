@@ -4,15 +4,20 @@ import importlib.util
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Final, Protocol
 
 from aicmo.adapters import AgentRequest, AgentResult, compose_prompt
+from aicmo.errors import AicmoError
 
-_MODEL_ALIASES = {
+_MODEL_ALIASES: Final = {
     "opus": "claude-opus-4-8",
     "sonnet": "claude-sonnet-4-6",
     "haiku": "claude-haiku-4-5-20251001",
     "fable": "claude-fable-5",
+    "claude-opus-4-8": "claude-opus-4-8",
+    "claude-sonnet-4-6": "claude-sonnet-4-6",
+    "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
+    "claude-fable-5": "claude-fable-5",
 }
 _DEFAULT_MODEL = "sonnet"
 _MAX_TOKENS = 2048
@@ -20,12 +25,13 @@ _DETAIL_LIMIT = 300
 
 
 def resolve_model(alias: str, default: str = _DEFAULT_MODEL) -> str:
-    key = (alias or default).strip()
-    if key in _MODEL_ALIASES:
+    key = alias.strip() or default.strip()
+    try:
         return _MODEL_ALIASES[key]
-    if key.startswith("claude-"):
-        return key
-    return _MODEL_ALIASES.get(default, default)
+    except KeyError:
+        allowed = ", ".join(sorted(_MODEL_ALIASES))
+        msg = f"unknown Anthropic model alias {key!r}; expected one of: {allowed}"
+        raise AicmoError(msg) from None
 
 
 class _Block(Protocol):
@@ -72,6 +78,7 @@ class AnthropicAdapter:
     client: _Client | None = None
 
     def generate(self, request: AgentRequest) -> AgentResult:
+        model = resolve_model(request.model, self.default_model)
         client = self.client or _make_client()
         if client is None:
             return AgentResult(
@@ -79,7 +86,6 @@ class AnthropicAdapter:
                 ok=False,
                 detail="unavailable: set ANTHROPIC_API_KEY and `uv add anthropic`",
             )
-        model = resolve_model(request.model, self.default_model)
         prompt = compose_prompt(request)
         try:
             response = client.messages.create(
