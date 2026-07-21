@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Self
 
@@ -103,16 +105,39 @@ class WorkflowStepStore(WorkflowRunStore):
                 self._mark_run(connection, run_id, RunStatus.RUNNING, step.id)
         return claimed
 
-    def renew_lease(self: Self, run_id: str, step_id: str, owner: str) -> None:
-        """Heartbeat: refresh a live lease so a long step is not falsely reclaimed."""
+    def renew_lease(self: Self, run_id: str, step_id: str, owner: str) -> bool:
+        """Refresh a live lease and report whether the caller still owns it."""
         with self.connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 update steps set locked_at = current_timestamp
                 where run_id = ? and step_id = ? and locked_by = ? and status = 'running'
                 """,
                 (run_id, step_id, owner),
             )
+        return cursor.rowcount == 1
+
+    @contextmanager
+    def hold_lease_for_write(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        owner: str,
+    ) -> Iterator[bool]:
+        """Order lease reclaims after a short file replace; this is not cross-system atomicity."""
+        with self.connect() as connection:
+            connection.execute("begin immediate")
+            owned = (
+                connection.execute(
+                    """
+                    select 1 from steps
+                    where run_id = ? and step_id = ? and locked_by = ? and status = 'running'
+                    """,
+                    (run_id, step_id, owner),
+                ).fetchone()
+                is not None
+            )
+            yield owned
 
     def _finalize_step(
         self: Self,

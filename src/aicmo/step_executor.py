@@ -4,6 +4,7 @@ import hashlib
 import json
 import threading
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +46,7 @@ from aicmo.store import WorkflowStore
 
 PhaseAnnouncer = Callable[[WorkflowStep, tuple[str, ...]], None]
 PhaseCompletionHook = Callable[[WorkflowStep, tuple[str, ...]], None]
+type _LeaseSignal = Future[None]
 
 
 def _sha256(path: Path) -> str:
@@ -73,43 +75,82 @@ class WorkflowStepExecutor:
     ) -> list[str]:
         if self.phase_announcer is not None:
             self.phase_announcer(step, self._declared_outputs(step, context))
-        if status != StepStatus.WAITING_APPROVAL and not self.store.mark_step_running(
+        owns_lease = status != StepStatus.WAITING_APPROVAL
+        if owns_lease and not self.store.mark_step_running(
             run_id,
             step,
             self.runner_token,
             self.lease_ttl_seconds,
         ):
             raise WorkflowExecutionError(step.id, "step is held by another live runner")
-        with self._lease_heartbeat(run_id, step.id):
+        with self._lease_heartbeat(run_id, step.id, active=owns_lease) as lease_signal:
             match step.type:
                 case StepType.FILE_LOAD:
-                    return self._run_file_load(step, context)
+                    return self._run_file_load(step, context, lease_signal)
                 case StepType.AGENT:
-                    return self._run_agent(step, context, artifact_refs)
+                    return self._run_agent(step, context, artifact_refs, lease_signal)
                 case StepType.GATE:
-                    return self._run_gate(run_id, step, context, status)
+                    return self._run_gate(run_id, step, context, status, lease_signal)
                 case StepType.KB_UPDATE:
-                    return self._run_kb_update(run_id, step, context)
+                    return self._run_kb_update(run_id, step, context, lease_signal)
                 case unreachable:
                     assert_never(unreachable)
 
     @contextmanager
-    def _lease_heartbeat(self, run_id: str, step_id: str) -> Iterator[None]:
+    def _lease_heartbeat(
+        self,
+        run_id: str,
+        step_id: str,
+        *,
+        active: bool,
+    ) -> Iterator[_LeaseSignal]:
+        failure = Future[None]()
+        if not active:
+            failure.set_result(None)
+            yield failure
+            return
         stop = threading.Event()
 
         def beat() -> None:
             while not stop.wait(self.heartbeat_interval_seconds):
-                self.store.renew_lease(run_id, step_id, self.runner_token)
+                try:
+                    self._renew_lease(run_id, step_id)
+                except WorkflowExecutionError as exc:
+                    failure.set_exception(exc)
+                    return
+                except Exception as exc:  # noqa: BLE001  # noqa: BROAD_EXCEPT_OK
+                    reason = f"lease heartbeat failed: {type(exc).__name__}: {exc}"
+                    failure.set_exception(WorkflowExecutionError(step_id, reason))
+                    return
 
         thread = threading.Thread(target=beat, daemon=True)
         thread.start()
         try:
-            yield
+            yield failure
         finally:
             stop.set()
             thread.join(timeout=self.heartbeat_interval_seconds + 1.0)
+        self._check_lease(run_id, step_id, failure)
 
-    def _run_file_load(self, step: WorkflowStep, context: dict[str, str]) -> list[str]:
+    def _check_lease(self, run_id: str, step_id: str, failure: _LeaseSignal) -> bool:
+        if failure.done():
+            failure.result()
+            return False
+        self._renew_lease(run_id, step_id)
+        if failure.done():
+            failure.result()
+        return True
+
+    def _renew_lease(self, run_id: str, step_id: str) -> None:
+        if not self.store.renew_lease(run_id, step_id, self.runner_token):
+            raise WorkflowExecutionError(step_id, "step lease lost during execution")
+
+    def _run_file_load(
+        self,
+        step: WorkflowStep,
+        context: dict[str, str],
+        lease_signal: _LeaseSignal,
+    ) -> list[str]:
         loaded: list[str] = []
         for path_template in step.paths:
             source = self._resolve(path_template, context)
@@ -118,13 +159,14 @@ class WorkflowStepExecutor:
             relative_source = source.relative_to(self.repo_root)
             source_text = source.read_text(encoding="utf-8")
             loaded.append(f"## Source: {relative_source}\n\n{source_text}")
-        return self._write_outputs(step, context, "\n\n---\n\n".join(loaded))
+        return self._write_outputs(step, context, "\n\n---\n\n".join(loaded), lease_signal)
 
     def _run_agent(
         self,
         step: WorkflowStep,
         context: dict[str, str],
         artifact_refs: tuple[ArtifactRef, ...],
+        lease_signal: _LeaseSignal,
     ) -> list[str]:
         # Role/prompt files are read here (not in the adapter) so a missing prompt still
         # fails the step exactly as before, independent of which executor is configured.
@@ -144,7 +186,7 @@ class WorkflowStepExecutor:
         result = self.adapter.generate(request)
         if not result.ok:
             raise WorkflowExecutionError(step.id, f"agent executor failed: {result.detail}")
-        return self._write_outputs(step, context, result.text)
+        return self._write_outputs(step, context, result.text, lease_signal)
 
     def _run_gate(
         self,
@@ -152,6 +194,7 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         context: dict[str, str],
         status: StepStatus,
+        lease_signal: _LeaseSignal,
     ) -> list[str]:
         approval = self.store.approval_for(run_id, step.id)
         if step.requires_approval and approval is None:
@@ -160,13 +203,15 @@ class WorkflowStepExecutor:
                 # outputs; a resume without an approval decision changes nothing
                 # (and must not re-snapshot files the owner may be editing).
                 return self.store.get_step_outputs(run_id, step.id)
-            self._snapshot_run_artifacts(run_id, context)
+            self._snapshot_run_artifacts(run_id, step.id, context, lease_signal)
             payload = self._gate_payload(step, GateDecision.WAITING_APPROVAL, context)
             outputs = self._write_outputs(
                 step,
                 context,
                 json.dumps(payload, ensure_ascii=False, indent=2),
+                lease_signal,
             )
+            self._check_lease(run_id, step.id, lease_signal)
             if not self.store.mark_step_waiting(
                 run_id,
                 step.id,
@@ -195,13 +240,20 @@ class WorkflowStepExecutor:
             step,
             context,
             json.dumps(payload, ensure_ascii=False, indent=2),
+            lease_signal,
         )
         if decision.value not in allowed_statuses(step.pass_if):
             msg = f"gate {decision.value}: artifact failed quality check"
             raise WorkflowExecutionError(step.id, msg)
         return outputs
 
-    def _snapshot_run_artifacts(self, run_id: str, context: dict[str, str]) -> None:
+    def _snapshot_run_artifacts(
+        self,
+        run_id: str,
+        step_id: str,
+        context: dict[str, str],
+        lease_signal: _LeaseSignal,
+    ) -> None:
         """Write-once copies of every successful step's outputs, taken when an
         approval gate first waits. Human edits happen after this point, so the
         snapshot is the diff base for reflection steps. The scope deliberately
@@ -222,10 +274,14 @@ class WorkflowStepExecutor:
                 target = snapshot_root / relative
                 if target.exists():
                     continue
+                active = self._check_lease(run_id, step_id, lease_signal)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                tmp = target.with_name(target.name + ".tmp")
-                tmp.write_bytes(source.read_bytes())
-                tmp.replace(target)
+                tmp = target.with_name(f"{target.name}.{self.runner_token}.tmp")
+                try:
+                    tmp.write_bytes(source.read_bytes())
+                    self._replace_output(run_id, step_id, lease_signal, active, tmp, target)
+                finally:
+                    tmp.unlink(missing_ok=True)
 
     def _stored_artifact_path(self, relative: str) -> Path | None:
         """Containment re-check for output paths read back from the store.
@@ -427,6 +483,7 @@ class WorkflowStepExecutor:
         run_id: str,
         step: WorkflowStep,
         context: dict[str, str],
+        lease_signal: _LeaseSignal,
     ) -> list[str]:
         body = "\n".join(
             [
@@ -440,8 +497,9 @@ class WorkflowStepExecutor:
                 "Runner does not write directly to knowledge-base.",
             ],
         )
-        outputs = self._write_outputs(step, context, body)
+        outputs = self._write_outputs(step, context, body, lease_signal)
         for output in outputs:
+            self._check_lease(run_id, step.id, lease_signal)
             self.store.record_kb_update(run_id, step.id, context.get("client", ""), output, body)
         return outputs
 
@@ -464,18 +522,47 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         context: dict[str, str],
         content: str,
+        lease_signal: _LeaseSignal,
     ) -> list[str]:
         written: list[str] = []
         for output_template in self._output_templates(step):
             target = self._resolve(output_template, context)
+            active = self._check_lease(context["run_id"], step.id, lease_signal)
             target.parent.mkdir(parents=True, exist_ok=True)
-            # Atomic write: a crash mid-write leaves the previous file (or none),
-            # never a truncated artifact that resume would trust.
-            tmp = target.with_name(target.name + ".tmp")
-            tmp.write_text(content.rstrip() + "\n", encoding="utf-8")
-            tmp.replace(target)
+            tmp = target.with_name(f"{target.name}.{self.runner_token}.tmp")
+            try:
+                tmp.write_text(content.rstrip() + "\n", encoding="utf-8")
+                self._replace_output(
+                    context["run_id"],
+                    step.id,
+                    lease_signal,
+                    active,
+                    tmp,
+                    target,
+                )
+            finally:
+                tmp.unlink(missing_ok=True)
             written.append(str(target.relative_to(self.repo_root)).replace("\\", "/"))
         return written
+
+    def _replace_output(
+        self,
+        run_id: str,
+        step_id: str,
+        lease_signal: _LeaseSignal,
+        active: bool,
+        tmp: Path,
+        target: Path,
+    ) -> None:
+        if not active:
+            tmp.replace(target)
+            return
+        with self.store.hold_lease_for_write(run_id, step_id, self.runner_token) as owned:
+            if lease_signal.done():
+                lease_signal.result()
+            if not owned:
+                raise WorkflowExecutionError(step_id, "step lease lost before artifact replace")
+            tmp.replace(target)
 
     def _output_templates(self, step: WorkflowStep) -> tuple[str, ...]:
         if step.outputs:
