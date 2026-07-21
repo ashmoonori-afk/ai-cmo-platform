@@ -25,6 +25,14 @@ SCHEMA = (
     )
     """,
     """
+    create table if not exists run_policies (
+        run_id text primary key,
+        phase_git_mode text not null check (
+            phase_git_mode in ('off', 'dry-run', 'commit', 'push', 'merge')
+        )
+    )
+    """,
+    """
     create table if not exists steps (
         run_id text not null,
         step_id text not null,

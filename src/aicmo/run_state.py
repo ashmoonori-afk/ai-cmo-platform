@@ -62,6 +62,31 @@ class WorkflowRunStore(StoreDb):
             raise RunNotFoundError(run_id)
         return row
 
+    def ensure_phase_git_mode(self: Self, run_id: str, mode: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                insert into run_policies (run_id, phase_git_mode)
+                values (?, ?)
+                on conflict(run_id) do nothing
+                """,
+                (run_id, mode),
+            )
+            row = connection.execute(
+                "select phase_git_mode from run_policies where run_id = ?",
+                (run_id,),
+            ).fetchone()
+        if row["phase_git_mode"] != mode:
+            raise RunConflictError(run_id, "existing run uses a different phase-git policy")
+
+    def get_phase_git_mode(self: Self, run_id: str) -> str:
+        with self.connect() as connection:
+            row = connection.execute(
+                "select phase_git_mode from run_policies where run_id = ?",
+                (run_id,),
+            ).fetchone()
+        return "off" if row is None else str(row["phase_git_mode"])
+
     def list_runs(self: Self) -> list[sqlite3.Row]:
         with self.connect() as connection:
             rows = connection.execute(
