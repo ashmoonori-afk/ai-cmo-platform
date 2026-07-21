@@ -10,7 +10,14 @@ from pathlib import Path
 from typing import assert_never
 from uuid import uuid4
 
-from aicmo.adapters import AgentRequest, LocalAdapter, StepAdapter
+from aicmo.adapters import (
+    ARTIFACT_REF_CONTENT_BUDGET,
+    ARTIFACT_REF_TRUNCATION_MARKER,
+    AgentRequest,
+    ArtifactRef,
+    LocalAdapter,
+    StepAdapter,
+)
 from aicmo.errors import WorkflowExecutionError
 from aicmo.gate import allowed_statuses, evaluate_artifacts, parse_verdict, stricter
 from aicmo.models import (
@@ -18,6 +25,7 @@ from aicmo.models import (
     GateDecision,
     StepStatus,
     StepType,
+    WorkflowSpec,
     WorkflowStep,
 )
 from aicmo.paths import resolve_inside_repo
@@ -55,6 +63,7 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         context: dict[str, str],
         status: StepStatus,
+        artifact_refs: tuple[ArtifactRef, ...],
     ) -> list[str]:
         if self.phase_announcer is not None:
             self.phase_announcer(step, self._declared_outputs(step, context))
@@ -70,7 +79,7 @@ class WorkflowStepExecutor:
                 case StepType.FILE_LOAD:
                     return self._run_file_load(step, context)
                 case StepType.AGENT:
-                    return self._run_agent(step, context)
+                    return self._run_agent(step, context, artifact_refs)
                 case StepType.GATE:
                     return self._run_gate(run_id, step, context, status)
                 case StepType.KB_UPDATE:
@@ -105,7 +114,12 @@ class WorkflowStepExecutor:
             loaded.append(f"## Source: {relative_source}\n\n{source_text}")
         return self._write_outputs(step, context, "\n\n---\n\n".join(loaded))
 
-    def _run_agent(self, step: WorkflowStep, context: dict[str, str]) -> list[str]:
+    def _run_agent(
+        self,
+        step: WorkflowStep,
+        context: dict[str, str],
+        artifact_refs: tuple[ArtifactRef, ...],
+    ) -> list[str]:
         # Role/prompt files are read here (not in the adapter) so a missing prompt still
         # fails the step exactly as before, independent of which executor is configured.
         role_text = self._read_optional(step, f"agents/{step.role}.md" if step.role else None)
@@ -119,6 +133,7 @@ class WorkflowStepExecutor:
             prompt_source=prompt_text or "[no prompt configured]",
             inputs_json=json.dumps(context, ensure_ascii=False, indent=2),
             model=step.model or "",
+            artifact_refs=artifact_refs,
         )
         result = self.adapter.generate(request)
         if not result.ok:
@@ -164,19 +179,19 @@ class WorkflowStepExecutor:
             raise WorkflowExecutionError(step.id, "manual gate rejected")
         # Approved manual gates pass on the human's authority; auto gates are evaluated
         # against the gated artifacts so a stub/empty/incomplete output cannot pass silently.
-        status = (
+        decision = (
             GateDecision.PASS
             if approval == ApprovalDecision.APPROVED
             else self._evaluate_gate(run_id, step, context)
         )
-        payload = self._gate_payload(step, status, context)
+        payload = self._gate_payload(step, decision, context)
         outputs = self._write_outputs(
             step,
             context,
             json.dumps(payload, ensure_ascii=False, indent=2),
         )
-        if status.value not in allowed_statuses(step.pass_if):
-            msg = f"gate {status.value}: artifact failed quality check"
+        if decision.value not in allowed_statuses(step.pass_if):
+            msg = f"gate {decision.value}: artifact failed quality check"
             raise WorkflowExecutionError(step.id, msg)
         return outputs
 
@@ -219,6 +234,88 @@ class WorkflowStepExecutor:
         if not resolved.is_relative_to(self.repo_root.resolve()):
             return None
         return resolved
+
+    def _artifact_refs(self, run_id: str, step: WorkflowStep) -> tuple[ArtifactRef, ...]:
+        remaining = ARTIFACT_REF_CONTENT_BUDGET
+        refs: list[ArtifactRef] = []
+        for dependency in step.depends_on:
+            for relative in self.store.get_step_outputs(run_id, dependency):
+                source = self._stored_artifact_path(relative)
+                if source is None or not source.is_file():
+                    continue
+                excerpt, truncated = self._artifact_excerpt(source, remaining)
+                remaining -= len(excerpt.encode("utf-8"))
+                refs.append(
+                    ArtifactRef(
+                        producer_step_id=dependency,
+                        path=relative,
+                        sha256=_sha256(source),
+                        content_excerpt=excerpt,
+                        truncated=truncated,
+                    ),
+                )
+        return tuple(refs)
+
+    def _artifact_excerpt(self, source: Path, budget: int) -> tuple[str, bool]:
+        with source.open("rb") as stream:
+            raw = stream.read(budget + 1)
+        encoded = raw.decode("utf-8", errors="replace").encode("utf-8")
+        truncated = len(raw) > budget or len(encoded) > budget
+        if not truncated:
+            return encoded.decode("utf-8"), False
+        marker = ARTIFACT_REF_TRUNCATION_MARKER.encode("utf-8")
+        if budget < len(marker):
+            return "", True
+        prefix = encoded[: budget - len(marker)].decode("utf-8", errors="ignore")
+        return prefix + ARTIFACT_REF_TRUNCATION_MARKER, True
+
+    def _consumed_ref_digest(self, refs: tuple[ArtifactRef, ...]) -> str:
+        payload = json.dumps(
+            [
+                [ref.version, ref.producer_step_id, ref.path, ref.sha256]
+                for ref in refs
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _reopen_stale_successes(
+        self,
+        spec: WorkflowSpec,
+        run_id: str,
+        context: dict[str, str],
+    ) -> None:
+        stale: set[str] = set()
+        for step in spec.execution_order():
+            if self.store.get_step_status(run_id, step.id) != StepStatus.SUCCESS:
+                continue
+            if not self._successful_outputs_present(run_id, step, context):
+                stale.add(step.id)
+                continue
+            if step.depends_on and self.store.get_consumed_ref_digest(
+                run_id,
+                step.id,
+            ) != self._consumed_ref_digest(self._artifact_refs(run_id, step)):
+                stale.add(step.id)
+        self._reopen_successes_and_dependents(spec, run_id, stale)
+
+    def _reopen_successes_and_dependents(
+        self,
+        spec: WorkflowSpec,
+        run_id: str,
+        roots: set[str],
+    ) -> None:
+        invalidated = set(roots)
+        for step in spec.execution_order():
+            if any(dependency in invalidated for dependency in step.depends_on):
+                invalidated.add(step.id)
+        for step in spec.execution_order():
+            if (
+                step.id in invalidated
+                and self.store.get_step_status(run_id, step.id) == StepStatus.SUCCESS
+            ):
+                self.store.reopen_step(run_id, step.id)
 
     def _evaluate_gate(
         self,

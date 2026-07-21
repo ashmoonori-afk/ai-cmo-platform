@@ -37,19 +37,17 @@ class UnavailableReviewAdapter:
         return AgentResult(text="", ok=False, detail="reviewer unavailable")
 
 
-def make_request(**overrides: str) -> AgentRequest:
-    base = {
-        "step_id": "draft",
-        "run_id": "r",
-        "workflow_id": "w",
-        "role": "copywriter",
-        "role_contract": "ROLE_CONTRACT",
-        "prompt_source": "PROMPT_SOURCE",
-        "inputs_json": "{}",
-        "model": "",
-    }
-    base.update(overrides)
-    return AgentRequest(**base)
+def make_request(model: str = "") -> AgentRequest:
+    return AgentRequest(
+        step_id="draft",
+        run_id="r",
+        workflow_id="w",
+        role="copywriter",
+        role_contract="ROLE_CONTRACT",
+        prompt_source="PROMPT_SOURCE",
+        inputs_json="{}",
+        model=model,
+    )
 
 
 # ---- G001: per-step model selection ----

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from typing import Self
 
 from aicmo.errors import StepTransitionError
@@ -45,9 +46,9 @@ class WorkflowLedgerStore(WorkflowStepStore):
         step_id: str | None,
         event_type: str,
         message: str,
-        payload: dict[str, str] | None = None,
+        payload: Mapping[str, str | list[str]] | None = None,
     ) -> None:
-        event_payload = {} if payload is None else payload
+        event_payload: Mapping[str, str | list[str]] = {} if payload is None else payload
         with self.connect() as connection:
             connection.execute(
                 """
@@ -62,6 +63,25 @@ class WorkflowLedgerStore(WorkflowStepStore):
                     json.dumps(event_payload, ensure_ascii=False),
                 ),
             )
+
+    def record_consumed_ref_digest(self: Self, run_id: str, step_id: str, digest: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                insert into step_consumed_ref_digests (run_id, step_id, sha256)
+                values (?, ?, ?)
+                on conflict(run_id, step_id) do update set sha256 = excluded.sha256
+                """,
+                (run_id, step_id, digest),
+            )
+
+    def get_consumed_ref_digest(self: Self, run_id: str, step_id: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "select sha256 from step_consumed_ref_digests where run_id = ? and step_id = ?",
+                (run_id, step_id),
+            ).fetchone()
+        return None if row is None else str(row["sha256"])
 
     def record_kb_update(
         self: Self,

@@ -117,12 +117,13 @@ class WorkflowRunner(WorkflowStepExecutor):
 
     def _execute(self: Self, spec: WorkflowSpec, run_id: str, inputs: dict[str, str]) -> RunResult:
         context = {**inputs, "run_id": run_id, "workflow_id": spec.id}
+        self._reopen_stale_successes(spec, run_id, context)
         for step in spec.execution_order():
             status = self.store.get_step_status(run_id, step.id)
             if status == StepStatus.SUCCESS:
                 if self._successful_outputs_present(run_id, step, context):
                     continue
-                self.store.reopen_step(run_id, step.id)
+                self._reopen_successes_and_dependents(spec, run_id, {step.id})
                 status = StepStatus.PENDING
             if not self._dependencies_done(run_id, step):
                 return self._fail(
@@ -132,7 +133,8 @@ class WorkflowRunner(WorkflowStepExecutor):
                     owner=None,
                 )
             try:
-                outputs = self._execute_step(run_id, step, context, status)
+                artifact_refs = self._artifact_refs(run_id, step)
+                outputs = self._execute_step(run_id, step, context, status, artifact_refs)
             except WorkflowExecutionError as exc:
                 return self._fail(
                     run_id,
@@ -152,7 +154,14 @@ class WorkflowRunner(WorkflowStepExecutor):
                 self.store.get_step_status(run_id, step.id) == StepStatus.WAITING_APPROVAL
                 and self.store.approval_for(run_id, step.id) is None
             )
-            after_step = self._after_step(run_id, step, status, outputs, waiting_without_approval)
+            after_step = self._after_step(
+                run_id,
+                step,
+                status,
+                outputs,
+                waiting_without_approval,
+                self._consumed_ref_digest(artifact_refs),
+            )
             if after_step is not None:
                 return after_step
         self.store.mark_run_success(run_id)
@@ -222,6 +231,7 @@ class WorkflowRunner(WorkflowStepExecutor):
         status: StepStatus,
         outputs: list[str],
         waiting_without_approval: bool,
+        consumed_ref_digest: str,
     ) -> RunResult | None:
         if waiting_without_approval:
             if not self._phase_completed(run_id, step, outputs):
@@ -235,6 +245,11 @@ class WorkflowRunner(WorkflowStepExecutor):
         ):
             return self._lost_lease(run_id, step.id, "step lease lost before success")
         self.store.record_output_hashes(run_id, step.id, self._hash_outputs(outputs))
+        self.store.record_consumed_ref_digest(
+            run_id,
+            step.id,
+            consumed_ref_digest,
+        )
         self.store.record_event(run_id, step.id, "step.success", f"Completed {step.id}")
         if not self._phase_completed(run_id, step, outputs):
             return self._fail(run_id, step.id, "phase automation failed", owner=None)

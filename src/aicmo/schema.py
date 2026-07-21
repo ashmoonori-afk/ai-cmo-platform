@@ -125,4 +125,13 @@ SCHEMA = (
         primary key (run_id, step_id, path)
     )
     """,
+    """
+    create table if not exists step_consumed_ref_digests (
+        run_id text not null,
+        step_id text not null,
+        sha256 text not null,
+        primary key (run_id, step_id),
+        foreign key (run_id, step_id) references steps(run_id, step_id)
+    )
+    """,
 )
