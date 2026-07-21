@@ -16,6 +16,8 @@ SCHEMA = (
         workflow_id text not null,
         status text not null,
         inputs_json text not null,
+        spec_digest text,
+        spec_revision integer,
         current_step_id text,
         failed_step_id text,
         created_at text not null default current_timestamp,

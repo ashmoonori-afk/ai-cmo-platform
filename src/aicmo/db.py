@@ -35,3 +35,10 @@ class StoreDb:
         with self.connect() as connection:
             for statement in SCHEMA:
                 connection.execute(statement)
+            columns = {
+                str(row["name"]) for row in connection.execute("pragma table_info(runs)")
+            }
+            if "spec_digest" not in columns:
+                connection.execute("alter table runs add column spec_digest text")
+            if "spec_revision" not in columns:
+                connection.execute("alter table runs add column spec_revision integer")

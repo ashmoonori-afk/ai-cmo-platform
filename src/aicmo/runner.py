@@ -3,14 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Self
 
-from aicmo.errors import StepTransitionError, WorkflowExecutionError
-from aicmo.models import (
-    ApprovalDecision,
-    RunResult,
-    StepStatus,
-    WorkflowSpec,
-    WorkflowStep,
+from aicmo.errors import (
+    RunConflictError,
+    StepTransitionError,
+    WorkflowExecutionError,
+    WorkflowSpecError,
 )
+from aicmo.models import ApprovalDecision, RunResult, StepStatus, WorkflowSpec, WorkflowStep
 from aicmo.paths import parse_safe_id
 from aicmo.spec import load_workflow_spec
 from aicmo.step_executor import WorkflowStepExecutor
@@ -33,9 +32,13 @@ class WorkflowRunner(WorkflowStepExecutor):
     def resume(self: Self, run_id: str) -> RunResult:
         self.store.initialize()
         run = self.store.get_run(run_id)
-        spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
         inputs = self.store.get_inputs(run_id)
-        self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
+        try:
+            spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
+            self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
+        except WorkflowSpecError as exc:
+            reason = f"current specification cannot be verified ({exc}); start a new run"
+            raise RunConflictError(run_id, reason) from None
         self.store.record_event(run_id, None, "run.resumed", f"Resumed {run_id}")
         return self._execute(spec, run_id, inputs)
 
@@ -142,7 +145,7 @@ class WorkflowRunner(WorkflowStepExecutor):
                     str(exc),
                     owner=self._owner_for_status(status),
                 )
-            except Exception as exc:  # noqa: BLE001 — record any step failure, never strand the run
+            except Exception as exc:  # noqa: BLE001  # noqa: BROAD_EXCEPT_OK
                 message = f"unexpected error: {type(exc).__name__}: {exc}"
                 return self._fail(
                     run_id,
@@ -260,7 +263,7 @@ class WorkflowRunner(WorkflowStepExecutor):
             return True
         try:
             self.phase_completed(step, tuple(outputs))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # noqa: BROAD_EXCEPT_OK
             message = f"phase automation failed: {type(exc).__name__}: {exc}"
             self.store.record_event(run_id, step.id, "phase.automation_failed", message)
             return False
