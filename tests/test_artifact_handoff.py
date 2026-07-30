@@ -121,9 +121,9 @@ def test_agent_request_includes_ordered_bounded_artifact_refs(tmp_path: Path) ->
         ref.sha256 == hashlib.sha256((tmp_path / ref.path).read_bytes()).hexdigest()
         for ref in request.artifact_refs
     )
-    assert sum(
-        len(ref.content_excerpt.encode("utf-8")) for ref in request.artifact_refs
-    ) <= 16 * 1024
+    assert (
+        sum(len(ref.content_excerpt.encode("utf-8")) for ref in request.artifact_refs) <= 16 * 1024
+    )
     assert request.artifact_refs[0].truncated is True
     assert "\ufffd" in request.artifact_refs[0].content_excerpt
 
@@ -160,9 +160,9 @@ def test_resume_reopens_transitive_dependents_when_producer_hash_changes(
     assert [request.step_id for request in adapter.seen] == ["producer", "middle", "final"]
     middle_request = next(request for request in adapter.seen if request.step_id == "middle")
     assert middle_request.artifact_refs[0].producer_step_id == "producer"
-    assert middle_request.artifact_refs[0].sha256 == hashlib.sha256(
-        producer.read_bytes()
-    ).hexdigest()
+    assert (
+        middle_request.artifact_refs[0].sha256 == hashlib.sha256(producer.read_bytes()).hexdigest()
+    )
 
 
 def test_resume_uses_refs_sent_to_agent_not_post_execution_files(tmp_path: Path) -> None:
@@ -231,11 +231,14 @@ def test_resume_never_reads_unsafe_dependency_artifact_ref(repo_root: Path) -> N
         store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
         adapter=adapter,
     )
-    assert runner.run(
-        workflow_id="dependency-chain",
-        run_id="run_unsafe_ref",
-        inputs={},
-    ).status == "success"
+    assert (
+        runner.run(
+            workflow_id="dependency-chain",
+            run_id="run_unsafe_ref",
+            inputs={},
+        ).status
+        == "success"
+    )
     outside = repo_root.parent / f"{repo_root.name}-outside-secret.txt"
     outside.write_text("must never enter an agent request", encoding="utf-8")
     with runner.store.connect() as connection:

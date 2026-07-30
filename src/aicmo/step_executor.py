@@ -271,10 +271,7 @@ class WorkflowStepExecutor:
 
     def _consumed_ref_digest(self, refs: tuple[ArtifactRef, ...]) -> str:
         payload = json.dumps(
-            [
-                [ref.version, ref.producer_step_id, ref.path, ref.sha256]
-                for ref in refs
-            ],
+            [[ref.version, ref.producer_step_id, ref.path, ref.sha256] for ref in refs],
             ensure_ascii=False,
             separators=(",", ":"),
         )
