@@ -79,7 +79,11 @@ class AnthropicAdapter:
 
     def generate(self, request: AgentRequest) -> AgentResult:
         model = resolve_model(request.model, self.default_model)
-        client = self.client or _make_client()
+        try:
+            client = self.client or _make_client()
+        except Exception as exc:  # noqa: BLE001 — SDK construction errors become a status, never a crash
+            detail = f"unavailable: anthropic client error: {str(exc)[:_DETAIL_LIMIT]}"
+            return AgentResult(text="", ok=False, detail=detail)
         if client is None:
             return AgentResult(
                 text="",

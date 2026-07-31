@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from aicmo.mockup import LandingBrief, brief_from_answers, render_landing_mockup, render_png
 from aicmo.onboarding import OnboardingAnswers
+
+if TYPE_CHECKING:
+    import pytest
 
 BRIEF = LandingBrief(
     company="엄마의 양초",
@@ -72,3 +77,26 @@ def test_render_png_returns_status_without_crashing(tmp_path: Path) -> None:
 
     assert isinstance(status, str)
     assert status == "generated" or "playwright" in status.lower()
+
+
+def test_render_png_timeout_returns_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    html_path = tmp_path / "mockup.html"
+    html_path.write_text(render_landing_mockup(BRIEF), encoding="utf-8")
+
+    def fake_find_spec(_name: str) -> object:
+        return object()
+
+    monkeypatch.setattr("aicmo.mockup.importlib.util.find_spec", fake_find_spec)
+
+    def hang(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd="playwright", timeout=1)
+
+    monkeypatch.setattr("aicmo.mockup.subprocess.run", hang)
+
+    status = render_png(html_path, tmp_path / "mockup.png")
+
+    assert status.startswith("unavailable:")
+    assert "timed out" in status

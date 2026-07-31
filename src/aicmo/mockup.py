@@ -117,13 +117,16 @@ def render_png(html_path: Path, png_path: Path) -> str:
     if importlib.util.find_spec("playwright") is None:
         return "unavailable: install playwright (uv add playwright && playwright install chromium)"
     png_path.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(  # noqa: S603 — fixed inline script via sys.executable, argv-only, no shell
-        [sys.executable, "-c", _SCREENSHOT_SCRIPT, html_path.resolve().as_uri(), str(png_path)],
-        capture_output=True,
-        text=True,
-        timeout=_SCREENSHOT_TIMEOUT,
-        check=False,
-    )
+    try:
+        result = subprocess.run(  # noqa: S603 — fixed inline script via sys.executable, argv-only, no shell
+            [sys.executable, "-c", _SCREENSHOT_SCRIPT, html_path.resolve().as_uri(), str(png_path)],
+            capture_output=True,
+            text=True,
+            timeout=_SCREENSHOT_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return f"unavailable: playwright screenshot timed out after {_SCREENSHOT_TIMEOUT}s"
     if result.returncode != 0:
         return f"unavailable: playwright error: {result.stderr.strip()[:_DETAIL_LIMIT]}"
     return "generated"

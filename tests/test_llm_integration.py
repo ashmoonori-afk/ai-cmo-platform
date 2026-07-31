@@ -120,6 +120,23 @@ def test_resolve_model_aliases() -> None:
     assert resolve_model("   ") == "claude-sonnet-4-6"
 
 
+def test_anthropic_adapter_client_construction_failure_returns_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def explode() -> None:
+        message = "client construction exploded"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr("aicmo.anthropic_adapter._make_client", explode)
+    adapter = AnthropicAdapter()
+
+    result = adapter.generate(make_request(model="sonnet"))
+
+    assert result.ok is False
+    assert result.detail.startswith("unavailable:")
+    assert "client construction exploded" in result.detail
+
+
 def test_anthropic_adapter_rejects_unknown_model_before_request() -> None:
     messages = _FakeMessages(text="SHOULD NOT BE REQUESTED")
     adapter = AnthropicAdapter(client=_FakeClient(messages=messages))
