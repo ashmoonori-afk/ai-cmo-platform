@@ -130,7 +130,7 @@ class WorkflowStepExecutor:
         finally:
             stop.set()
             thread.join(timeout=self.heartbeat_interval_seconds + 1.0)
-        self._check_lease(run_id, step_id, failure)
+        failure.result() if failure.done() else None
 
     def _check_lease(self, run_id: str, step_id: str, failure: _LeaseSignal) -> bool:
         if failure.done():
