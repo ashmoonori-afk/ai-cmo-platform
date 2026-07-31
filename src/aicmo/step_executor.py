@@ -4,8 +4,8 @@ import hashlib
 import json
 import threading
 from collections.abc import Callable, Iterator
-from concurrent.futures import Future
-from contextlib import contextmanager
+from concurrent.futures import Future, InvalidStateError
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import assert_never
@@ -116,11 +116,13 @@ class WorkflowStepExecutor:
                 try:
                     self._renew_lease(run_id, step_id)
                 except WorkflowExecutionError as exc:
-                    failure.set_exception(exc)
+                    with suppress(InvalidStateError):
+                        failure.set_exception(exc)
                     return
                 except Exception as exc:  # noqa: BLE001  # noqa: BROAD_EXCEPT_OK
                     reason = f"lease heartbeat failed: {type(exc).__name__}: {exc}"
-                    failure.set_exception(WorkflowExecutionError(step_id, reason))
+                    with suppress(InvalidStateError):
+                        failure.set_exception(WorkflowExecutionError(step_id, reason))
                     return
 
         thread = threading.Thread(target=beat, daemon=True)
@@ -212,6 +214,12 @@ class WorkflowStepExecutor:
                 lease_signal,
             )
             self._check_lease(run_id, step.id, lease_signal)
+            # mark_step_waiting releases the lease while the heartbeat thread is
+            # still alive; resolve the signal first so a post-release renewal
+            # failure cannot fail a legitimately waiting gate. Ownership stays
+            # fail-closed via mark_step_waiting's owner guard below.
+            with suppress(InvalidStateError):
+                lease_signal.set_result(None)
             if not self.store.mark_step_waiting(
                 run_id,
                 step.id,

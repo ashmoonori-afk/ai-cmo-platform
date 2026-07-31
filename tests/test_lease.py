@@ -272,3 +272,30 @@ def test_lease_loss_after_prewrite_check_cannot_replace_winner(
     assert step["attempt"] == 2
     assert OFFLINE_STUB_MARKER in content
     assert "stale runner output" not in content
+
+
+def test_gate_wait_survives_heartbeat_shutdown_race(repo_root: Path) -> None:
+    # Given: an approval gate run whose heartbeat renews at sub-millisecond cadence.
+    workflow = repo_root / "workflows" / "blog-article.workflow.yaml"
+    workflow.write_text(
+        workflow.read_text(encoding="utf-8").replace(
+            "  - id: review\n    type: gate\n",
+            "  - id: review\n    type: gate\n    requires_approval: true\n",
+        ),
+        encoding="utf-8",
+    )
+    runner = WorkflowRunner(
+        repo_root=repo_root,
+        store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
+        adapter=LocalAdapter(),
+        heartbeat_interval_seconds=0.001,
+    )
+
+    # When: the run parks at the approval gate and the heartbeat tears down.
+    result = runner.run("blog-article", "r_gate_wait", _INPUTS)
+
+    # Then: the released lease is not renewed into a false lease-lost failure.
+    step = next(row for row in runner.store.list_steps("r_gate_wait") if row["step_id"] == "review")
+    assert result.status == "waiting_approval"
+    assert step["status"] == "waiting_approval"
+    assert step["locked_by"] is None
