@@ -8,6 +8,7 @@ from typing import ClassVar
 import pytest
 
 from aicmo.cli import parse_input_pairs
+from aicmo.models import ApprovalDecision
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 
@@ -103,7 +104,14 @@ class _OrderProbeStore(WorkflowStore):
         _OrderProbeStore.calls.append("bless")
         WorkflowStore.record_output_hashes(self, run_id, step_id, hashes)
 
-    def approve(self, run_id: str, step_id: str, decision, reviewer: str, notes: str) -> None:  # noqa: ANN001
+    def approve(
+        self,
+        run_id: str,
+        step_id: str,
+        decision: ApprovalDecision,
+        reviewer: str,
+        notes: str,
+    ) -> None:
         _OrderProbeStore.calls.append("approve")
         WorkflowStore.approve(self, run_id, step_id, decision, reviewer, notes)
 
