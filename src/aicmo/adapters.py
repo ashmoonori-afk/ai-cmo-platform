@@ -5,6 +5,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Final, Literal, Protocol
 
+from aicmo.redaction import redact
+
 _MAX_DETAIL = 500
 ARTIFACT_REF_CONTENT_BUDGET: Final = 16 * 1024
 ARTIFACT_REF_TRUNCATION_MARKER: Final = "\n[artifact excerpt truncated]"
@@ -144,7 +146,7 @@ class CommandAdapter:
                 check=False,
             )
         except OSError as exc:
-            return AgentResult(text="", ok=False, detail=f"executor could not start: {exc}")
+            return AgentResult(text="", ok=False, detail=redact(f"executor could not start: {exc}"))
         except subprocess.TimeoutExpired:
             return AgentResult(
                 text="",
@@ -152,7 +154,7 @@ class CommandAdapter:
                 detail=f"executor timed out after {self.timeout_seconds:g}s",
             )
         if completed.returncode != 0:
-            stderr = (completed.stderr or "").strip()[:_MAX_DETAIL]
+            stderr = redact((completed.stderr or "").strip()[:_MAX_DETAIL])
             return AgentResult(
                 text="",
                 ok=False,

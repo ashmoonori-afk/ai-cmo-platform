@@ -22,6 +22,7 @@ from aicmo.mockup import brief_from_answers, render_landing_mockup, render_png
 from aicmo.models import RunResult, RunStatus, WorkflowStep
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
 from aicmo.phase_git import PhaseGitMode, PhaseGitResult, PhaseGitStatus, run_phase_git
+from aicmo.redaction import redact
 from aicmo.reporter import flush_kb_updates
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
@@ -189,17 +190,21 @@ ExecutorCmdOpt = Annotated[
     typer.Option("--executor-cmd", help="Live executor command (prompt piped on stdin)."),
 ]
 ExecutorOpt = Annotated[
-    str | None, typer.Option("--executor", help="Preset: local|claude|codex|anthropic"),
+    str | None,
+    typer.Option("--executor", help="Preset: local|claude|codex|anthropic"),
 ]
 AnthropicOpt = Annotated[bool, typer.Option("--anthropic", help="Anthropic API executor")]
 ReviewOpt = Annotated[
-    str | None, typer.Option("--review", help="Reviewer preset: claude|codex|anthropic"),
+    str | None,
+    typer.Option("--review", help="Reviewer preset: claude|codex|anthropic"),
 ]
 ReviewCmdOpt = Annotated[
-    str | None, typer.Option("--review-cmd", help="Semantic gate reviewer command"),
+    str | None,
+    typer.Option("--review-cmd", help="Semantic gate reviewer command"),
 ]
 ReviewAnthropicOpt = Annotated[
-    bool, typer.Option("--review-anthropic", help="Anthropic as gate reviewer"),
+    bool,
+    typer.Option("--review-anthropic", help="Anthropic as gate reviewer"),
 ]
 
 
@@ -309,7 +314,10 @@ def ingest_inbox(
         for item in items:
             console.print(f"{item.source_file.name}: {len(item.urls)} url(s)", markup=False)
             for url in item.urls:
-                console.print(f"  would run content-engine --input source_url={url}", markup=False)
+                console.print(
+                    f"  would run content-engine --input source_url={redact(url)}",
+                    markup=False,
+                )
         return
     runner = make_runner(
         repo_root,
@@ -323,7 +331,7 @@ def ingest_inbox(
         failed_urls: list[str] = []
         for url in item.urls:
             run_id = generated_run_id()
-            console.print(f"{item.source_file.name} -> {run_id}: {url}", markup=False)
+            console.print(f"{item.source_file.name} -> {run_id}: {redact(url)}", markup=False)
             try:
                 result = runner.run(
                     workflow_id="content-engine",
@@ -331,7 +339,7 @@ def ingest_inbox(
                     inputs={"client": client, "source_url": url},
                 )
             except Exception as exc:  # noqa: BLE001 — keep ingesting the remaining URLs
-                console.print(f"  failed: {type(exc).__name__}: {exc}", markup=False)
+                console.print(redact(f"  failed: {type(exc).__name__}: {exc}"), markup=False)
                 failed_urls.append(url)
                 continue
             console.print(f"  {result.status}", markup=False)

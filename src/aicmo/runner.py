@@ -11,6 +11,7 @@ from aicmo.errors import (
 )
 from aicmo.models import ApprovalDecision, RunResult, StepStatus, WorkflowSpec, WorkflowStep
 from aicmo.paths import parse_safe_id
+from aicmo.redaction import contains_raw_secret
 from aicmo.spec import load_workflow_spec
 from aicmo.step_executor import WorkflowStepExecutor
 
@@ -193,6 +194,11 @@ class WorkflowRunner(WorkflowStepExecutor):
         if undeclared:
             step_id = "inputs"
             raise WorkflowExecutionError(step_id, f"undeclared inputs: {', '.join(undeclared)}")
+        for key, value in inputs.items():
+            if contains_raw_secret(value):
+                step_id = "inputs"
+                msg = f"input {key!r} contains a raw credential; pass env:NAME references instead"
+                raise WorkflowExecutionError(step_id, msg)
         client = inputs.get("client")
         if "client" in spec.inputs and client:
             slug = parse_safe_id("client", client)

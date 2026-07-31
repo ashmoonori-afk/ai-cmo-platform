@@ -8,6 +8,7 @@ from typing import Final, Protocol
 
 from aicmo.adapters import AgentRequest, AgentResult, compose_prompt
 from aicmo.errors import AicmoError
+from aicmo.redaction import redact
 
 _MODEL_ALIASES: Final = {
     "opus": "claude-opus-4-8",
@@ -82,7 +83,7 @@ class AnthropicAdapter:
         try:
             client = self.client or _make_client()
         except Exception as exc:  # noqa: BLE001 — SDK construction errors become a status, never a crash
-            detail = f"unavailable: anthropic client error: {str(exc)[:_DETAIL_LIMIT]}"
+            detail = redact(f"unavailable: anthropic client error: {str(exc)[:_DETAIL_LIMIT]}")
             return AgentResult(text="", ok=False, detail=detail)
         if client is None:
             return AgentResult(
@@ -99,7 +100,7 @@ class AnthropicAdapter:
             )
             text = "".join(block.text for block in response.content).strip()
         except Exception as exc:  # noqa: BLE001 — any SDK/network error becomes a status, never a crash
-            detail = f"unavailable: anthropic error: {str(exc)[:_DETAIL_LIMIT]}"
+            detail = redact(f"unavailable: anthropic error: {str(exc)[:_DETAIL_LIMIT]}")
             return AgentResult(text="", ok=False, detail=detail)
         if not text:
             return AgentResult(text="", ok=False, detail="unavailable: empty model response")
