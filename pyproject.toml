@@ -38,7 +38,7 @@ filterwarnings = ["error"]
 [tool.ruff]
 target-version = "py313"
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -57,6 +57,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"scripts/**/*.py" = ["INP001", "T201"]
 "tests/**/*.py" = [
     "D",
     "PLR2004",
@@ -72,7 +73,7 @@ docstring-code-format = true
 typeCheckingMode = "all"
 pythonVersion = "3.13"
 pythonPlatform = "All"
-include = ["src", "tests"]
+include = ["src", "tests", "scripts"]
 exclude = ["**/__pycache__", "**/.venv", "**/build", "**/dist"]
 reportAny = "none"
 reportCallInDefaultInitializer = "none"
