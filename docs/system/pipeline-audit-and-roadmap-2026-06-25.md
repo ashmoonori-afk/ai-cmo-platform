@@ -1,5 +1,7 @@
 # AI CMO Platform — Pipeline Audit & Feature Roadmap
 
+> ⚠️ 2026-06-25 시점 스냅샷 — 본문의 현재형 서술(예: "리뷰어 게이트 없음", "evaluation/mockup/web 미구현")은 당시 상태다. 현재 아키텍처는 docs/system/workflow-engine.md 참조.
+
 > **STATUS (2026-07-02): HISTORICAL SNAPSHOT.** Sections 0–6 describe the repository **as of the 2026-06-25 audit**, before the roadmap was built. The P0–P3 items were shipped on the same date (see §7 and the commit history: live executor presets, evaluated gates, KB flush, onboarding wizard, mockup/serve). For the **current** engine behavior, read `docs/system/workflow-engine.md`; do not cite §0–§6 as the present state.
 
 **Date:** 2026-06-25
@@ -193,7 +195,7 @@ The stub→real unlock is done at the executor layer. Remaining to make the live
 
 ### 2026-06-25 — P2 engine, P1 evaluation, P2 mockup, P3 access ALL SHIPPED
 
-The remaining roadmap was built out sequentially, each built test-first and verified on the real CLI surface with independent review. Final suite: **71 tests green, ruff(ALL) + basedpyright clean.**
+The remaining roadmap was built out sequentially, each built test-first and verified on the real CLI surface with independent review. Final suite: **71 tests (당시) green, ruff(ALL) + basedpyright clean.**
 
 - **P2 — real reviewer gate** (`src/aicmo/gate.py`): `_run_gate` no longer hardcodes PASS. It evaluates the gated artifacts deterministically (empty / TODO·TBD·placeholder `{{}}` → FAIL; thin → WARN; else PASS), checks against `pass_if`, and a FAIL stops the run. Recognizes the offline-stub sentinel → WARN so deterministic default runs still pass. Surface-proven: a TODO artifact fails the run at `review`; clean passes.
 - **P2 — KB consumer** (`src/aicmo/reporter.py`, `aicmo kb-flush`): dequeues queued `kb_updates` → appends to `knowledge-base/<client>/insights.md` (append-only) and marks them consumed (idempotent). Closes the durable-learning loop.

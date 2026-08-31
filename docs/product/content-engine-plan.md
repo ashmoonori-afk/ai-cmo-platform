@@ -9,7 +9,7 @@
 - **이게 뭔지**: "URL 하나 던지면 → 검증 → 소스 리포트 → 채널별 포스트+이미지 → 사장님 승인(수정 가능) → 발행 캘린더 → **수정 내용 자동 학습**"까지 한 줄로 이어지는 콘텐츠 엔진을 우리 워크플로우 러너에 이식한다.
 - **왜**: 지금 우리 SNS SOP는 "주제를 주면 잘 쓴다". 이 파이프라인은 "소스가 들어오면 알아서 만든다" — 사장님이 기사·유튜브·자기 블로그 링크만 보내면 콘텐츠가 나오는 구조로 운영 부담을 한 단계 더 낮춘다.
 - **핵심 차별 포인트**: reflection(사장님이 고친 문안을 diff해서 KB에 학습)은 우리 자기 개선 루프(winning-copy/copy-patterns)와 정확히 맞물린다 — 원본 레포에서 가장 이식 가치가 높은 부분.
-- **오늘 결정할 것 하나**: P0 범위(승인 전 수정 허용을 위한 엔진 소수정 + 워크플로우 1개 + 플레이북 1개)로 시작할지.
+- **오늘 결정할 것 하나**: P0 범위(승인 전 수정 허용을 위한 엔진 소수정 + 워크플로우 1개 + 플레이북 1개)로 시작할지. → **결정 완료: P0·P1·P2 모두 착수·구현됨 (2026-07-07)**
 
 ## 1. 원본 파이프라인 분석 (소스 트리 확인 기준)
 
@@ -32,12 +32,12 @@
 
 | 원본 | 우리 현황 | 판정 |
 |------|----------|------|
-| ingest-data (Slack+cron) | 없음 — 사용자가 대화/CLI로 시작 | **신규 (P2, 한국형 대체)** |
+| ingest-data (Slack+cron) | ~~없음~~ **구현됨** — `aicmo ingest`(inbox/ 폴더 스캔, `--dry-run`) + 대화 한 줄. cron 스케줄링만 미구현 | **신규 (P2, 한국형 대체) → 구현 완료** |
 | verify-links (소스 가치 판단) | 없음 | **신규 스텝** |
 | generate-report (2단계 생성) | 부분 — researcher가 유사 역할 | **신규 스텝** (소스 요약 리포트) |
 | generate-post / generate-thread | **있음** — social-post.md (인스타/X/Threads/LinkedIn 규격+페널티 검사) | 재사용 |
 | find-and-generate-images | 부분 — designer + codex-image-gen (visual_asset_status 규칙) | 재사용 |
-| curated-post-interrupt (Agent Inbox) | **있음** — owner_gate (WAITING_APPROVAL + approve/reject CLI) | 재사용 + **수정 허용 보강 (P0 엔진)** |
+| curated-post-interrupt (Agent Inbox) | **있음** — owner_gate (WAITING_APPROVAL + approve/reject CLI) + `approve --accept-edits` 수정 승인(`_pre_edit` 스냅샷) 구현됨 | 재사용 + 수정 허용 보강 **구현 완료** |
 | upload-post (API 발행) | 없음 — 승인 후 복붙 팩 | **P2 (선택)** |
 | **reflection (수정 학습)** | 부분 — KB 수동 append (winning-copy) | **신규 스텝 (최고 가치)** |
 | repurposer | **있음** — repurpose.md (4포맷 병렬) | 재사용 |
@@ -79,18 +79,20 @@ load_context → verify_source(agent: researcher — 소스 본문 추출+가치
 
 | 원본 | 우리 선택 | 이유 |
 |------|----------|------|
-| Slack 채널 인제스트 | **inbox/ 폴더 + 대화 한 줄** ("이 링크로 포스트") → P2에서 Claude Code cron으로 inbox 폴더 스캔 | 카카오톡 개인 수집 API 없음; 시니어 타깃에겐 대화가 더 쉬움 |
+| Slack 채널 인제스트 | **inbox/ 폴더 + 대화 한 줄** ("이 링크로 포스트") → `aicmo ingest` CLI로 구현됨. Claude Code cron 자동 스캔은 미구현(수동 실행) | 카카오톡 개인 수집 API 없음; 시니어 타깃에겐 대화가 더 쉬움 |
 | X/LinkedIn API 자동 발행 | **발행 큐 문서**(날짜·채널·복붙 문안·체크박스) 우선, API 발행은 P2 선택 | X API 유료·인스타 그래프 API는 비즈니스 계정+앱 심사 필요 — 시니어 온보딩 장벽. 승인→복붙이 현 단계 최적 [추정] |
 | FireCrawl 크롤링 | Claude 내장 WebFetch/WebSearch | 외부 의존성 0 원칙 유지 |
 | 채널: X/LinkedIn 중심 | 인스타/Threads/X/네이버 블로그 — 기존 social-post.md 규격 재사용 | 한국 채널 리서치 근거 (2026-07 다이제스트) |
+
+> 결정(2026-08-31): cron/스케줄러는 도입하지 않는다 — 외부 의존성 0 원칙에 따라 수동 `aicmo ingest` 실행이 원칙.
 
 ## 4. 로드맵
 
 | 단계 | 내용 | 산출물 | 공수(추정) |
 |------|------|--------|-----------|
-| **P0** | 엔진 --accept-edits + content-engine 워크플로우 + 플레이북 + CLAUDE.md 매핑 + 스펙 테스트 | 코드 소수정, YAML 1, MD 1 | 반나절 |
-| **P1** | reflection 품질 고도화(diff→규칙 추출 프롬프트) + 발행 큐 표준 + repurpose 연결(승자 포스트→시리즈) | 프롬프트/SOP 보강 | 반나절 |
-| **P2** | inbox/ 폴더 cron 인제스트 + (선택) Threads/인스타 API 발행 어댑터 | 수집기+어댑터 | 검토 후 |
+| **P0** ✅ 완료 | 엔진 --accept-edits + content-engine 워크플로우 + 플레이북 + CLAUDE.md 매핑 + 스펙 테스트 | 코드 소수정, YAML 1, MD 1 | 반나절 |
+| **P1** ✅ 완료 | reflection 품질 고도화(diff→규칙 추출 프롬프트) + 발행 큐 표준 + repurpose 연결(승자 포스트→시리즈) | 프롬프트/SOP 보강 | 반나절 |
+| **P2** ✅ CLI 완료 (cron·API 발행 미구현) | inbox/ 폴더 cron 인제스트 + (선택) Threads/인스타 API 발행 어댑터 | 수집기+어댑터 | 검토 후 |
 
 ## 5. 리스크 / 열린 질문
 
