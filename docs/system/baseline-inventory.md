@@ -6,13 +6,16 @@ contracts.
 
 ## Current Counts
 
+> 2026-08-31 기준 갱신 (당시 베이스라인과 다를 수 있음 — 보존 규칙은 여전히 유효)
+> 수치 검증: `uv run python scripts/doc_counts.py`.
+
 | Surface | Count | Preservation rule |
 |---------|-------|-------------------|
-| Agents in `agents/` | 10 | Keep existing agent names and prompt contracts. |
-| Core playbooks in `playbooks/01-*` through `playbooks/07-*` | 33 | Do not delete, rename, or renumber the existing core playbooks. |
-| Chain playbooks in `playbooks/00-chains/` | 4 | Existing chains remain usable; `ai-cmo-operating-system.md` is the new user pipeline. |
-| Routing rows in `CLAUDE.md` | 43 | Do not reduce the existing natural-language routing map. |
-| Shared prompts in `prompts/shared/` | 3 | Keep the reviewer and KB record policies non-destructive. |
+| Agents in `agents/` | 11 | Keep existing agent names and prompt contracts. |
+| Core playbooks in `playbooks/01-*` through `playbooks/07-*` | 38 | Do not delete, rename, or renumber the existing core playbooks. |
+| Chain playbooks in `playbooks/00-chains/` | 5 | Existing chains remain usable; `ai-cmo-operating-system.md` is the new user pipeline. |
+| Routing rows in `CLAUDE.md` | 64 | Do not reduce the existing natural-language routing map. |
+| Shared prompts in `prompts/shared/` | 6 | Keep the reviewer and KB record policies non-destructive. |
 
 ## Protected Dirty Work
 

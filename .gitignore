@@ -1,4 +1,6 @@
 outputs/
+output/
+NUL
 .omo/
 .aicmo/
 .playwright-mcp/
@@ -15,3 +17,6 @@ __pycache__/
 docs/research/
 knowledge-base/_platform/
 inbox/
+
+# Private repository audit
+docs/private/2026-07-30-repository-audit-moat-marketing.md

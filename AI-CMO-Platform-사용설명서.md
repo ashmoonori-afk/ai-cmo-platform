@@ -1,5 +1,7 @@
 # AI CMO Platform 사용설명서
 
+> 이 문서는 전체 매뉴얼입니다. 빠른 시작은 [docs/사용설명서.md](docs/사용설명서.md) 참고.
+
 > 11개 AI 에이전트 + 68개 플레이북으로 마케팅 반복 업무를 표준화하는 노코드 AI 마케팅 운영체계
 
 ---
@@ -62,7 +64,7 @@ Claude Code를 열고 자연어로 마케팅 업무를 지시하면, AI가 전�
 
 **Step 1: 압축 해제**
 ```
-ai-cmo-platform-v1.0.zip 압축 해제 → 원하는 위치에 배치
+ai-cmo-platform-v0.2.0.zip 압축 해제 → 원하는 위치에 배치
 ```
 
 **Step 2: 첫 클라이언트 등록**
@@ -145,6 +147,7 @@ Reporter가 knowledge-base 반영 후보 정리
 ### 결과물은 어디에?
 
 모든 산출물은 `outputs/{클라이언트명}/{모듈}/` 폴더에 저장합니다.
+(단, `aicmo run` 엔진으로 실행한 워크플로우의 산출물은 `artifacts/{run_id}/`에 저장됩니다.) (규칙 원천: docs/system/user-pipeline.md)
 
 ```
 outputs/
@@ -463,9 +466,9 @@ knowledge-base/{클라이언트}/
 ai-cmo-platform/
 │
 ├── CLAUDE.md                    ← 시스템 두뇌 (건드리지 마세요)
-│                                   43개 자연어 매핑, 디스패치 규칙 등
+│                                   64개 자연어 매핑, 디스패치 규칙 등
 │
-├── agents/                      ← AI 에이전트 프롬프트 (10개)
+├── agents/                      ← AI 에이전트 프롬프트 (11개)
 │   ├── researcher.md            ← 리서치 전문가
 │   ├── competitor.md            ← 경쟁사 분석가
 │   ├── strategist.md            ← 전략가
@@ -552,5 +555,5 @@ ai-cmo-platform/
 
 ---
 
-> **AI CMO Platform v1.0** — 10 Agents, 7 Modules, 33 Playbooks
+> **AI CMO Platform v0.2.0** — 11 Agents, 12 Modules, 68 Playbooks
 > Built with Claude Code

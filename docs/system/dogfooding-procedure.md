@@ -72,6 +72,10 @@ Expected result:
 - private-data gates remain present on sensitive workflows;
 - handoff manifest parses as JSON.
 
+## Snapshot Count Convention
+
+- 도그푸딩 기록의 날짜가 있는 스냅샷 수치는 `당시 N개` 형식으로 적습니다(예: "당시 91 passed"). 이후 독자가 현재 값으로 오해하지 않도록 하며, 현재 값은 `uv run python scripts/doc_counts.py`와 `uv run pytest -q`로 확인합니다.
+
 ## Exit Criteria
 
 A dogfooding run is complete only when:

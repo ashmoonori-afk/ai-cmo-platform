@@ -23,10 +23,10 @@ and Baemin, where global marketing tools fall short.
 
 ```powershell
 git clone <this-repo> && cd ai-cmo-platform
-uv sync && uv run pytest -q          # 100 tests
+uv sync && uv run pytest -q          # 전체 테스트
 uv run aicmo run launch-pack --client sample-client-a --run-id demo1
 uv run aicmo approve demo1 owner_gate --reviewer owner --notes ok
-uv run aicmo resume demo1            # 12 linear steps -> 5 deliverables + HTML
+uv run aicmo resume demo1            # 13 linear steps -> 5 deliverables + HTML
 ```
 
 Or open the repo in Claude Code and just say: `런치팩 해줘 — 새 클라이언트: {회사명}`
@@ -54,7 +54,7 @@ AI CMO Platform은 한 명의 마케터가 머릿속으로 처리하던 업무 �
 - 11개 specialist role과 68개 playbook으로 실행합니다 (로컬 실행 SOP 7개 +
   유료 광고 SOP 3개 포함 — 네이버 플레이스·카톡채널·당근·배달앱·오프라인·
   네이버 검색광고·메타광고·광고 전략 라이브러리. 근거 리서치 다이제스트는
-  운영자 비공개 레이어 `docs/research/`에 유지 — SOP 본문에 핵심 출처 인라인 인용).
+  운영자 비공개 레이어 `docs/research/`(gitignore, 로컬 전용)에 유지 — SOP 본문에 핵심 출처 인라인 인용).
 - 역할별 SOP, Reviewer gate, Reporter KB 기록으로 품질을 고정합니다.
 - `src/aicmo/` 의 실행형 워크플로우 엔진(SQLite 상태, 승인 게이트, 재개)으로
   선택한 playbook을 재현 가능한 DAG 실행으로 돌립니다.
@@ -165,7 +165,7 @@ uv run aicmo run blog-article `
 git clone <this-repo> && cd ai-cmo-platform
 uv sync                 # 가상환경 + 의존성
 uv run aicmo --help     # CLI 동작 확인
-uv run pytest -q        # 100 tests, 동작 확인
+uv run pytest -q        # 전체 테스트, 동작 확인
 ```
 
 ### A. 대화형 모드 — Claude Code에서 자연어로
@@ -253,7 +253,7 @@ uv run aicmo run blog-article --client sample-client-a --topic "..." --executor 
 
 상태/산출물 위치: 상태 DB `.aicmo/runs.sqlite3`, 스텝 출력 `artifacts/{run_id}/`
 (둘 다 로컬 run 상태이며 git ignore). 산출물은 `outputs/{client}/{module}/`,
-지식은 Reporter가 `knowledge-base/`에 append (runner는 큐만).
+지식은 Reporter가 `knowledge-base/`에 append (runner는 큐만) (규칙 원천: docs/system/user-pipeline.md).
 
 ---
 
@@ -290,7 +290,7 @@ uv run aicmo run blog-article --client sample-client-a --topic "..." --executor 
 ### 헬스 체크
 
 ```powershell
-uv run pytest                       # 91 passed
+uv run pytest                       # 전체 테스트 통과
 uv run ruff check src tests examples
 uv run basedpyright src tests
 git diff --check
@@ -487,7 +487,7 @@ uv run aicmo onboard --client {slug} --from answers.json
 이 저장소는 플랫폼 자신을 통해 dogfooding으로 검증됩니다.
 
 ```powershell
-uv run pytest                         # 91 passed
+uv run pytest                         # 전체 테스트 통과
 uv run ruff check src tests examples
 uv run basedpyright src tests
 git diff --check

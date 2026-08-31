@@ -30,6 +30,12 @@ assets_available:
 risk_level:
 ```
 
+## 산출물 저장 규칙 (원천)
+
+- 대화형(Claude Code 에이전트 디스패치) 산출물은 `outputs/{client}/{module}/`에 저장하며 gitignore 대상입니다.
+- `aicmo run` 엔진 실행물은 `artifacts/{run_id}/`에 저장하며 gitignore 대상이고, `step_executor`의 기본값입니다.
+- 이 문서가 산출물 저장 규칙의 단일 원천이며, 다른 문서는 이 문서로 링크합니다.
+
 ## Done Definition
 
 A user request is complete only when:
