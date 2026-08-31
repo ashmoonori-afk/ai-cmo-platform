@@ -84,6 +84,9 @@
 |-----------|---------------|
 | Sample Client A, sample-client-a, 꽃배달 | `sample-client-a` |
 | Sample Client B, sample-client-b | `sample-client-b` |
+| Sample Client C, sample-client-c | `sample-client-c` |
+| Sample Client D, sample-client-d | `sample-client-d` |
+| Sample Client E, sample-client-e | `sample-client-e` |
 | (새 클라이언트) | 사용자에게 확인 후 `clients/{name}/` 생성 |
 
 ### 2.2 컨텍스트 로딩
@@ -128,7 +131,7 @@
 
 사용자가 자연어로 입력하면 아래 테이블에서 가장 적합한 워크플로우를 매칭합니다. **한국어 패턴 기반**으로 매핑합니다.
 
-### 3.1 Strategy (전략 기획) — 6개 플레이북
+### 3.1 Strategy (전략 기획) — 7개 플레이북
 
 **Strategy SOP 권장 실행 순서:**
 ```
@@ -155,7 +158,7 @@ gtm-motion-analysis → positioning-map → channel-strategy → funnel-design �
 | 10 | "ICP 분석", "고객 프로필", "이상적 고객", "타겟 고객 분석" | `playbooks/02-intelligence/icp-analysis.md` | data-analyst + researcher (병렬) → strategist | opus |
 | 11 | "고객 피드백", "리뷰 분석", "고객 의견", "VOC 분석" | `playbooks/02-intelligence/customer-feedback.md` | data-analyst | opus |
 
-### 3.3 Content (콘텐츠) — 8개 플레이북
+### 3.3 Content (콘텐츠) — 11개 플레이북
 
 | # | 사용자 입력 패턴 | 플레이북 경로 | 에이전트 조합 | 모델 |
 |---|----------------|-------------|-------------|------|
@@ -178,7 +181,7 @@ gtm-motion-analysis → positioning-map → channel-strategy → funnel-design �
 | 23 | "미팅 후", "팔로업", "미팅 정리", "후속 조치", "미팅 메모 정리" | `playbooks/04-sales/post-meeting.md` | sales-writer → reviewer | sonnet |
 | 24 | "피칭덱", "IR덱", "투자 발표", "피치덱", "pitch deck" | `playbooks/04-sales/pitch-deck.md` | strategist → sales-writer → reviewer | opus |
 
-### 3.5 SEO — 3개 플레이북
+### 3.5 SEO — 4개 플레이북
 
 | # | 사용자 입력 패턴 | 플레이북 경로 | 에이전트 조합 | 모델 |
 |---|----------------|-------------|-------------|------|
@@ -458,7 +461,7 @@ ESCALATE 시:
 
 ## 7. Knowledge Base 업데이트 규칙
 
-### 7.0 KB 기본 소스 원칙 (Research-first)
+### 7.1 KB 기본 소스 원칙 (Research-first)
 
 **KB와 SOP의 기본 소스는 인터넷 조사로 확보한다.** 새 SOP/모듈/표준을 만들거나 큰 개정을 할 때:
 
@@ -469,14 +472,17 @@ ESCALATE 시:
 
 예시: `docs/research/2026-07-02-local-sop-research.md` → `playbooks/09-local/` 7개 SOP + `prompts/shared/deliverable-standard.md`
 
-### 7.1 KB 구조
+### 7.2 KB 구조
 
 ```
 knowledge-base/
-├── _platform/                    ← 플랫폼 레벨 (모든 클라이언트 공통)
+├── _platform/                    ← 플랫폼 레벨 (모든 클라이언트 공통, gitignore 로컬 전용)
 │   ├── sop-lessons.md            ← SOP 실행 교훈 (과거 실수/해결 패턴)
 │   ├── agent-patterns.md         ← 에이전트 성공/실패 패턴
 │   └── quality-benchmarks.md     ← 산출물 품질 기준선
+│
+├── _engine-improvements/         ← 엔진 피드백 (aicmo approve --accept-edits 등 수정 피드백 자동 기록)
+│   └── artifact-feedback.md
 │
 └── {client}/                     ← 클라이언트별
     ├── insights.md               ← 리서치 인사이트 누적
@@ -484,7 +490,7 @@ knowledge-base/
     └── lessons-learned.md        ← 전략적 교훈
 ```
 
-### 7.1.1 Platform KB 참조 규칙
+### 7.2.1 Platform KB 참조 규칙
 
 모든 에이전트는 작업 시작 전 해당되는 Platform KB를 참조한다:
 
@@ -495,7 +501,7 @@ knowledge-base/
 | reviewer | `_platform/quality-benchmarks.md` — 판정 기준 참조 |
 | reporter | 모든 Platform KB — 주간 리포트 시 플랫폼 교훈 업데이트 |
 
-### 7.1.2 Platform KB 자동 업데이트 트리거
+### 7.2.2 Platform KB 자동 업데이트 트리거
 
 | KB 파일 | 업데이트 트리거 | 추가 주체 |
 |---------|---------------|---------|
@@ -504,7 +510,7 @@ knowledge-base/
 | `agent-patterns.md` | 새로운 성공/실패 패턴 발견 시 | reporter (주간 리포트 시) |
 | `quality-benchmarks.md` | 새로운 산출물 유형 추가 시, 기준 조정 필요 시 | reviewer |
 
-### 7.2 자동 업데이트 트리거
+### 7.3 자동 업데이트 트리거
 
 | KB 파일 | 업데이트 트리거 | 추가할 내용 |
 |---------|---------------|-----------|
@@ -512,7 +518,7 @@ knowledge-base/
 | `winning-copy.md` | 사용자가 "좋다", "이거 괜찮네" 피드백 시 | 해당 카피 전문 + 왜 좋았는지 |
 | `lessons-learned.md` | 전략 리뷰/회고 시 (strategist 실행 후) | 성공/실패 교훈 |
 
-### 7.3 업데이트 형식
+### 7.4 업데이트 형식
 
 모든 KB 항목은 아래 형식으로 **append (추가)** 합니다:
 
@@ -536,20 +542,20 @@ knowledge-base/
 ---
 ```
 
-### 7.4 제약 조건
+### 7.5 제약 조건
 
 - **Append-only**: 기존 내용 수정/삭제 금지, 추가만 허용
 - 각 항목에 날짜 + 출처 워크플로우 태그 필수
 - 항목당 최대 500자
 - 분기별 정리 시에만 구조 변경 허용 (reporter 에이전트가 수행)
 
-### 7.5 KB 참조 규칙
+### 7.6 KB 참조 규칙
 
 - **strategist**: 작업 전 반드시 해당 클라이언트의 `insights.md` + `lessons-learned.md` 읽기
 - **copywriter**: `winning-copy.md`를 참조하여 검증된 톤/패턴 사용
 - **reporter**: 분기별 KB 전체 정리 (중복 제거, 구조화)
 
-### 7.6 동시성 규칙
+### 7.7 동시성 규칙
 
 병렬 에이전트가 동시에 KB를 업데이트할 수 있으므로:
 - 각 에이전트는 자신의 항목만 append
@@ -593,7 +599,7 @@ CMO: config.md 존재 확인 → 없으면 온보딩 (Lite: config + brand만)
 
 ---
 
-## 부록: 빠른 참조
+## 9. 부록: 빠른 참조
 
 ### Shared Operating Layer
 
@@ -633,8 +639,11 @@ ai-cmo-platform/
 ├── agents/                      ← 서브에이전트 프롬프트 (11개)
 ├── clients/                     ← 클라이언트별 설정
 │   ├── _template/               ← 신규 클라이언트 온보딩 템플릿
-│   ├── sample-client-a/              ← Sample Client A 설정
-│   └── sample-client-b/                    ← Sample Client B 설정
+│   ├── sample-client-a/         ← Sample Client A 설정
+│   ├── sample-client-b/         ← Sample Client B 설정
+│   ├── sample-client-c/         ← Sample Client C 설정
+│   ├── sample-client-d/         ← Sample Client D 설정
+│   └── sample-client-e/         ← Sample Client E 설정
 ├── playbooks/                   ← 실행 가능한 SOP (12개 모듈, 68개 플레이북)
 │   ├── 00-chains/               ← 복합 체인 (5개, launch-pack 포함)
 │   ├── 01-strategy/             ← 전략 기획 (7개)
@@ -650,11 +659,13 @@ ai-cmo-platform/
 │   └── 10-ads/                  ← 유료 광고 SOP (3개 — 네이버 검색광고/메타광고/전략 라이브러리)
 ├── workflows/                   ← 러너 실행용 워크플로우 스펙 (aicmo run {id})
 ├── prompts/shared/              ← 공유 프롬프트
-├── outputs/                     ← 생성물 (클라이언트별 → 모듈별)
+├── outputs/                     ← 생성물 (클라이언트별 → 모듈별, 대화형 실행)
+├── artifacts/                   ← 엔진 실행물 (aicmo run → artifacts/{run_id}/, gitignore)
 ├── knowledge-base/              ← 축적형 자산
 │   ├── _platform/               ← 플랫폼 교훈 (SOP 교훈, 에이전트 패턴, 품질 기준)
 └── references/                  ← 기존 전략 문서 아카이브 (읽기 전용)
 ```
+생성물 저장 규칙(outputs/ 대화형 vs artifacts/ 엔진)의 원천 문서는 `docs/system/user-pipeline.md`이다.
 
 ### 워크플로우 최종 판정
 
