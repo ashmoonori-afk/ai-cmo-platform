@@ -3,6 +3,16 @@
   "date": "2026-06-24",
   "language": "en",
   "purpose": "Transfer the upgraded AI CMO Platform to Hermes Agent and OpenClaw with explicit entrypoints, safety gates, and verification checks.",
+  "untrusted_reference_sets": [
+    {
+      "name": "ai-marketing-skills-curated",
+      "provenance": "references/upstream/ai-marketing-skills/PROVENANCE.json",
+      "load_by_default": false,
+      "network_allowed": false,
+      "execution_approved": false,
+      "activation": "none"
+    }
+  ],
   "entrypoints": {
     "human_overview": "README.md",
     "system_brain": "CLAUDE.md",

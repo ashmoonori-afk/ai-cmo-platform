@@ -2,14 +2,70 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from typing import Self
 
 from aicmo.errors import StepTransitionError
 from aicmo.models import ApprovalDecision, StepStatus
+from aicmo.redaction import redact
 from aicmo.step_state import WorkflowStepStore
 
 
 class WorkflowLedgerStore(WorkflowStepStore):
+    def complete_step_success(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        outputs: list[str],
+        output_hashes: Mapping[str, str],
+        consumed_ref_digest: str,
+        owner: str | None = None,
+    ) -> bool:
+        """Commit the success ledger for artifacts already written to disk."""
+        if set(outputs) != set(output_hashes):
+            raise StepTransitionError(
+                run_id,
+                step_id,
+                "successful outputs require exactly one hash each",
+            )
+        with self.connect() as connection:
+            done = self._finalize_step(
+                connection,
+                run_id,
+                step_id,
+                owner,
+                "status = ?, outputs_json = ?, completed_at = current_timestamp, error_json = null",
+                (StepStatus.SUCCESS.value, json.dumps(outputs, ensure_ascii=False)),
+            )
+            if not done:
+                return False
+            self._record_artifacts(connection, run_id, step_id, outputs, "markdown")
+            for path in outputs:
+                connection.execute(
+                    """
+                    insert into step_output_hashes (run_id, step_id, path, sha256)
+                    values (?, ?, ?, ?)
+                    on conflict(run_id, step_id, path) do update set sha256 = excluded.sha256
+                    """,
+                    (run_id, step_id, path, output_hashes[path]),
+                )
+            connection.execute(
+                """
+                insert into step_consumed_ref_digests (run_id, step_id, sha256)
+                values (?, ?, ?)
+                on conflict(run_id, step_id) do update set sha256 = excluded.sha256
+                """,
+                (run_id, step_id, consumed_ref_digest),
+            )
+            connection.execute(
+                """
+                insert into events (run_id, step_id, event_type, message, payload_json)
+                values (?, ?, 'step.success', ?, '{}')
+                """,
+                (run_id, step_id, f"Completed {step_id}"),
+            )
+        return True
+
     def approve(
         self: Self,
         run_id: str,
@@ -45,9 +101,14 @@ class WorkflowLedgerStore(WorkflowStepStore):
         step_id: str | None,
         event_type: str,
         message: str,
-        payload: dict[str, str] | None = None,
+        payload: Mapping[str, str | list[str]] | None = None,
     ) -> None:
-        event_payload = {} if payload is None else payload
+        message = redact(message)
+        raw_payload: Mapping[str, str | list[str]] = {} if payload is None else payload
+        event_payload: Mapping[str, str | list[str]] = {
+            key: [redact(item) for item in value] if isinstance(value, list) else redact(value)
+            for key, value in raw_payload.items()
+        }
         with self.connect() as connection:
             connection.execute(
                 """
@@ -62,6 +123,25 @@ class WorkflowLedgerStore(WorkflowStepStore):
                     json.dumps(event_payload, ensure_ascii=False),
                 ),
             )
+
+    def record_consumed_ref_digest(self: Self, run_id: str, step_id: str, digest: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                insert into step_consumed_ref_digests (run_id, step_id, sha256)
+                values (?, ?, ?)
+                on conflict(run_id, step_id) do update set sha256 = excluded.sha256
+                """,
+                (run_id, step_id, digest),
+            )
+
+    def get_consumed_ref_digest(self: Self, run_id: str, step_id: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "select sha256 from step_consumed_ref_digests where run_id = ? and step_id = ?",
+                (run_id, step_id),
+            ).fetchone()
+        return None if row is None else str(row["sha256"])
 
     def record_kb_update(
         self: Self,

@@ -1,0 +1,121 @@
+"""Privacy boundary: secrets never persist to SQLite diagnostics or CLI output."""
+
+from __future__ import annotations
+
+import sqlite3
+import sys
+from contextlib import closing
+from pathlib import Path
+
+import pytest
+
+from aicmo.adapters import CommandAdapter
+from aicmo.cli import ingest_inbox
+from aicmo.errors import WorkflowExecutionError
+from aicmo.redaction import redact
+from aicmo.runner import WorkflowRunner
+from aicmo.store import WorkflowStore
+
+_BEARER_SECRET = "sk-live-LEAKME123456"
+_AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
+_STDERR_SCRIPT = (
+    "import sys\n"
+    f'sys.stderr.write("Authorization: Bearer {_BEARER_SECRET}\\n")\n'
+    f'sys.stderr.write("api_key={_AWS_KEY}\\n")\n'
+    "sys.exit(3)\n"
+)
+
+_INPUTS = {"client": "sample-client-a", "topic": "보안 점검"}
+
+
+def _persisted_diagnostics(db: Path) -> str:
+    with closing(sqlite3.connect(db)) as connection:
+        connection.row_factory = sqlite3.Row
+        events = [
+            f"{row['message']} {row['payload_json']}"
+            for row in connection.execute("select message, payload_json from events")
+        ]
+        errors = [
+            row["error_json"] or "" for row in connection.execute("select error_json from steps")
+        ]
+    return "\n".join(events + errors)
+
+
+def test_failed_executor_stderr_secrets_absent_from_events(repo_root: Path) -> None:
+    db = repo_root / ".aicmo" / "runs.sqlite3"
+    runner = WorkflowRunner(
+        repo_root=repo_root,
+        store=WorkflowStore(db),
+        adapter=CommandAdapter(command=(sys.executable, "-c", _STDERR_SCRIPT)),
+    )
+
+    result = runner.run("blog-article", "r_privacy", _INPUTS)
+
+    blob = _persisted_diagnostics(db)
+    assert result.status == "failed"
+    assert _BEARER_SECRET not in blob
+    assert _AWS_KEY not in blob
+    # Diagnostics stay useful and legitimate client context stays intact.
+    assert "executor exited 3" in blob
+    assert "보안 점검" in blob
+
+
+def test_ingest_dry_run_masks_signed_url_values(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    inbox = tmp_path / "inbox" / "sample-client-a"
+    inbox.mkdir(parents=True)
+    (inbox / "sources.txt").write_text(
+        "https://cdn.example.com/report.pdf?X-Amz-Signature=SECSIG99&X-Amz-Credential=AKIACRED7\n",
+        encoding="utf-8",
+    )
+
+    ingest_inbox(client="sample-client-a", dry_run=True, repo=tmp_path)
+
+    flat = capsys.readouterr().out.replace("\n", "")
+    assert "cdn.example.com" in flat
+    assert "SECSIG99" not in flat
+    assert "AKIACRED7" not in flat
+
+
+def test_raw_credential_inputs_rejected(repo_root: Path) -> None:
+    runner = WorkflowRunner(
+        repo_root=repo_root,
+        store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
+    )
+
+    with pytest.raises(WorkflowExecutionError, match="credential"):
+        runner.run(
+            "blog-article",
+            "r_rawsecret",
+            {"client": "sample-client-a", "topic": f"use Bearer {_BEARER_SECRET}"},
+        )
+
+
+def test_env_reference_inputs_accepted(repo_root: Path) -> None:
+    runner = WorkflowRunner(
+        repo_root=repo_root,
+        store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
+    )
+
+    result = runner.run(
+        "blog-article",
+        "r_envref",
+        {"client": "sample-client-a", "topic": "env:BLOG_TOPIC_TOKEN"},
+    )
+
+    assert result.status == "success"
+
+
+def test_redaction_preserves_legitimate_content() -> None:
+    korean = "문의: hong@example.com / 010-1234-5678 김대리, 서울 강남구"
+    assert redact(korean) == korean
+
+    masked = redact(f"Authorization: Bearer {_BEARER_SECRET}")
+    assert _BEARER_SECRET not in masked
+    assert "Bearer" in masked
+
+    signed = redact("https://x.example/a.pdf?X-Amz-Signature=abc123&page=2")
+    assert "abc123" not in signed
+    assert "page=2" in signed

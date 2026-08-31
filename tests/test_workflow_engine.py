@@ -5,9 +5,21 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from aicmo.adapters import AgentRequest, AgentResult
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 from tests.conftest import lines, write_text
+
+
+class FailDraftOnceAdapter:
+    def __init__(self) -> None:
+        self.failed = False
+
+    def generate(self, request: AgentRequest, /) -> AgentResult:
+        if request.step_id == "draft" and not self.failed:
+            self.failed = True
+            return AgentResult(text="", ok=False, detail="injected draft failure")
+        return AgentResult(text=f"completed {request.step_id}")
 
 
 def test_blog_workflow_run_is_idempotent_and_records_artifacts(repo_root: Path) -> None:
@@ -54,9 +66,11 @@ def test_blog_workflow_run_is_idempotent_and_records_artifacts(repo_root: Path) 
 
 def test_resume_continues_from_failed_step_without_repeating_successes(repo_root: Path) -> None:
     db_path = repo_root / ".aicmo" / "runs.sqlite3"
-    prompt = repo_root / "playbooks" / "03-content" / "blog-article.md"
-    prompt.unlink()
-    runner = WorkflowRunner(repo_root=repo_root, store=WorkflowStore(db_path))
+    runner = WorkflowRunner(
+        repo_root=repo_root,
+        store=WorkflowStore(db_path),
+        adapter=FailDraftOnceAdapter(),
+    )
 
     failed = runner.run(
         workflow_id="blog-article",
@@ -67,7 +81,6 @@ def test_resume_continues_from_failed_step_without_repeating_successes(repo_root
     assert failed.status == "failed"
     assert failed.failed_step_id == "draft"
 
-    write_text(prompt, "# Blog Article\n\nDraft the article.\n")
     resumed = runner.resume("run_retry")
 
     assert resumed.status == "success"

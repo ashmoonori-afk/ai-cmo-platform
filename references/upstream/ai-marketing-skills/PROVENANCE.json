@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "reference_set": "ai-marketing-skills-curated",
+  "source": {
+    "url": "https://github.com/ericosiu/ai-marketing-skills",
+    "branch": "main",
+    "commit": "6a6626727dc10644d8c4e54c39da207fea5d1089",
+    "tree": "8e4c27c18972d55baf344c85cfbface786c9ba9c",
+    "version": "1.0.0",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2026 Single Grain",
+    "retrieval_date": "2026-07-31"
+  },
+  "selected_files": [
+    {
+      "original_path": "closed-loop-analytics-upgrade/SKILL.md",
+      "local_path": "curated/closed-loop-evaluation-method.md",
+      "modification_status": "modified/sanitized for reference-only use"
+    },
+    {
+      "original_path": "personal-strategic-signal-intelligence/SKILL.md",
+      "local_path": "curated/personal-strategic-signal-intelligence-method.md",
+      "modification_status": "modified/sanitized for reference-only use"
+    },
+    {
+      "original_path": "personal-strategic-signal-intelligence/README.md",
+      "local_path": "curated/personal-strategic-signal-intelligence-method.md",
+      "modification_status": "modified/sanitized for reference-only use"
+    },
+    {
+      "original_path": "content-ops/scoring-rubrics/content-quality.md",
+      "local_path": "curated/content-quality-rubric.md",
+      "modification_status": "modified/sanitized for reference-only use"
+    },
+    {
+      "original_path": "content-ops/scoring-rubrics/conversion-quality.md",
+      "local_path": "curated/conversion-quality-rubric.md",
+      "modification_status": "modified/sanitized for reference-only use"
+    },
+    {
+      "original_path": "content-ops/scoring-rubrics/evaluation-quality.md",
+      "local_path": "curated/evaluation-quality-rubric.md",
+      "modification_status": "modified/sanitized for reference-only use"
+    },
+    {
+      "original_path": "content-ops/scoring-rubrics/strategic-quality.md",
+      "local_path": "curated/strategic-quality-rubric.md",
+      "modification_status": "modified/sanitized for reference-only use"
+    },
+    {
+      "original_path": "content-ops/scoring-rubrics/visual-quality.md",
+      "local_path": "curated/visual-quality-rubric.md",
+      "modification_status": "modified/sanitized for reference-only use"
+    }
+  ],
+  "excluded_executable_categories": [
+    "Python source (*.py)",
+    "TypeScript source (*.ts)",
+    "shell source (*.sh)",
+    "Makefile and requirements files",
+    "environment examples",
+    "clone-site assets",
+    "telemetry components",
+    "sales or outbound execution components",
+    "webhook components",
+    "video pipeline components"
+  ],
+  "trust_policy": {
+    "classification": "untrusted quarantined reference",
+    "permitted_use": "manual review of sanitized methodology",
+    "load_by_default": false,
+    "network_allowed": false,
+    "execution_approved": false,
+    "activation": "none",
+    "active_surface_linking": false,
+    "relocation_requires_new_security_review": true
+  }
+}

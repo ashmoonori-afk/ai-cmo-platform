@@ -17,6 +17,9 @@ from ._shared import (
 from ._shared import (
     parse_input_pairs as parse_input_pairs,
 )
+from .run_cmds import (
+    ingest_inbox as ingest_inbox,
+)
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 

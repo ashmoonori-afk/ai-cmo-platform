@@ -4,47 +4,78 @@ import json
 import sqlite3
 from typing import Self
 
+from pydantic import TypeAdapter, ValidationError
+
 from aicmo.db import StoreDb
 from aicmo.errors import RunConflictError, RunNotFoundError
 from aicmo.models import RunStatus, StepStatus, WorkflowSpec
+from aicmo.spec import RUN_SPEC_REVISION, run_spec_digest
+
+_RUN_INPUTS_ADAPTER = TypeAdapter(dict[str, str])
 
 
 class WorkflowRunStore(StoreDb):
-    def register_workflow(self: Self, spec: WorkflowSpec) -> None:
+    def _register_workflow(
+        self: Self,
+        connection: sqlite3.Connection,
+        spec: WorkflowSpec,
+    ) -> None:
         spec_path = "" if spec.source_path is None else str(spec.source_path)
+        connection.execute(
+            """
+            insert into workflows (workflow_id, name, spec_path)
+            values (?, ?, ?)
+            on conflict(workflow_id) do update set
+                name = excluded.name,
+                spec_path = excluded.spec_path,
+                updated_at = current_timestamp
+            """,
+            (spec.id, spec.name, spec_path),
+        )
+
+    def register_workflow(self: Self, spec: WorkflowSpec) -> None:
         with self.connect() as connection:
-            connection.execute(
-                """
-                insert into workflows (workflow_id, name, spec_path)
-                values (?, ?, ?)
-                on conflict(workflow_id) do update set
-                    name = excluded.name,
-                    spec_path = excluded.spec_path,
-                    updated_at = current_timestamp
-                """,
-                (spec.id, spec.name, spec_path),
-            )
+            self._register_workflow(connection, spec)
 
     def ensure_run(self: Self, spec: WorkflowSpec, run_id: str, inputs: dict[str, str]) -> None:
-        self.register_workflow(spec)
+        spec_digest = run_spec_digest(spec, inputs)
         inputs_json = json.dumps(inputs, ensure_ascii=False, sort_keys=True)
         with self.connect() as connection:
-            connection.execute(
-                """
-                insert into runs (run_id, workflow_id, status, inputs_json)
-                values (?, ?, ?, ?)
-                on conflict(run_id) do nothing
-                """,
-                (run_id, spec.id, RunStatus.RUNNING.value, inputs_json),
-            )
+            connection.execute("begin immediate")
             row = connection.execute(
-                "select workflow_id, inputs_json from runs where run_id = ?",
+                "select workflow_id, spec_digest, spec_revision from runs where run_id = ?",
                 (run_id,),
             ).fetchone()
-            if row["workflow_id"] != spec.id:
-                raise RunConflictError(run_id, "existing run uses a different workflow")
-            if row["inputs_json"] != inputs_json:
-                raise RunConflictError(run_id, "existing run uses different inputs")
+            if row is None:
+                self._register_workflow(connection, spec)
+                connection.execute(
+                    """
+                    insert into runs (
+                        run_id, workflow_id, status, inputs_json, spec_digest, spec_revision
+                    )
+                    values (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        spec.id,
+                        RunStatus.RUNNING.value,
+                        inputs_json,
+                        spec_digest,
+                        RUN_SPEC_REVISION,
+                    ),
+                )
+            elif row["workflow_id"] != spec.id:
+                raise RunConflictError(run_id, "workflow changed; start a new run")
+            elif row["spec_digest"] is None or row["spec_revision"] is None:
+                raise RunConflictError(
+                    run_id,
+                    "legacy run has no specification identity; start a new run",
+                )
+            elif row["spec_revision"] != RUN_SPEC_REVISION or row["spec_digest"] != spec_digest:
+                raise RunConflictError(
+                    run_id,
+                    "workflow, role/prompt, or inputs changed; start a new run",
+                )
             for order, step in enumerate(spec.steps):
                 connection.execute(
                     """
@@ -62,6 +93,31 @@ class WorkflowRunStore(StoreDb):
             raise RunNotFoundError(run_id)
         return row
 
+    def ensure_phase_git_mode(self: Self, run_id: str, mode: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                insert into run_policies (run_id, phase_git_mode)
+                values (?, ?)
+                on conflict(run_id) do nothing
+                """,
+                (run_id, mode),
+            )
+            row = connection.execute(
+                "select phase_git_mode from run_policies where run_id = ?",
+                (run_id,),
+            ).fetchone()
+        if row["phase_git_mode"] != mode:
+            raise RunConflictError(run_id, "existing run uses a different phase-git policy")
+
+    def get_phase_git_mode(self: Self, run_id: str) -> str:
+        with self.connect() as connection:
+            row = connection.execute(
+                "select phase_git_mode from run_policies where run_id = ?",
+                (run_id,),
+            ).fetchone()
+        return "off" if row is None else str(row["phase_git_mode"])
+
     def list_runs(self: Self) -> list[sqlite3.Row]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -71,8 +127,11 @@ class WorkflowRunStore(StoreDb):
 
     def get_inputs(self: Self, run_id: str) -> dict[str, str]:
         row = self.get_run(run_id)
-        loaded = json.loads(row["inputs_json"])
-        return {str(key): str(value) for key, value in loaded.items()}
+        try:
+            return _RUN_INPUTS_ADAPTER.validate_json(row["inputs_json"], strict=True)
+        except ValidationError:
+            reason = "persisted inputs must be a JSON object with string values; start a new run"
+            raise RunConflictError(run_id, reason) from None
 
     def _mark_run(
         self: Self,

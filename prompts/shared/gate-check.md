@@ -72,12 +72,14 @@ instead of inventing a brand score.
 
 ---
 
-## 출력 형식
+## 워크플로우 러너 출력 형식
 
-검증 완료 시 아래 형식으로 결과 보고:
+`policy_version=aicmo.reviewer-decision.v1` 요청에는 아래 JSON 객체 하나만 반환합니다.
+코드 펜스나 다른 문장을 붙이지 않습니다.
 
-**✅ PASS** 또는 **⚠️ WARN** 또는 **❌ FAIL**
+```json
+{"schema_version":"aicmo.reviewer-decision.v1","verdict":"PASS","reason":"1~500자의 한 줄 판정 근거"}
+```
 
-- 검증 항목: N/N 통과
-- 경고: (있으면 나열)
-- 실패: (있으면 나열 + 구체적 수정 지시)
+`verdict`는 `PASS`, `WARN`, `FAIL` 중 하나입니다. 선택형 점수는 판정을 덮어쓰지 않으며,
+안전 게이트 실패는 항상 `FAIL`입니다. 재시도와 `ESCALATE`는 러너/운영 정책이 담당합니다.

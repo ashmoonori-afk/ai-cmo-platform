@@ -15,18 +15,17 @@ from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 
 
-def make_request(**overrides: str) -> AgentRequest:
-    base = {
-        "step_id": "draft",
-        "run_id": "run_x",
-        "workflow_id": "blog-article",
-        "role": "copywriter",
-        "role_contract": "ROLE_CONTRACT_MARKER",
-        "prompt_source": "PROMPT_SOURCE_MARKER",
-        "inputs_json": '{"client": "acme"}',
-    }
-    base.update(overrides)
-    return AgentRequest(**base)
+def make_request(model: str = "") -> AgentRequest:
+    return AgentRequest(
+        step_id="draft",
+        run_id="run_x",
+        workflow_id="blog-article",
+        role="copywriter",
+        role_contract="ROLE_CONTRACT_MARKER",
+        prompt_source="PROMPT_SOURCE_MARKER",
+        inputs_json='{"client": "acme"}',
+        model=model,
+    )
 
 
 @dataclass(frozen=True, slots=True)

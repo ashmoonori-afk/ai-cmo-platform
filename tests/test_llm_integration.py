@@ -2,16 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import pytest
 
 from aicmo.adapters import AgentRequest, AgentResult
 from aicmo.anthropic_adapter import AnthropicAdapter, resolve_model
+from aicmo.errors import AicmoError
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 from tests.conftest import lines, write_text
-
-if TYPE_CHECKING:
-    import pytest
 
 
 @dataclass
@@ -37,19 +36,17 @@ class UnavailableReviewAdapter:
         return AgentResult(text="", ok=False, detail="reviewer unavailable")
 
 
-def make_request(**overrides: str) -> AgentRequest:
-    base = {
-        "step_id": "draft",
-        "run_id": "r",
-        "workflow_id": "w",
-        "role": "copywriter",
-        "role_contract": "ROLE_CONTRACT",
-        "prompt_source": "PROMPT_SOURCE",
-        "inputs_json": "{}",
-        "model": "",
-    }
-    base.update(overrides)
-    return AgentRequest(**base)
+def make_request(model: str = "") -> AgentRequest:
+    return AgentRequest(
+        step_id="draft",
+        run_id="r",
+        workflow_id="w",
+        role="copywriter",
+        role_contract="ROLE_CONTRACT",
+        prompt_source="PROMPT_SOURCE",
+        inputs_json="{}",
+        model=model,
+    )
 
 
 # ---- G001: per-step model selection ----
@@ -112,9 +109,42 @@ class _FakeClient:
 
 def test_resolve_model_aliases() -> None:
     assert resolve_model("opus") == "claude-opus-4-8"
+    assert resolve_model("sonnet") == "claude-sonnet-4-6"
     assert resolve_model("haiku") == "claude-haiku-4-5-20251001"
+    assert resolve_model("fable") == "claude-fable-5"
+    assert resolve_model("claude-opus-4-8") == "claude-opus-4-8"
     assert resolve_model("claude-sonnet-4-6") == "claude-sonnet-4-6"
+    assert resolve_model("claude-haiku-4-5-20251001") == "claude-haiku-4-5-20251001"
+    assert resolve_model("claude-fable-5") == "claude-fable-5"
     assert resolve_model("") == "claude-sonnet-4-6"
+    assert resolve_model("   ") == "claude-sonnet-4-6"
+
+
+def test_anthropic_adapter_client_construction_failure_returns_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def explode() -> None:
+        message = "client construction exploded"
+        raise RuntimeError(message)
+
+    monkeypatch.setattr("aicmo.anthropic_adapter._make_client", explode)
+    adapter = AnthropicAdapter()
+
+    result = adapter.generate(make_request(model="sonnet"))
+
+    assert result.ok is False
+    assert result.detail.startswith("unavailable:")
+    assert "client construction exploded" in result.detail
+
+
+def test_anthropic_adapter_rejects_unknown_model_before_request() -> None:
+    messages = _FakeMessages(text="SHOULD NOT BE REQUESTED")
+    adapter = AnthropicAdapter(client=_FakeClient(messages=messages))
+
+    with pytest.raises(AicmoError, match="unknown Anthropic model alias"):
+        adapter.generate(make_request(model="claude-sonnet-4-6-typo"))
+
+    assert messages.captured == {}
 
 
 def test_anthropic_adapter_with_fake_client() -> None:
@@ -148,7 +178,12 @@ def test_semantic_review_fail_fails_the_run(repo_root: Path) -> None:
     runner = WorkflowRunner(
         repo_root=repo_root,
         store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
-        review_adapter=VerdictAdapter(verdict="FAIL: the draft is too thin"),
+        review_adapter=VerdictAdapter(
+            verdict=(
+                '{"schema_version":"aicmo.reviewer-decision.v1",'
+                '"verdict":"FAIL","reason":"machine-readable review"}'
+            ),
+        ),
     )
 
     result = runner.run(
@@ -165,7 +200,12 @@ def test_semantic_review_pass_passes_the_run(repo_root: Path) -> None:
     runner = WorkflowRunner(
         repo_root=repo_root,
         store=WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3"),
-        review_adapter=VerdictAdapter(verdict="PASS — clear and complete"),
+        review_adapter=VerdictAdapter(
+            verdict=(
+                '{"schema_version":"aicmo.reviewer-decision.v1",'
+                '"verdict":"PASS","reason":"machine-readable review"}'
+            ),
+        ),
     )
 
     result = runner.run(

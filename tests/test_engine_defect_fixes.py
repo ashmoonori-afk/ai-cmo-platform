@@ -205,65 +205,6 @@ def test_non_workflow_error_in_step_is_recorded_as_failed(repo_root: Path) -> No
     assert runner.store.get_step_status("run_binary", "load_bin") == StepStatus.FAILED
 
 
-def test_resume_reconciles_spec_that_gained_a_step(repo_root: Path) -> None:
-    """Resume must create rows for steps added to the spec after the run started."""
-    spec_path = repo_root / "workflows" / "growing.workflow.yaml"
-    write_text(
-        spec_path,
-        lines(
-            "id: growing",
-            "name: Growing",
-            "inputs:",
-            "  client: required",
-            "steps:",
-            "  - id: first",
-            "    type: file.load",
-            "    paths:",
-            "      - clients/${client}/config.md",
-            "    outputs:",
-            "      - artifacts/${run_id}/first.md",
-        ),
-    )
-    db_path = repo_root / ".aicmo" / "runs.sqlite3"
-    runner = WorkflowRunner(repo_root=repo_root, store=WorkflowStore(db_path))
-
-    first_run = runner.run(
-        workflow_id="growing",
-        run_id="run_growing",
-        inputs={"client": "sample-client-a"},
-    )
-    assert first_run.status == "success"
-
-    write_text(
-        spec_path,
-        lines(
-            "id: growing",
-            "name: Growing",
-            "inputs:",
-            "  client: required",
-            "steps:",
-            "  - id: first",
-            "    type: file.load",
-            "    paths:",
-            "      - clients/${client}/config.md",
-            "    outputs:",
-            "      - artifacts/${run_id}/first.md",
-            "  - id: second",
-            "    type: agent",
-            "    role: reporter",
-            "    depends_on: [first]",
-            "    outputs:",
-            "      - artifacts/${run_id}/second.md",
-        ),
-    )
-
-    resumed = runner.resume("run_growing")
-
-    assert resumed.status == "success"
-    assert (repo_root / "artifacts" / "run_growing" / "second.md").exists()
-    assert runner.store.get_step_status("run_growing", "second") == StepStatus.SUCCESS
-
-
 def test_spec_loader_rejects_empty_output_template(repo_root: Path) -> None:
     write_text(
         repo_root / "workflows" / "empty-output.workflow.yaml",

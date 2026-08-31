@@ -3,15 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Self
 
-from aicmo.errors import StepTransitionError, WorkflowExecutionError
-from aicmo.models import (
-    ApprovalDecision,
-    RunResult,
-    StepStatus,
-    WorkflowSpec,
-    WorkflowStep,
+from aicmo.errors import (
+    RunConflictError,
+    StepTransitionError,
+    WorkflowExecutionError,
+    WorkflowSpecError,
 )
+from aicmo.models import ApprovalDecision, RunResult, StepStatus, WorkflowSpec, WorkflowStep
 from aicmo.paths import parse_safe_id
+from aicmo.redaction import contains_raw_secret
 from aicmo.spec import load_workflow_spec
 from aicmo.step_executor import WorkflowStepExecutor
 
@@ -33,9 +33,13 @@ class WorkflowRunner(WorkflowStepExecutor):
     def resume(self: Self, run_id: str) -> RunResult:
         self.store.initialize()
         run = self.store.get_run(run_id)
-        spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
         inputs = self.store.get_inputs(run_id)
-        self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
+        try:
+            spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
+            self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
+        except WorkflowSpecError as exc:
+            reason = f"current specification cannot be verified ({exc}); start a new run"
+            raise RunConflictError(run_id, reason) from None
         self.store.record_event(run_id, None, "run.resumed", f"Resumed {run_id}")
         return self._execute(spec, run_id, inputs)
 
@@ -87,9 +91,7 @@ class WorkflowRunner(WorkflowStepExecutor):
                 continue
             previous = self.store.get_output_hashes(run_id, step_id)
             current = self._hash_outputs(outputs)
-            changed.extend(
-                path for path, digest in current.items() if previous.get(path) != digest
-            )
+            changed.extend(path for path, digest in current.items() if previous.get(path) != digest)
             missing = [path for path in outputs if path not in current]
             if missing:
                 # A deleted output cannot be blessed; resume will reopen the whole
@@ -117,12 +119,16 @@ class WorkflowRunner(WorkflowStepExecutor):
 
     def _execute(self: Self, spec: WorkflowSpec, run_id: str, inputs: dict[str, str]) -> RunResult:
         context = {**inputs, "run_id": run_id, "workflow_id": spec.id}
+        self._reopen_stale_successes(spec, run_id, context)
         for step in spec.execution_order():
             status = self.store.get_step_status(run_id, step.id)
             if status == StepStatus.SUCCESS:
-                if self._successful_outputs_present(run_id, step, context):
+                hash_index_complete = set(self.store.get_step_outputs(run_id, step.id)) == set(
+                    self.store.get_output_hashes(run_id, step.id),
+                )
+                if hash_index_complete and self._successful_outputs_present(run_id, step, context):
                     continue
-                self.store.reopen_step(run_id, step.id)
+                self._reopen_successes_and_dependents(spec, run_id, {step.id})
                 status = StepStatus.PENDING
             if not self._dependencies_done(run_id, step):
                 return self._fail(
@@ -132,7 +138,8 @@ class WorkflowRunner(WorkflowStepExecutor):
                     owner=None,
                 )
             try:
-                outputs = self._execute_step(run_id, step, context, status)
+                artifact_refs = self._artifact_refs(run_id, step)
+                outputs = self._execute_step(run_id, step, context, status, artifact_refs)
             except WorkflowExecutionError as exc:
                 return self._fail(
                     run_id,
@@ -140,7 +147,7 @@ class WorkflowRunner(WorkflowStepExecutor):
                     str(exc),
                     owner=self._owner_for_status(status),
                 )
-            except Exception as exc:  # noqa: BLE001 — record any step failure, never strand the run
+            except Exception as exc:  # noqa: BLE001  # noqa: BROAD_EXCEPT_OK
                 message = f"unexpected error: {type(exc).__name__}: {exc}"
                 return self._fail(
                     run_id,
@@ -152,7 +159,14 @@ class WorkflowRunner(WorkflowStepExecutor):
                 self.store.get_step_status(run_id, step.id) == StepStatus.WAITING_APPROVAL
                 and self.store.approval_for(run_id, step.id) is None
             )
-            after_step = self._after_step(run_id, step, status, outputs, waiting_without_approval)
+            after_step = self._after_step(
+                run_id,
+                step,
+                status,
+                outputs,
+                waiting_without_approval,
+                self._consumed_ref_digest(artifact_refs),
+            )
             if after_step is not None:
                 return after_step
         self.store.mark_run_success(run_id)
@@ -180,6 +194,11 @@ class WorkflowRunner(WorkflowStepExecutor):
         if undeclared:
             step_id = "inputs"
             raise WorkflowExecutionError(step_id, f"undeclared inputs: {', '.join(undeclared)}")
+        for key, value in inputs.items():
+            if contains_raw_secret(value):
+                step_id = "inputs"
+                msg = f"input {key!r} contains a raw credential; pass env:NAME references instead"
+                raise WorkflowExecutionError(step_id, msg)
         client = inputs.get("client")
         if "client" in spec.inputs and client:
             slug = parse_safe_id("client", client)
@@ -222,20 +241,21 @@ class WorkflowRunner(WorkflowStepExecutor):
         status: StepStatus,
         outputs: list[str],
         waiting_without_approval: bool,
+        consumed_ref_digest: str,
     ) -> RunResult | None:
         if waiting_without_approval:
             if not self._phase_completed(run_id, step, outputs):
                 return self._fail(run_id, step.id, "phase automation failed", owner=None)
             return RunResult(status=StepStatus.WAITING_APPROVAL.value, run_id=run_id)
-        if not self.store.mark_step_success(
+        if not self.store.complete_step_success(
             run_id,
             step.id,
             outputs,
+            self._hash_outputs(outputs),
+            consumed_ref_digest,
             owner=self._owner_for_status(status),
         ):
             return self._lost_lease(run_id, step.id, "step lease lost before success")
-        self.store.record_output_hashes(run_id, step.id, self._hash_outputs(outputs))
-        self.store.record_event(run_id, step.id, "step.success", f"Completed {step.id}")
         if not self._phase_completed(run_id, step, outputs):
             return self._fail(run_id, step.id, "phase automation failed", owner=None)
         return None
@@ -245,7 +265,7 @@ class WorkflowRunner(WorkflowStepExecutor):
             return True
         try:
             self.phase_completed(step, tuple(outputs))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001  # noqa: BROAD_EXCEPT_OK
             message = f"phase automation failed: {type(exc).__name__}: {exc}"
             self.store.record_event(run_id, step.id, "phase.automation_failed", message)
             return False

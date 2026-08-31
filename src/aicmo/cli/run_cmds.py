@@ -10,6 +10,8 @@ import typer
 from aicmo.feedback import record_artifact_feedback
 from aicmo.ingest import archive_item, retain_failed_urls, scan_inbox
 from aicmo.phase_git import PhaseGitMode, run_phase_git
+from aicmo.redaction import redact
+from aicmo.store import WorkflowStore
 
 from ._options import (
     AnthropicOpt,
@@ -24,7 +26,9 @@ from ._shared import (
     EXIT_FAILED,
     compact_inputs,
     console,
+    default_db,
     emit_phase_deliverables,
+    emit_phase_git_result,
     emit_result,
     make_runner,
     parse_input_pairs,
@@ -103,6 +107,8 @@ def run_workflow(
         emit_phase_deliverables,
         phase_git_callback(repo_root, phase_git, run_id_value),
     )
+    runner.store.initialize()
+    runner.store.ensure_phase_git_mode(run_id_value, phase_git.value)
     result = runner.run(workflow_id=workflow_id, run_id=run_id_value, inputs=inputs)
     if feedback and client:
         path = record_artifact_feedback(
@@ -113,11 +119,9 @@ def run_workflow(
             feedback,
         )
         console.print(f"feedback: {path.relative_to(repo_root)}")
-        for line in run_phase_git(repo_root, phase_git, run_id_value, "feedback"):
-            console.print(line)
+        emit_phase_git_result(run_phase_git(repo_root, phase_git, run_id_value, "feedback"))
     elif phase_git != PhaseGitMode.OFF:
-        for line in run_phase_git(repo_root, phase_git, run_id_value, "workflow"):
-            console.print(line)
+        emit_phase_git_result(run_phase_git(repo_root, phase_git, run_id_value, "workflow"))
     emit_result(result)
 
 def ingest_inbox(
@@ -150,7 +154,10 @@ def ingest_inbox(
         for item in items:
             console.print(f"{item.source_file.name}: {len(item.urls)} url(s)", markup=False)
             for url in item.urls:
-                console.print(f"  would run content-engine --input source_url={url}", markup=False)
+                console.print(
+                    f"  would run content-engine --input source_url={redact(url)}",
+                    markup=False,
+                )
         return
     runner = make_runner(
         repo_root,
@@ -164,7 +171,7 @@ def ingest_inbox(
         failed_urls: list[str] = []
         for url in item.urls:
             run_id = generated_run_id()
-            console.print(f"{item.source_file.name} -> {run_id}: {url}", markup=False)
+            console.print(f"{item.source_file.name} -> {run_id}: {redact(url)}", markup=False)
             try:
                 result = runner.run(
                     workflow_id="content-engine",
@@ -172,7 +179,7 @@ def ingest_inbox(
                     inputs={"client": client, "source_url": url},
                 )
             except Exception as exc:  # noqa: BLE001 — keep ingesting the remaining URLs
-                console.print(f"  failed: {type(exc).__name__}: {exc}", markup=False)
+                console.print(redact(f"  failed: {type(exc).__name__}: {exc}"), markup=False)
                 failed_urls.append(url)
                 continue
             console.print(f"  {result.status}", markup=False)
@@ -201,6 +208,13 @@ def ingest_inbox(
 
 def resume_run(
     run_id: Annotated[str, typer.Argument()],
+    phase_git: Annotated[
+        PhaseGitMode | None,
+        typer.Option(
+            "--phase-git",
+            help="Persisted phase-Git policy; omit to reuse the mode selected by run.",
+        ),
+    ] = None,
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
     db: Annotated[Path | None, typer.Option("--db")] = None,
     executor_cmd: ExecutorCmdOpt = None,
@@ -210,12 +224,20 @@ def resume_run(
     review_cmd: ReviewCmdOpt = None,
     review_anthropic: ReviewAnthropicOpt = False,
 ) -> None:
+    repo_root = repo.resolve()
+    policy_store = WorkflowStore(db or default_db(repo_root))
+    policy_store.initialize()
+    policy_store.get_run(run_id)
+    stored_mode = PhaseGitMode(policy_store.get_phase_git_mode(run_id))
+    selected_mode = stored_mode if phase_git is None else phase_git
+    policy_store.ensure_phase_git_mode(run_id, selected_mode.value)
     runner = make_runner(
-        repo,
+        repo_root,
         db,
         select_adapter(executor, executor_cmd, anthropic),
         select_review_adapter(review, review_cmd, review_anthropic),
         emit_phase_deliverables,
+        phase_git_callback(repo_root, selected_mode, run_id),
     )
     result = runner.resume(run_id)
     emit_result(result)

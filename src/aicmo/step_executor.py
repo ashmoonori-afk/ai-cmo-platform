@@ -4,33 +4,49 @@ import hashlib
 import json
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from concurrent.futures import Future, InvalidStateError
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import assert_never
 from uuid import uuid4
 
-from aicmo.adapters import AgentRequest, LocalAdapter, StepAdapter
+from aicmo.adapters import (
+    ARTIFACT_REF_CONTENT_BUDGET,
+    ARTIFACT_REF_TRUNCATION_MARKER,
+    AgentRequest,
+    ArtifactRef,
+    LocalAdapter,
+    StepAdapter,
+)
 from aicmo.errors import WorkflowExecutionError
-from aicmo.gate import allowed_statuses, evaluate_artifacts, parse_verdict, stricter
+from aicmo.gate import (
+    REVIEW_DECISION_SCHEMA_VERSION,
+    allowed_statuses,
+    evaluate_artifacts,
+    stricter,
+)
 from aicmo.models import (
     ApprovalDecision,
     GateDecision,
     StepStatus,
     StepType,
+    WorkflowSpec,
     WorkflowStep,
 )
 from aicmo.paths import resolve_inside_repo
+from aicmo.reviewer_contract import (
+    REVIEW_CLIENT_CRITERIA,
+    REVIEW_CLIENT_CRITERIA_LIMIT,
+    REVIEW_CONTRACT,
+    REVIEW_INPUT_LIMIT,
+    resolve_reviewer_output,
+)
 from aicmo.store import WorkflowStore
 
-_REVIEW_CONTRACT = (
-    "Judge the artifact against the quality gate: clarity, completeness, accuracy, brand "
-    "fit, and safety. Reply with exactly one verdict word — PASS, WARN, or FAIL — then a "
-    "one-line reason."
-)
-_REVIEW_INPUT_LIMIT = 8000
 PhaseAnnouncer = Callable[[WorkflowStep, tuple[str, ...]], None]
 PhaseCompletionHook = Callable[[WorkflowStep, tuple[str, ...]], None]
+type _LeaseSignal = Future[None]
 
 
 def _sha256(path: Path) -> str:
@@ -55,46 +71,88 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         context: dict[str, str],
         status: StepStatus,
+        artifact_refs: tuple[ArtifactRef, ...],
     ) -> list[str]:
         if self.phase_announcer is not None:
             self.phase_announcer(step, self._declared_outputs(step, context))
-        if status != StepStatus.WAITING_APPROVAL and not self.store.mark_step_running(
+        owns_lease = status != StepStatus.WAITING_APPROVAL
+        if owns_lease and not self.store.mark_step_running(
             run_id,
             step,
             self.runner_token,
             self.lease_ttl_seconds,
         ):
             raise WorkflowExecutionError(step.id, "step is held by another live runner")
-        with self._lease_heartbeat(run_id, step.id):
+        with self._lease_heartbeat(run_id, step.id, active=owns_lease) as lease_signal:
             match step.type:
                 case StepType.FILE_LOAD:
-                    return self._run_file_load(step, context)
+                    return self._run_file_load(step, context, lease_signal)
                 case StepType.AGENT:
-                    return self._run_agent(step, context)
+                    return self._run_agent(step, context, artifact_refs, lease_signal)
                 case StepType.GATE:
-                    return self._run_gate(run_id, step, context, status)
+                    return self._run_gate(run_id, step, context, status, lease_signal)
                 case StepType.KB_UPDATE:
-                    return self._run_kb_update(run_id, step, context)
+                    return self._run_kb_update(run_id, step, context, lease_signal)
                 case unreachable:
                     assert_never(unreachable)
 
     @contextmanager
-    def _lease_heartbeat(self, run_id: str, step_id: str) -> Iterator[None]:
+    def _lease_heartbeat(
+        self,
+        run_id: str,
+        step_id: str,
+        *,
+        active: bool,
+    ) -> Iterator[_LeaseSignal]:
+        failure = Future[None]()
+        if not active:
+            failure.set_result(None)
+            yield failure
+            return
         stop = threading.Event()
 
         def beat() -> None:
             while not stop.wait(self.heartbeat_interval_seconds):
-                self.store.renew_lease(run_id, step_id, self.runner_token)
+                try:
+                    self._renew_lease(run_id, step_id)
+                except WorkflowExecutionError as exc:
+                    with suppress(InvalidStateError):
+                        failure.set_exception(exc)
+                    return
+                except Exception as exc:  # noqa: BLE001  # noqa: BROAD_EXCEPT_OK
+                    reason = f"lease heartbeat failed: {type(exc).__name__}: {exc}"
+                    with suppress(InvalidStateError):
+                        failure.set_exception(WorkflowExecutionError(step_id, reason))
+                    return
 
         thread = threading.Thread(target=beat, daemon=True)
         thread.start()
         try:
-            yield
+            yield failure
         finally:
             stop.set()
             thread.join(timeout=self.heartbeat_interval_seconds + 1.0)
+        failure.result() if failure.done() else None
 
-    def _run_file_load(self, step: WorkflowStep, context: dict[str, str]) -> list[str]:
+    def _check_lease(self, run_id: str, step_id: str, failure: _LeaseSignal) -> bool:
+        if failure.done():
+            failure.result()
+            return False
+        self._renew_lease(run_id, step_id)
+        if failure.done():
+            failure.result()
+        return True
+
+    def _renew_lease(self, run_id: str, step_id: str) -> None:
+        if not self.store.renew_lease(run_id, step_id, self.runner_token):
+            raise WorkflowExecutionError(step_id, "step lease lost during execution")
+
+    def _run_file_load(
+        self,
+        step: WorkflowStep,
+        context: dict[str, str],
+        lease_signal: _LeaseSignal,
+    ) -> list[str]:
         loaded: list[str] = []
         for path_template in step.paths:
             source = self._resolve(path_template, context)
@@ -103,9 +161,15 @@ class WorkflowStepExecutor:
             relative_source = source.relative_to(self.repo_root)
             source_text = source.read_text(encoding="utf-8")
             loaded.append(f"## Source: {relative_source}\n\n{source_text}")
-        return self._write_outputs(step, context, "\n\n---\n\n".join(loaded))
+        return self._write_outputs(step, context, "\n\n---\n\n".join(loaded), lease_signal)
 
-    def _run_agent(self, step: WorkflowStep, context: dict[str, str]) -> list[str]:
+    def _run_agent(
+        self,
+        step: WorkflowStep,
+        context: dict[str, str],
+        artifact_refs: tuple[ArtifactRef, ...],
+        lease_signal: _LeaseSignal,
+    ) -> list[str]:
         # Role/prompt files are read here (not in the adapter) so a missing prompt still
         # fails the step exactly as before, independent of which executor is configured.
         role_text = self._read_optional(step, f"agents/{step.role}.md" if step.role else None)
@@ -119,11 +183,12 @@ class WorkflowStepExecutor:
             prompt_source=prompt_text or "[no prompt configured]",
             inputs_json=json.dumps(context, ensure_ascii=False, indent=2),
             model=step.model or "",
+            artifact_refs=artifact_refs,
         )
         result = self.adapter.generate(request)
         if not result.ok:
             raise WorkflowExecutionError(step.id, f"agent executor failed: {result.detail}")
-        return self._write_outputs(step, context, result.text)
+        return self._write_outputs(step, context, result.text, lease_signal)
 
     def _run_gate(
         self,
@@ -131,6 +196,7 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         context: dict[str, str],
         status: StepStatus,
+        lease_signal: _LeaseSignal,
     ) -> list[str]:
         approval = self.store.approval_for(run_id, step.id)
         if step.requires_approval and approval is None:
@@ -139,13 +205,21 @@ class WorkflowStepExecutor:
                 # outputs; a resume without an approval decision changes nothing
                 # (and must not re-snapshot files the owner may be editing).
                 return self.store.get_step_outputs(run_id, step.id)
-            self._snapshot_run_artifacts(run_id, context)
+            self._snapshot_run_artifacts(run_id, step.id, context, lease_signal)
             payload = self._gate_payload(step, GateDecision.WAITING_APPROVAL, context)
             outputs = self._write_outputs(
                 step,
                 context,
                 json.dumps(payload, ensure_ascii=False, indent=2),
+                lease_signal,
             )
+            self._check_lease(run_id, step.id, lease_signal)
+            # mark_step_waiting releases the lease while the heartbeat thread is
+            # still alive; resolve the signal first so a post-release renewal
+            # failure cannot fail a legitimately waiting gate. Ownership stays
+            # fail-closed via mark_step_waiting's owner guard below.
+            with suppress(InvalidStateError):
+                lease_signal.set_result(None)
             if not self.store.mark_step_waiting(
                 run_id,
                 step.id,
@@ -164,23 +238,30 @@ class WorkflowStepExecutor:
             raise WorkflowExecutionError(step.id, "manual gate rejected")
         # Approved manual gates pass on the human's authority; auto gates are evaluated
         # against the gated artifacts so a stub/empty/incomplete output cannot pass silently.
-        status = (
+        decision = (
             GateDecision.PASS
             if approval == ApprovalDecision.APPROVED
             else self._evaluate_gate(run_id, step, context)
         )
-        payload = self._gate_payload(step, status, context)
+        payload = self._gate_payload(step, decision, context)
         outputs = self._write_outputs(
             step,
             context,
             json.dumps(payload, ensure_ascii=False, indent=2),
+            lease_signal,
         )
-        if status.value not in allowed_statuses(step.pass_if):
-            msg = f"gate {status.value}: artifact failed quality check"
+        if decision.value not in allowed_statuses(step.pass_if):
+            msg = f"gate {decision.value}: artifact failed quality check"
             raise WorkflowExecutionError(step.id, msg)
         return outputs
 
-    def _snapshot_run_artifacts(self, run_id: str, context: dict[str, str]) -> None:
+    def _snapshot_run_artifacts(
+        self,
+        run_id: str,
+        step_id: str,
+        context: dict[str, str],
+        lease_signal: _LeaseSignal,
+    ) -> None:
         """Write-once copies of every successful step's outputs, taken when an
         approval gate first waits. Human edits happen after this point, so the
         snapshot is the diff base for reflection steps. The scope deliberately
@@ -201,10 +282,14 @@ class WorkflowStepExecutor:
                 target = snapshot_root / relative
                 if target.exists():
                     continue
+                active = self._check_lease(run_id, step_id, lease_signal)
                 target.parent.mkdir(parents=True, exist_ok=True)
-                tmp = target.with_name(target.name + ".tmp")
-                tmp.write_bytes(source.read_bytes())
-                tmp.replace(target)
+                tmp = target.with_name(f"{target.name}.{self.runner_token}.tmp")
+                try:
+                    tmp.write_bytes(source.read_bytes())
+                    self._replace_output(run_id, step_id, lease_signal, active, tmp, target)
+                finally:
+                    tmp.unlink(missing_ok=True)
 
     def _stored_artifact_path(self, relative: str) -> Path | None:
         """Containment re-check for output paths read back from the store.
@@ -219,6 +304,85 @@ class WorkflowStepExecutor:
         if not resolved.is_relative_to(self.repo_root.resolve()):
             return None
         return resolved
+
+    def _artifact_refs(self, run_id: str, step: WorkflowStep) -> tuple[ArtifactRef, ...]:
+        remaining = ARTIFACT_REF_CONTENT_BUDGET
+        refs: list[ArtifactRef] = []
+        for dependency in step.depends_on:
+            for relative in self.store.get_step_outputs(run_id, dependency):
+                source = self._stored_artifact_path(relative)
+                if source is None or not source.is_file():
+                    continue
+                excerpt, truncated = self._artifact_excerpt(source, remaining)
+                remaining -= len(excerpt.encode("utf-8"))
+                refs.append(
+                    ArtifactRef(
+                        producer_step_id=dependency,
+                        path=relative,
+                        sha256=_sha256(source),
+                        content_excerpt=excerpt,
+                        truncated=truncated,
+                    ),
+                )
+        return tuple(refs)
+
+    def _artifact_excerpt(self, source: Path, budget: int) -> tuple[str, bool]:
+        with source.open("rb") as stream:
+            raw = stream.read(budget + 1)
+        encoded = raw.decode("utf-8", errors="replace").encode("utf-8")
+        truncated = len(raw) > budget or len(encoded) > budget
+        if not truncated:
+            return encoded.decode("utf-8"), False
+        marker = ARTIFACT_REF_TRUNCATION_MARKER.encode("utf-8")
+        if budget < len(marker):
+            return "", True
+        prefix = encoded[: budget - len(marker)].decode("utf-8", errors="ignore")
+        return prefix + ARTIFACT_REF_TRUNCATION_MARKER, True
+
+    def _consumed_ref_digest(self, refs: tuple[ArtifactRef, ...]) -> str:
+        payload = json.dumps(
+            [[ref.version, ref.producer_step_id, ref.path, ref.sha256] for ref in refs],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _reopen_stale_successes(
+        self,
+        spec: WorkflowSpec,
+        run_id: str,
+        context: dict[str, str],
+    ) -> None:
+        stale: set[str] = set()
+        for step in spec.execution_order():
+            if self.store.get_step_status(run_id, step.id) != StepStatus.SUCCESS:
+                continue
+            if not self._successful_outputs_present(run_id, step, context):
+                stale.add(step.id)
+                continue
+            if step.depends_on and self.store.get_consumed_ref_digest(
+                run_id,
+                step.id,
+            ) != self._consumed_ref_digest(self._artifact_refs(run_id, step)):
+                stale.add(step.id)
+        self._reopen_successes_and_dependents(spec, run_id, stale)
+
+    def _reopen_successes_and_dependents(
+        self,
+        spec: WorkflowSpec,
+        run_id: str,
+        roots: set[str],
+    ) -> None:
+        invalidated = set(roots)
+        for step in spec.execution_order():
+            if any(dependency in invalidated for dependency in step.depends_on):
+                invalidated.add(step.id)
+        for step in spec.execution_order():
+            if (
+                step.id in invalidated
+                and self.store.get_step_status(run_id, step.id) == StepStatus.SUCCESS
+            ):
+                self.store.reopen_step(run_id, step.id)
 
     def _evaluate_gate(
         self,
@@ -247,28 +411,87 @@ class WorkflowStepExecutor:
         context: dict[str, str],
         texts: list[str],
     ) -> GateDecision:
-        if self.review_adapter is None:
+        review_adapter = self.review_adapter
+        if review_adapter is None:
             return GateDecision.PASS
+        review_input = "\n\n---\n\n".join(texts)[:REVIEW_INPUT_LIMIT]
+        policy_sources: list[str] = []
+        role_contracts = [REVIEW_CONTRACT]
+        declared_policy_sources = tuple(
+            relative
+            for relative in (
+                f"agents/{step.role}.md" if step.role else None,
+                step.prompt,
+            )
+            if relative is not None
+        )
+        for relative in declared_policy_sources:
+            source = self._resolve(relative, {})
+            if source.is_file():
+                policy_sources.append(relative)
+                role_contracts.append(source.read_text(encoding="utf-8"))
+        client = context.get("client", "")
+        client_criteria: list[dict[str, str]] = []
+        criteria_remaining = REVIEW_CLIENT_CRITERIA_LIMIT
+        for filename in REVIEW_CLIENT_CRITERIA if client else ():
+            relative = f"clients/{client}/{filename}"
+            source = self._resolve(relative, {})
+            if source.is_file() and criteria_remaining:
+                content = source.read_text(encoding="utf-8")[:criteria_remaining]
+                client_criteria.append({"path": relative, "content": content})
+                criteria_remaining -= len(content)
         request = AgentRequest(
             step_id=step.id,
             run_id=context["run_id"],
             workflow_id=context["workflow_id"],
             role="reviewer",
-            role_contract=_REVIEW_CONTRACT,
-            prompt_source="\n\n---\n\n".join(texts)[:_REVIEW_INPUT_LIMIT],
-            inputs_json="{}",
+            role_contract="\n\n---\n\n".join(role_contracts),
+            prompt_source=review_input,
+            inputs_json=json.dumps(
+                {
+                    "policy_version": REVIEW_DECISION_SCHEMA_VERSION,
+                    "policy_sources": policy_sources,
+                    "client": client,
+                    "client_criteria": client_criteria,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
             model=step.model or "",
+            artifact_refs=self._artifact_refs(context["run_id"], step),
         )
-        result = self.review_adapter.generate(request)
-        if not result.ok:
-            return GateDecision.FAIL
-        return parse_verdict(result.text)
+        result = review_adapter.generate(request)
+        resolution = resolve_reviewer_output(review_adapter, request, result)
+        self.store.record_event(
+            context["run_id"],
+            step.id,
+            "gate.reviewer",
+            "Structured reviewer decision evaluated",
+            {
+                "schema_version": REVIEW_DECISION_SCHEMA_VERSION,
+                "adapter": type(review_adapter).__name__,
+                "attempts": str(resolution.attempts),
+                "outcome": resolution.outcome,
+                "effective_decision": resolution.decision.value,
+                "input_sha256": hashlib.sha256(review_input.encode()).hexdigest(),
+                "initial_response_sha256": hashlib.sha256(
+                    resolution.initial_response.encode(),
+                ).hexdigest(),
+                "effective_response_sha256": hashlib.sha256(
+                    resolution.effective_response.encode(),
+                ).hexdigest(),
+                "policy_sources": policy_sources,
+                "artifact_ref_count": str(len(request.artifact_refs)),
+            },
+        )
+        return resolution.decision
 
     def _run_kb_update(
         self,
         run_id: str,
         step: WorkflowStep,
         context: dict[str, str],
+        lease_signal: _LeaseSignal,
     ) -> list[str]:
         body = "\n".join(
             [
@@ -282,8 +505,9 @@ class WorkflowStepExecutor:
                 "Runner does not write directly to knowledge-base.",
             ],
         )
-        outputs = self._write_outputs(step, context, body)
+        outputs = self._write_outputs(step, context, body, lease_signal)
         for output in outputs:
+            self._check_lease(run_id, step.id, lease_signal)
             self.store.record_kb_update(run_id, step.id, context.get("client", ""), output, body)
         return outputs
 
@@ -306,18 +530,47 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         context: dict[str, str],
         content: str,
+        lease_signal: _LeaseSignal,
     ) -> list[str]:
         written: list[str] = []
         for output_template in self._output_templates(step):
             target = self._resolve(output_template, context)
+            active = self._check_lease(context["run_id"], step.id, lease_signal)
             target.parent.mkdir(parents=True, exist_ok=True)
-            # Atomic write: a crash mid-write leaves the previous file (or none),
-            # never a truncated artifact that resume would trust.
-            tmp = target.with_name(target.name + ".tmp")
-            tmp.write_text(content.rstrip() + "\n", encoding="utf-8")
-            tmp.replace(target)
+            tmp = target.with_name(f"{target.name}.{self.runner_token}.tmp")
+            try:
+                tmp.write_text(content.rstrip() + "\n", encoding="utf-8")
+                self._replace_output(
+                    context["run_id"],
+                    step.id,
+                    lease_signal,
+                    active,
+                    tmp,
+                    target,
+                )
+            finally:
+                tmp.unlink(missing_ok=True)
             written.append(str(target.relative_to(self.repo_root)).replace("\\", "/"))
         return written
+
+    def _replace_output(
+        self,
+        run_id: str,
+        step_id: str,
+        lease_signal: _LeaseSignal,
+        active: bool,
+        tmp: Path,
+        target: Path,
+    ) -> None:
+        if not active:
+            tmp.replace(target)
+            return
+        with self.store.hold_lease_for_write(run_id, step_id, self.runner_token) as owned:
+            if lease_signal.done():
+                lease_signal.result()
+            if not owned:
+                raise WorkflowExecutionError(step_id, "step lease lost before artifact replace")
+            tmp.replace(target)
 
     def _output_templates(self, step: WorkflowStep) -> tuple[str, ...]:
         if step.outputs:

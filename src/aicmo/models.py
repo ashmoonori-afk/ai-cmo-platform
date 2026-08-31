@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -63,6 +64,7 @@ class WorkflowStep(BaseModel):
     prompt: str | None = None
     pass_if: str | None = None
     requires_approval: bool = False
+    terminal_delivery: bool = False
     model: str | None = None
 
     @field_validator("id")
@@ -84,6 +86,25 @@ class WorkflowStep(BaseModel):
         if isinstance(value, str):
             return (value,)
         return tuple(value)
+
+    @model_validator(mode="after")
+    def validate_terminal_delivery(self) -> WorkflowStep:
+        if not self.terminal_delivery:
+            return self
+        match self.type:
+            case StepType.GATE:
+                if self.requires_approval:
+                    msg = "terminal delivery step must be an automatic gate"
+                    raise ValueError(msg)
+            case StepType.FILE_LOAD | StepType.AGENT | StepType.KB_UPDATE:
+                msg = "terminal delivery step must be an automatic gate"
+                raise ValueError(msg)
+            case unreachable:
+                assert_never(unreachable)
+        if not self.depends_on:
+            msg = "terminal delivery gate requires artifact producers"
+            raise ValueError(msg)
+        return self
 
 
 class WorkflowSpec(BaseModel):
@@ -134,6 +155,15 @@ class WorkflowSpec(BaseModel):
             msg = "duplicate output path"
             raise ValueError(msg)
         self._validate_acyclic()
+        return self
+
+    @model_validator(mode="after")
+    def validate_terminal_topology(self) -> WorkflowSpec:
+        terminal_ids = {step.id for step in self.steps if step.terminal_delivery}
+        for step in self.steps:
+            if any(dependency in terminal_ids for dependency in step.depends_on):
+                msg = "terminal delivery gate must be a leaf"
+                raise ValueError(msg)
         return self
 
     def _validate_acyclic(self) -> None:

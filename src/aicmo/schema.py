@@ -16,12 +16,22 @@ SCHEMA = (
         workflow_id text not null,
         status text not null,
         inputs_json text not null,
+        spec_digest text,
+        spec_revision integer,
         current_step_id text,
         failed_step_id text,
         created_at text not null default current_timestamp,
         updated_at text not null default current_timestamp,
         completed_at text,
         foreign key (workflow_id) references workflows(workflow_id)
+    )
+    """,
+    """
+    create table if not exists run_policies (
+        run_id text primary key,
+        phase_git_mode text not null check (
+            phase_git_mode in ('off', 'dry-run', 'commit', 'push', 'merge')
+        )
     )
     """,
     """
@@ -115,6 +125,15 @@ SCHEMA = (
         path text not null,
         sha256 text not null,
         primary key (run_id, step_id, path)
+    )
+    """,
+    """
+    create table if not exists step_consumed_ref_digests (
+        run_id text not null,
+        step_id text not null,
+        sha256 text not null,
+        primary key (run_id, step_id),
+        foreign key (run_id, step_id) references steps(run_id, step_id)
     )
     """,
 )

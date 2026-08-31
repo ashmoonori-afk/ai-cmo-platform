@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Self
 
-from aicmo.errors import StepTransitionError
+from pydantic import TypeAdapter, ValidationError
+
+from aicmo.errors import RunConflictError, StepTransitionError
 from aicmo.models import ApprovalDecision, RunStatus, StepStatus, WorkflowStep
+from aicmo.redaction import redact
 from aicmo.run_state import WorkflowRunStore
 
 _DEFAULT_LEASE_TTL = 300.0
+_STEP_OUTPUTS_ADAPTER = TypeAdapter(list[str])
 
 
 def _stale_threshold(lease_ttl_seconds: float) -> str:
@@ -44,8 +50,14 @@ class WorkflowStepStore(WorkflowRunStore):
             ).fetchone()
         if row is None:
             return []
-        loaded = json.loads(row["outputs_json"])
-        return [str(value) for value in loaded]
+        try:
+            return _STEP_OUTPUTS_ADAPTER.validate_json(row["outputs_json"], strict=True)
+        except ValidationError:
+            reason = (
+                f"persisted outputs for step {step_id} must be a JSON array of strings; "
+                "start a new run"
+            )
+            raise RunConflictError(run_id, reason) from None
 
     def record_output_hashes(self: Self, run_id: str, step_id: str, hashes: dict[str, str]) -> None:
         with self.connect() as connection:
@@ -103,16 +115,39 @@ class WorkflowStepStore(WorkflowRunStore):
                 self._mark_run(connection, run_id, RunStatus.RUNNING, step.id)
         return claimed
 
-    def renew_lease(self: Self, run_id: str, step_id: str, owner: str) -> None:
-        """Heartbeat: refresh a live lease so a long step is not falsely reclaimed."""
+    def renew_lease(self: Self, run_id: str, step_id: str, owner: str) -> bool:
+        """Refresh a live lease and report whether the caller still owns it."""
         with self.connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 update steps set locked_at = current_timestamp
                 where run_id = ? and step_id = ? and locked_by = ? and status = 'running'
                 """,
                 (run_id, step_id, owner),
             )
+        return cursor.rowcount == 1
+
+    @contextmanager
+    def hold_lease_for_write(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        owner: str,
+    ) -> Iterator[bool]:
+        """Order lease reclaims after a short file replace; this is not cross-system atomicity."""
+        with self.connect() as connection:
+            connection.execute("begin immediate")
+            owned = (
+                connection.execute(
+                    """
+                    select 1 from steps
+                    where run_id = ? and step_id = ? and locked_by = ? and status = 'running'
+                    """,
+                    (run_id, step_id, owner),
+                ).fetchone()
+                is not None
+            )
+            yield owned
 
     def _finalize_step(
         self: Self,
@@ -190,7 +225,7 @@ class WorkflowStepStore(WorkflowRunStore):
         message: str,
         owner: str | None = None,
     ) -> bool:
-        payload = json.dumps({"message": message}, ensure_ascii=False)
+        payload = json.dumps({"message": redact(message)}, ensure_ascii=False)
         with self.connect() as connection:
             done = self._finalize_step(
                 connection,

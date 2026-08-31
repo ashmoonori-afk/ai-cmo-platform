@@ -1,15 +1,30 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Final, Literal, Protocol
+
+from aicmo.redaction import redact
 
 _MAX_DETAIL = 500
+ARTIFACT_REF_CONTENT_BUDGET: Final = 16 * 1024
+ARTIFACT_REF_TRUNCATION_MARKER: Final = "\n[artifact excerpt truncated]"
 
 # Stable sentinel that marks a deterministic offline-stub artifact. The reviewer gate
 # recognizes it and returns WARN (offline placeholder) instead of scanning the echoed
 # role/prompt boilerplate for incomplete markers.
 OFFLINE_STUB_MARKER = "Local deterministic adapter completed."
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactRef:
+    producer_step_id: str
+    path: str
+    sha256: str
+    content_excerpt: str
+    truncated: bool
+    version: Literal["v1"] = "v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +37,7 @@ class AgentRequest:
     prompt_source: str
     inputs_json: str
     model: str = ""
+    artifact_refs: tuple[ArtifactRef, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,23 +52,47 @@ class StepAdapter(Protocol):
 
 
 def compose_prompt(request: AgentRequest) -> str:
-    return "\n\n".join(
+    sections = [
+        f"# Agent task: {request.step_id}",
+        f"- role: {request.role}",
+        f"- workflow: {request.workflow_id}",
+        f"- run_id: {request.run_id}",
+        "## Role contract",
+        request.role_contract,
+        "## Playbook / prompt",
+        request.prompt_source,
+        "## Inputs",
+        request.inputs_json,
+    ]
+    if request.artifact_refs:
+        sections.extend(
+            [
+                "## Upstream artifacts",
+                json.dumps(
+                    [
+                        {
+                            "version": ref.version,
+                            "producer_step_id": ref.producer_step_id,
+                            "path": ref.path,
+                            "sha256": ref.sha256,
+                            "content_excerpt": ref.content_excerpt,
+                            "truncated": ref.truncated,
+                        }
+                        for ref in request.artifact_refs
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+            ],
+        )
+    sections.extend(
         [
-            f"# Agent task: {request.step_id}",
-            f"- role: {request.role}",
-            f"- workflow: {request.workflow_id}",
-            f"- run_id: {request.run_id}",
-            "## Role contract",
-            request.role_contract,
-            "## Playbook / prompt",
-            request.prompt_source,
-            "## Inputs",
-            request.inputs_json,
             "## Instruction",
             "Produce the deliverable described by the role contract and playbook above, "
             "using the inputs. Return only the finished artifact content.",
         ],
     )
+    return "\n\n".join(sections)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +146,7 @@ class CommandAdapter:
                 check=False,
             )
         except OSError as exc:
-            return AgentResult(text="", ok=False, detail=f"executor could not start: {exc}")
+            return AgentResult(text="", ok=False, detail=redact(f"executor could not start: {exc}"))
         except subprocess.TimeoutExpired:
             return AgentResult(
                 text="",
@@ -114,7 +154,7 @@ class CommandAdapter:
                 detail=f"executor timed out after {self.timeout_seconds:g}s",
             )
         if completed.returncode != 0:
-            stderr = (completed.stderr or "").strip()[:_MAX_DETAIL]
+            stderr = redact((completed.stderr or "").strip()[:_MAX_DETAIL])
             return AgentResult(
                 text="",
                 ok=False,

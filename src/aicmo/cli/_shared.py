@@ -12,7 +12,7 @@ from aicmo.adapters import CommandAdapter, LocalAdapter, StepAdapter
 from aicmo.anthropic_adapter import AnthropicAdapter
 from aicmo.errors import AicmoError
 from aicmo.models import RunResult, RunStatus, WorkflowStep
-from aicmo.phase_git import PhaseGitMode, run_phase_git
+from aicmo.phase_git import PhaseGitMode, PhaseGitResult, PhaseGitStatus, run_phase_git
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 
@@ -44,6 +44,13 @@ def emit_phase_deliverables(step: WorkflowStep, deliverables: tuple[str, ...]) -
     for deliverable in deliverables:
         console.print(f"  {deliverable}")
 
+def emit_phase_git_result(result: PhaseGitResult) -> None:
+    if result.message:
+        console.print(result.message)
+    if result.status == PhaseGitStatus.FAILED:
+        raise AicmoError(result.message)
+
+
 def phase_git_callback(
     repo_root: Path,
     mode: PhaseGitMode,
@@ -53,8 +60,7 @@ def phase_git_callback(
         return None
 
     def completed(step: WorkflowStep, _deliverables: tuple[str, ...]) -> None:
-        for line in run_phase_git(repo_root, mode, run_id, step.id):
-            console.print(line)
+        emit_phase_git_result(run_phase_git(repo_root, mode, run_id, step.id))
 
     return completed
 

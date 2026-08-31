@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+
+from pydantic import TypeAdapter, ValidationError
 
 from aicmo.errors import OnboardingError
 from aicmo.paths import parse_safe_id
@@ -14,6 +14,7 @@ _TEMPLATE_DIR = Path(__file__).parent / "templates" / "onboarding"
 _TOKEN_PATTERN = re.compile(r"\{\{(\w+)\}\}")
 
 _VALID_MARKET_TYPES = frozenset({"b2b", "b2c", "both"})
+_ANSWERS_ADAPTER = TypeAdapter(dict[str, str | None])
 
 _CLIENT_TEMPLATES = ("config.md", "brand-guidelines.md")
 _KB_TEMPLATES = ("insights.md", "winning-copy.md", "lessons-learned.md")
@@ -54,11 +55,12 @@ class OnboardingResult:
 
 
 def load_answers(path: Path) -> OnboardingAnswers:
-    parsed = json.loads(path.read_text("utf-8"))
-    if not isinstance(parsed, dict):
-        raise OnboardingError(str(path), "answers file must be a JSON object")
-    raw = cast("dict[str, object]", parsed)
-    values = {key: "" if value is None else str(value) for key, value in raw.items()}
+    try:
+        parsed = _ANSWERS_ADAPTER.validate_json(path.read_bytes(), strict=True)
+    except ValidationError:
+        reason = "answers file must be a JSON object with string or null values"
+        raise OnboardingError(str(path), reason) from None
+    values = {key: "" if value is None else value for key, value in parsed.items()}
     missing = [name for name in _REQUIRED_FIELDS if not values.get(name, "").strip()]
     if missing:
         joined = ", ".join(missing)
