@@ -1,4 +1,6 @@
 outputs/
+output/
+NUL
 .omo/
 .aicmo/
 .playwright-mcp/
