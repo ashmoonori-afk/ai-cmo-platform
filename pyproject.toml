@@ -21,6 +21,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "basedpyright>=1.29",
+    "playwright>=1.62.0",
     "pytest>=8.4",
     "ruff>=0.12",
 ]

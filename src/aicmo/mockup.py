@@ -1,3 +1,5 @@
+# pyright: reportImportCycles=false
+
 from __future__ import annotations
 
 import html
@@ -6,11 +8,14 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from aicmo.onboarding import OnboardingAnswers
+if TYPE_CHECKING:
+    from aicmo.onboarding import OnboardingAnswers
 
 _ACCENT = "#0F6E56"
 _SCREENSHOT_TIMEOUT = 120
+_PDF_TIMEOUT = 120
 _DETAIL_LIMIT = 300
 
 # Run in a child process so this module never statically imports the optional `playwright`
@@ -25,6 +30,19 @@ with sync_playwright() as runner:
     page = browser.new_page(viewport={"width": 1280, "height": 800})
     page.goto(uri)
     page.screenshot(path=out, full_page=True)
+    browser.close()
+"""
+
+_PDF_SCRIPT = """
+import sys
+from playwright.sync_api import sync_playwright
+
+uri, out = sys.argv[1], sys.argv[2]
+with sync_playwright() as runner:
+    browser = runner.chromium.launch(headless=True)
+    page = browser.new_page()
+    page.goto(uri, wait_until="networkidle")
+    page.pdf(path=out, format="A4", print_background=True)
     browser.close()
 """
 
@@ -109,6 +127,36 @@ def render_landing_mockup(brief: LandingBrief) -> str:
 """
 
 
+def _run_browser_script(
+    script: str, html_path: Path, output_path: Path, *, timeout: int
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 — fixed inline script via sys.executable, argv-only, no shell
+        [sys.executable, "-c", script, html_path.resolve().as_uri(), str(output_path)],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def render_pdf(html_path: Path, pdf_path: Path) -> str:
+    """Render the HTML mockup to a validated PDF if Playwright is available."""
+    if importlib.util.find_spec("playwright") is None:
+        return "unavailable: install playwright"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        result = _run_browser_script(_PDF_SCRIPT, html_path, pdf_path, timeout=_PDF_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return f"unavailable: playwright PDF timed out after {_PDF_TIMEOUT}s"
+    if result.returncode != 0:
+        return f"unavailable: playwright error: {result.stderr.strip()[:_DETAIL_LIMIT]}"
+    try:
+        valid_pdf = pdf_path.stat().st_size > 0 and pdf_path.read_bytes().startswith(b"%PDF")
+    except OSError:
+        valid_pdf = False
+    return "generated" if valid_pdf else "unavailable: playwright produced no valid PDF"
+
+
 def render_png(html_path: Path, png_path: Path) -> str:
     """Screenshot the HTML mockup to a PNG if Playwright is installed; else say so.
 
@@ -118,12 +166,8 @@ def render_png(html_path: Path, png_path: Path) -> str:
         return "unavailable: install playwright (uv add playwright && playwright install chromium)"
     png_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        result = subprocess.run(  # noqa: S603 — fixed inline script via sys.executable, argv-only, no shell
-            [sys.executable, "-c", _SCREENSHOT_SCRIPT, html_path.resolve().as_uri(), str(png_path)],
-            capture_output=True,
-            text=True,
-            timeout=_SCREENSHOT_TIMEOUT,
-            check=False,
+        result = _run_browser_script(
+            _SCREENSHOT_SCRIPT, html_path, png_path, timeout=_SCREENSHOT_TIMEOUT
         )
     except subprocess.TimeoutExpired:
         return f"unavailable: playwright screenshot timed out after {_SCREENSHOT_TIMEOUT}s"

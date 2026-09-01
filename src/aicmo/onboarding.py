@@ -1,3 +1,5 @@
+# pyright: reportImportCycles=false
+
 from __future__ import annotations
 
 import re
@@ -7,6 +9,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
+from aicmo import mockup, primer
 from aicmo.errors import OnboardingError
 from aicmo.paths import parse_safe_id
 
@@ -52,6 +55,7 @@ class OnboardingAnswers:
 class OnboardingResult:
     client: str
     created: tuple[Path, ...]
+    pdf_status: str = "disabled"
 
 
 def load_answers(path: Path) -> OnboardingAnswers:
@@ -97,6 +101,7 @@ def scaffold_client(
     answers: OnboardingAnswers,
     *,
     force: bool = False,
+    pdf: bool = True,
 ) -> OnboardingResult:
     slug = parse_safe_id("client", answers.client)
     if answers.market_type not in _VALID_MARKET_TYPES:
@@ -124,4 +129,12 @@ def scaffold_client(
         out = kb_dir / name
         out.write_text(_render(name, answers, date), encoding="utf-8")
         created.append(out)
-    return OnboardingResult(client=slug, created=tuple(created))
+    html_path = client_dir / "primer-report.html"
+    html_path.write_text(primer.render_primer_html(answers, date=date), encoding="utf-8")
+    created.append(html_path)
+    pdf_status = "disabled"
+    if pdf:
+        pdf_status = mockup.render_pdf(html_path, client_dir / "primer-report.pdf")
+        if pdf_status == "generated":
+            created.append(client_dir / "primer-report.pdf")
+    return OnboardingResult(client=slug, created=tuple(created), pdf_status=pdf_status)
