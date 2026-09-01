@@ -35,7 +35,7 @@ def sample_answers() -> OnboardingAnswers:
 def test_scaffold_embeds_all_seven_answers(tmp_path: Path) -> None:
     answers = sample_answers()
 
-    result = scaffold_client(tmp_path, answers)
+    result = scaffold_client(tmp_path, answers, pdf=False)
 
     config_text = (tmp_path / "clients" / "moms-candles" / "config.md").read_text("utf-8")
     for value in (
@@ -53,7 +53,7 @@ def test_scaffold_embeds_all_seven_answers(tmp_path: Path) -> None:
 
 
 def test_generated_files_have_no_placeholders_and_define_jargon(tmp_path: Path) -> None:
-    scaffold_client(tmp_path, sample_answers())
+    scaffold_client(tmp_path, sample_answers(), pdf=False)
 
     client_dir = tmp_path / "clients" / "moms-candles"
     config_text = (client_dir / "config.md").read_text("utf-8")
@@ -71,7 +71,7 @@ def test_generated_files_have_no_placeholders_and_define_jargon(tmp_path: Path) 
 
 
 def test_kb_files_initialized(tmp_path: Path) -> None:
-    scaffold_client(tmp_path, sample_answers())
+    scaffold_client(tmp_path, sample_answers(), pdf=False)
 
     kb_dir = tmp_path / "knowledge-base" / "moms-candles"
     for name in ("insights.md", "winning-copy.md", "lessons-learned.md"):
@@ -153,17 +153,17 @@ def test_unsafe_slug_is_rejected(tmp_path: Path) -> None:
         cta="x",
     )
     with pytest.raises(AicmoError):
-        scaffold_client(tmp_path, answers)
+        scaffold_client(tmp_path, answers, pdf=False)
 
 
 def test_existing_client_not_overwritten_without_force(tmp_path: Path) -> None:
     answers = sample_answers()
-    scaffold_client(tmp_path, answers)
+    scaffold_client(tmp_path, answers, pdf=False)
 
     with pytest.raises(AicmoError):
-        scaffold_client(tmp_path, answers)
+        scaffold_client(tmp_path, answers, pdf=False)
 
-    forced = scaffold_client(tmp_path, answers, force=True)
+    forced = scaffold_client(tmp_path, answers, force=True, pdf=False)
     assert forced.created
 
 
@@ -207,7 +207,7 @@ def test_json_null_becomes_blank_not_literal_none(tmp_path: Path) -> None:
 def test_literal_token_in_answer_is_not_re_expanded(tmp_path: Path) -> None:
     answers = replace(sample_answers(), offer="{{cta}} 라는 글자가 그대로 남아야 한다")
 
-    scaffold_client(tmp_path, answers)
+    scaffold_client(tmp_path, answers, pdf=False)
 
     config_text = (tmp_path / "clients" / "moms-candles" / "config.md").read_text("utf-8")
     assert "{{cta}} 라는 글자가 그대로 남아야 한다" in config_text

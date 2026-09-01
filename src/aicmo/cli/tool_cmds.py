@@ -5,8 +5,9 @@ from typing import Annotated
 import typer
 
 from aicmo.evaluate import evaluate_asset, render_report
-from aicmo.mockup import brief_from_answers, render_landing_mockup, render_png
+from aicmo.mockup import brief_from_answers, render_landing_mockup, render_pdf, render_png
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
+from aicmo.primer import render_primer_html
 from aicmo.reporter import flush_kb_updates
 from aicmo.store import WorkflowStore
 from aicmo.web import run_server
@@ -18,6 +19,7 @@ def emit_onboarding(result: OnboardingResult) -> None:
     console.print(f"onboarded {result.client}: {len(result.created)} files created")
     for path in result.created:
         console.print(f"  {path}")
+    console.print(f"pdf: {result.pdf_status}")
 
 def onboard_client(
     client: Annotated[str, typer.Option("--client", help="Client slug (folder under clients/)")],
@@ -25,10 +27,13 @@ def onboard_client(
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
     force: Annotated[bool, typer.Option("--force")] = False,
     date: Annotated[str | None, typer.Option("--date")] = None,
+    pdf: Annotated[
+        bool, typer.Option("--pdf/--no-pdf", help="Generate onboarding primer PDF")
+    ] = True,
 ) -> None:
     loaded = load_answers(answers)
     loaded = replace(loaded, client=client, onboarding_date=date or loaded.onboarding_date)
-    result = scaffold_client(repo.resolve(), loaded, force=force)
+    result = scaffold_client(repo.resolve(), loaded, force=force, pdf=pdf)
     emit_onboarding(result)
 
 def serve_cmd(
@@ -49,6 +54,18 @@ def mockup_cmd(
     console.print(f"mockup: {out}")
     if png is not None:
         console.print(f"png: {render_png(out, png)}")
+
+def primer_cmd(
+    source: Annotated[Path, typer.Option("--from", help="Onboarding answers JSON")],
+    out: Annotated[Path, typer.Option("--out", help="HTML primer output path")],
+    pdf: Annotated[Path | None, typer.Option("--pdf", help="PDF output path")] = None,
+) -> None:
+    answers = load_answers(source)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(render_primer_html(answers, date=answers.onboarding_date), encoding="utf-8")
+    console.print(f"primer: {out}")
+    if pdf is not None:
+        console.print(f"pdf: {render_pdf(out, pdf)}")
 
 def evaluate_cmd(
     source: Annotated[Path, typer.Option("--from", help="Asset markdown to score")],
@@ -82,6 +99,7 @@ def kb_flush(
 def register(app: typer.Typer) -> None:
     app.command("onboard")(onboard_client)
     app.command("serve")(serve_cmd)
+    app.command("primer")(primer_cmd)
     app.command("mockup")(mockup_cmd)
     app.command("evaluate")(evaluate_cmd)
     app.command("kb-flush")(kb_flush)
