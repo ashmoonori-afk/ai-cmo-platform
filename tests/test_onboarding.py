@@ -167,6 +167,56 @@ def test_existing_client_not_overwritten_without_force(tmp_path: Path) -> None:
     assert forced.created
 
 
+def test_force_update_preserves_existing_knowledge_base_bytes(tmp_path: Path) -> None:
+    answers = sample_answers()
+    scaffold_client(tmp_path, answers, pdf=False)
+    kb_dir = tmp_path / "knowledge-base" / answers.client
+    paths = [kb_dir / name for name in ("insights.md", "winning-copy.md", "lessons-learned.md")]
+    for index, path in enumerate(paths):
+        path.write_bytes(b"\xef\xbb\xbf" + f"owner knowledge {index}\r\n".encode())
+    before = {path: path.read_bytes() for path in paths}
+
+    updated = replace(answers, company_name="엄마의 새 향초")
+    scaffold_client(tmp_path, updated, force=True, pdf=False)
+
+    assert {path: path.read_bytes() for path in paths} == before
+    config = (tmp_path / "clients" / answers.client / "config.md").read_text("utf-8")
+    assert "엄마의 새 향초" in config
+
+
+def test_force_update_rolls_back_all_profile_files_on_mid_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers = sample_answers()
+    scaffold_client(tmp_path, answers, pdf=False)
+    client_dir = tmp_path / "clients" / answers.client
+    paths = [
+        client_dir / name
+        for name in ("config.md", "brand-guidelines.md", "primer-report.html")
+    ]
+    before = {path: path.read_bytes() for path in paths}
+    original_replace = Path.replace
+    replacements = 0
+
+    def fail_second_profile_replace(source: Path, target: Path) -> Path:
+        nonlocal replacements
+        if source.name.endswith(".onboarding.tmp"):
+            replacements += 1
+            if replacements == 2:
+                message = "injected mid-update failure"
+                raise OSError(message)
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", fail_second_profile_replace)
+
+    with pytest.raises(OnboardingError, match="rolled back"):
+        scaffold_client(tmp_path, replace(answers, offer="변경된 상품"), force=True, pdf=False)
+
+    assert {path: path.read_bytes() for path in paths} == before
+    assert not list(client_dir.glob(".*.onboarding.*"))
+
+
 def test_playbook_and_template_break_circular_dependency() -> None:
     playbook_path = REPO_ROOT / "playbooks" / "07-operations" / "client-onboarding.md"
     playbook = playbook_path.read_text("utf-8")

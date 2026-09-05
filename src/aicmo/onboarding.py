@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -96,6 +98,97 @@ def _render(template_name: str, answers: OnboardingAnswers, date: str) -> str:
     return _TOKEN_PATTERN.sub(lambda found: tokens.get(found.group(1), found.group(0)), text)
 
 
+def _restore_profile_files(written: list[Path], backups: dict[Path, Path]) -> list[str]:
+    errors: list[str] = []
+    for target in reversed(written):
+        try:
+            backup = backups[target]
+            if backup.exists():
+                backup.replace(target)
+            else:
+                target.unlink(missing_ok=True)
+        except OSError as exc:
+            errors.append(f"{target}: {exc}")
+    return errors
+
+
+def _prepare_profile_backups(backups: dict[Path, Path]) -> None:
+    for target, backup in backups.items():
+        if target.exists():
+            shutil.copy2(target, backup)
+
+
+def _write_profile_files(contents: dict[Path, str], slug: str) -> None:
+    """Replace profile files together; retain recoverable backups until commit."""
+    backups = {
+        target: target.with_name(f".{target.name}.onboarding.bak") for target in contents
+    }
+    temporary = {target: target.with_name(f".{target.name}.onboarding.tmp") for target in contents}
+    leftovers = [path for path in (*backups.values(), *temporary.values()) if path.exists()]
+    if leftovers:
+        names = ", ".join(str(path) for path in leftovers)
+        raise OnboardingError(slug, f"unfinished onboarding backup exists: {names}")
+
+    written: list[Path] = []
+    try:
+        _prepare_profile_backups(backups)
+        for target, content in contents.items():
+            temp = temporary[target]
+            temp.write_text(content, encoding="utf-8")
+            temp.replace(target)
+            written.append(target)
+    except Exception as exc:
+        recovery_errors = _restore_profile_files(written, backups)
+        if recovery_errors:
+            detail = "; ".join(recovery_errors)
+            message = f"profile update failed; backups retained: {detail}"
+            raise OnboardingError(slug, message) from exc
+        for backup in backups.values():
+            backup.unlink(missing_ok=True)
+        raise OnboardingError(slug, f"profile update failed and was rolled back: {exc}") from exc
+    else:
+        for backup in backups.values():
+            backup.unlink(missing_ok=True)
+    finally:
+        for temp in temporary.values():
+            temp.unlink(missing_ok=True)
+
+
+def _profile_contents(
+    client_dir: Path,
+    kb_dir: Path,
+    answers: OnboardingAnswers,
+    date: str,
+) -> dict[Path, str]:
+    contents = {
+        client_dir / name: _render(name, answers, date) for name in _CLIENT_TEMPLATES
+    }
+    contents.update(
+        {
+            kb_dir / name: _render(name, answers, date)
+            for name in _KB_TEMPLATES
+            if not (kb_dir / name).exists()
+        }
+    )
+    contents[client_dir / "primer-report.html"] = primer.render_primer_html(answers, date=date)
+    return contents
+
+
+def _remove_new_empty_directories(
+    client_dir: Path,
+    kb_dir: Path,
+    *,
+    client_existed: bool,
+    kb_existed: bool,
+) -> None:
+    if not client_existed:
+        with suppress(OSError):
+            client_dir.rmdir()
+    if not kb_existed:
+        with suppress(OSError):
+            kb_dir.rmdir()
+
+
 def scaffold_client(
     repo_root: Path,
     answers: OnboardingAnswers,
@@ -115,23 +208,26 @@ def scaffold_client(
     if not client_dir.is_relative_to(root) or not kb_dir.is_relative_to(root):
         raise OnboardingError(slug, "resolved path escapes the repository root")
     if client_dir.exists() and not force:
-        msg = f"client already exists: {client_dir} (use force to overwrite)"
+        msg = f"client already exists: {client_dir} (use force to update the profile)"
         raise OnboardingError(slug, msg)
 
-    created: list[Path] = []
+    client_existed = client_dir.exists()
+    kb_existed = kb_dir.exists()
     client_dir.mkdir(parents=True, exist_ok=True)
-    for name in _CLIENT_TEMPLATES:
-        out = client_dir / name
-        out.write_text(_render(name, answers, date), encoding="utf-8")
-        created.append(out)
     kb_dir.mkdir(parents=True, exist_ok=True)
-    for name in _KB_TEMPLATES:
-        out = kb_dir / name
-        out.write_text(_render(name, answers, date), encoding="utf-8")
-        created.append(out)
+    contents = _profile_contents(client_dir, kb_dir, answers, date)
     html_path = client_dir / "primer-report.html"
-    html_path.write_text(primer.render_primer_html(answers, date=date), encoding="utf-8")
-    created.append(html_path)
+    try:
+        _write_profile_files(contents, slug)
+    except OnboardingError:
+        _remove_new_empty_directories(
+            client_dir,
+            kb_dir,
+            client_existed=client_existed,
+            kb_existed=kb_existed,
+        )
+        raise
+    created = list(contents)
     pdf_status = "disabled"
     if pdf:
         pdf_status = mockup.render_pdf(html_path, client_dir / "primer-report.pdf")
