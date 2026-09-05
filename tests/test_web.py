@@ -4,16 +4,30 @@ import socket
 import threading
 from http.server import ThreadingHTTPServer
 
+import pytest
+
+from aicmo.errors import OnboardingError
 from aicmo.web import RequestHandler, answers_from_form, generate_page, render_form_page
 
 FIELDS = (
     "company_name", "offer", "audience", "problem",
     "differentiator", "channel", "proof", "cta",
+    "neighborhood", "business_type", "price", "business_hours",
+    "objective", "weekly_capacity", "campaign_start", "campaign_end",
 )
 
 
 def _form(**overrides: str) -> dict[str, list[str]]:
-    base = {name: [name] for name in FIELDS}
+    base = {
+        "company_name": ["brand"],
+        "offer": ["offer"],
+        "audience": ["audience"],
+        "problem": ["problem"],
+        "differentiator": ["differentiator"],
+        "channel": ["인스타그램"],
+        "proof": ["후기없음"],
+        "cta": ["order"],
+    }
     base.update({key: [value] for key, value in overrides.items()})
     return base
 
@@ -34,6 +48,22 @@ def test_answers_from_form_maps_fields() -> None:
     assert answers.company_name == "엄마의 양초"
     assert answers.offer == "콩 왁스 향초"
     assert answers.cta == "주문하기"
+    assert answers.neighborhood == "모름"
+
+
+def test_web_and_cli_share_profile_validation() -> None:
+    with pytest.raises(OnboardingError, match="price cannot be negative"):
+        answers_from_form(_form(price="-1원"))
+
+    with pytest.raises(OnboardingError, match="missing required answers: offer"):
+        answers_from_form(_form(offer=""))
+
+
+def test_web_defaults_missing_proof_without_inventing_a_review() -> None:
+    form = _form()
+    form.pop("proof")
+
+    assert answers_from_form(form).proof == "후기없음"
 
 
 def test_generate_page_is_mockup_with_brand() -> None:

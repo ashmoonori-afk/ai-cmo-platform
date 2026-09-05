@@ -29,6 +29,15 @@ def sample_answers() -> OnboardingAnswers:
         website="https://example.com/moms-candles",
         market_type="b2c",
         onboarding_date="2026-06-25",
+        neighborhood="망원동",
+        business_type="향초 소매",
+        price="18,000원",
+        business_hours="화~일 11:00~20:00",
+        objective="첫 구매 20건",
+        weekly_capacity="주 3시간",
+        fact_status="confirmed",
+        campaign_start="2026-07-01",
+        campaign_end="2026-07-31",
     )
 
 
@@ -50,6 +59,11 @@ def test_scaffold_embeds_all_seven_answers(tmp_path: Path) -> None:
     ):
         assert value in config_text, f"config.md is missing the answer: {value}"
     assert (tmp_path / "clients" / "moms-candles" / "config.md") in result.created
+    assert "aicmo.smb-profile.v1" in config_text
+    assert answers.neighborhood in config_text
+    assert answers.price in config_text
+    assert (tmp_path / "clients" / "moms-candles" / "copy-patterns.md").exists()
+    assert (tmp_path / "clients" / "moms-candles" / "pricing-rules.md").exists()
 
 
 def test_generated_files_have_no_placeholders_and_define_jargon(tmp_path: Path) -> None:
@@ -98,6 +112,79 @@ def test_load_answers_round_trip(tmp_path: Path) -> None:
     assert answers.client == "moms-candles"
     assert answers.offer == payload["offer"]
     assert answers.market_type == "both"
+
+
+def test_new_store_can_start_without_proof(tmp_path: Path) -> None:
+    payload = asdict(sample_answers())
+    payload.pop("proof")
+    answers_path = tmp_path / "answers.json"
+    answers_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    answers = load_answers(answers_path)
+    scaffold_client(tmp_path, answers, pdf=False)
+
+    assert answers.proof == "후기없음"
+    config = (tmp_path / "clients" / answers.client / "config.md").read_text("utf-8")
+    assert "후기없음" in config
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"offer": ""}, "missing required answers: offer"),
+        ({"price": "-1000원"}, "price cannot be negative"),
+        ({"price": "가격:(-1000원)"}, "price cannot be negative"),
+        ({"price": "\N{MINUS SIGN}1000원"}, "price cannot be negative"),
+        ({"price": "-\N{WON SIGN}1000"}, "price cannot be negative"),
+        ({"price": "KRW -1000"}, "price cannot be negative"),
+        ({"price": "price -1000"}, "price cannot be negative"),
+        (
+            {"campaign_start": "2026-08-01", "campaign_end": "2026-07-01"},
+            "campaign_start cannot be after campaign_end",
+        ),
+        ({"campaign_start": "2026-07-01T23:00:00"}, "must be an ISO date"),
+        ({"channel": "임의채널"}, "channel must name a supported channel"),
+        ({"channel": "instagrammer"}, "channel must name a supported channel"),
+        ({"channel": "인스타그램, 텔레그램"}, "channel must name a supported channel"),
+        ({"channel": "후기없음"}, "channel must name a supported channel"),
+    ],
+)
+def test_profile_validation_rejects_invalid_input(
+    tmp_path: Path,
+    changes: dict[str, str],
+    message: str,
+) -> None:
+    with pytest.raises(OnboardingError, match=message):
+        scaffold_client(tmp_path, replace(sample_answers(), **changes), pdf=False)
+
+
+def test_unknown_and_not_applicable_profile_values_are_allowed(tmp_path: Path) -> None:
+    answers = replace(
+        sample_answers(),
+        channel="모름",
+        proof="후기없음",
+        price="모름",
+        business_hours="해당없음",
+        fact_status="unknown",
+        campaign_start="",
+        campaign_end="",
+    )
+
+    scaffold_client(tmp_path, answers, pdf=False)
+
+    config = (tmp_path / "clients" / answers.client / "config.md").read_text("utf-8")
+    assert "후기없음" in config
+    assert "해당없음 ~ 해당없음" in config
+
+
+@pytest.mark.parametrize("price", ["10,000원-20,000원", "10,000원 - 20,000원"])
+def test_positive_price_ranges_are_allowed(tmp_path: Path, price: str) -> None:
+    scaffold_client(tmp_path, replace(sample_answers(), price=price), pdf=False)
+
+
+@pytest.mark.parametrize("channel", ["네이버 블로그", "카카오톡", "네이버 플레이스"])
+def test_domestic_channel_aliases_are_allowed(tmp_path: Path, channel: str) -> None:
+    scaffold_client(tmp_path, replace(sample_answers(), channel=channel), pdf=False)
 
 
 @pytest.mark.parametrize(
@@ -165,6 +252,33 @@ def test_existing_client_not_overwritten_without_force(tmp_path: Path) -> None:
 
     forced = scaffold_client(tmp_path, answers, force=True, pdf=False)
     assert forced.created
+
+
+def test_force_migrates_legacy_config_and_keeps_recoverable_backup_during_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers = sample_answers()
+    client_dir = tmp_path / "clients" / answers.client
+    client_dir.mkdir(parents=True)
+    legacy = client_dir / "config.md"
+    legacy.write_text("# 기존 고객 설정\n\n운영 중인 원문\n", encoding="utf-8")
+    observed_backup = False
+    original_replace = Path.replace
+
+    def observe_backup(source: Path, target: Path) -> Path:
+        nonlocal observed_backup
+        if source.name == ".config.md.onboarding.tmp":
+            backup = target.with_name(".config.md.onboarding.bak")
+            observed_backup = backup.read_text("utf-8") == legacy.read_text("utf-8")
+        return original_replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", observe_backup)
+
+    scaffold_client(tmp_path, answers, force=True, pdf=False)
+
+    assert observed_backup
+    assert "aicmo.smb-profile.v1" in legacy.read_text("utf-8")
 
 
 def test_force_update_preserves_existing_knowledge_base_bytes(tmp_path: Path) -> None:

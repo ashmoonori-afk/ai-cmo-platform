@@ -3,9 +3,19 @@
 > 이 파일은 7개의 쉬운 질문에 답하면 자동으로 만들어집니다.
 > 전문용어 옆 괄호는 쉬운 설명입니다. 틀린 부분은 언제든 직접 고쳐도 됩니다.
 
+- **프로필 스키마**: aicmo.smb-profile.v1
+
 - **온보딩 날짜**: {{date}}
 - **웹사이트**: {{website}}
 - **시장 유형 (누구에게 파나)**: {{market_type}} — b2c=일반 소비자, b2b=다른 회사, both=둘 다
+- **동네/상권**: {{neighborhood}}
+- **업종**: {{business_type}}
+- **대표 상품 가격**: {{price}}
+- **영업시간**: {{business_hours}}
+- **이번 목적**: {{objective}}
+- **주당 마케팅 여력**: {{weekly_capacity}}
+- **사실 확인 상태**: {{fact_status}} — confirmed=확인, unknown=모름, not_applicable=해당없음
+- **캠페인 기간**: {{campaign_start}} ~ {{campaign_end}}
 
 ## 1) 한 줄 소개 — 무엇을 파는가 (Offer = 한 문장 제품 설명)
 {{offer}}

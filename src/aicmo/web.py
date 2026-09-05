@@ -4,8 +4,9 @@ import html
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
+from aicmo.errors import OnboardingError
 from aicmo.mockup import brief_from_answers, render_landing_mockup
-from aicmo.onboarding import OnboardingAnswers
+from aicmo.onboarding import OnboardingAnswers, validate_answers
 
 _MAX_BODY = 64 * 1024
 
@@ -18,13 +19,28 @@ _QUESTIONS = (
     ("channel", "5) 그 사람들은 어디서 시간을 보내나요?", "예: 인스타그램, 스마트스토어"),
     ("proof", "6) 결과를 본 고객 사례가 있나요?", "예: 200명 재구매, 평점 4.9"),
     ("cta", "7) 처음 온 사람이 했으면 하는 행동은?", "예: 첫 향초 주문하기"),
+    ("neighborhood", "동네·상권", "모르면 모름"),
+    ("business_type", "업종", "예: 카페, 미용실, 온라인 쇼핑몰"),
+    ("price", "대표 상품 가격", "예: 8,000원 / 모르면 모름"),
+    ("business_hours", "영업시간", "예: 평일 10:00~20:00 / 해당없음"),
+    ("objective", "이번 마케팅 목적", "예: 평일 방문 예약 10건"),
+    ("weekly_capacity", "주당 마케팅 여력", "예: 주 2시간"),
+    ("campaign_start", "캠페인 시작일", "YYYY-MM-DD / 비워도 됨"),
+    ("campaign_end", "캠페인 종료일", "YYYY-MM-DD / 비워도 됨"),
+)
+
+_REQUIRED_FORM_FIELDS = frozenset(
+    {"company_name", "offer", "audience", "problem", "differentiator", "channel", "cta"}
 )
 
 
 def _field_html(name: str, label: str, placeholder: str) -> str:
+    required = " required" if name in _REQUIRED_FORM_FIELDS else ""
+    input_type = "date" if name in {"campaign_start", "campaign_end"} else "text"
     return (
         f'<label class="block mt-5"><span class="font-medium">{html.escape(label)}</span>'
-        f'<input name="{name}" placeholder="{html.escape(placeholder)}" '
+        f'<input type="{input_type}" name="{name}" '
+        f'placeholder="{html.escape(placeholder)}"{required} '
         'class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"></label>'
     )
 
@@ -63,17 +79,27 @@ def _first(form: dict[str, list[str]], key: str, default: str = "") -> str:
 
 
 def answers_from_form(form: dict[str, list[str]]) -> OnboardingAnswers:
-    return OnboardingAnswers(
+    answers = OnboardingAnswers(
         client="web",
-        company_name=_first(form, "company_name", "브랜드"),
+        company_name=_first(form, "company_name"),
         offer=_first(form, "offer"),
         audience=_first(form, "audience"),
         problem=_first(form, "problem"),
         differentiator=_first(form, "differentiator"),
         channel=_first(form, "channel"),
-        proof=_first(form, "proof"),
-        cta=_first(form, "cta", "주문하기"),
+        proof=_first(form, "proof", "후기없음") or "후기없음",
+        cta=_first(form, "cta"),
+        neighborhood=_first(form, "neighborhood", "모름") or "모름",
+        business_type=_first(form, "business_type", "모름") or "모름",
+        price=_first(form, "price", "모름") or "모름",
+        business_hours=_first(form, "business_hours", "모름") or "모름",
+        objective=_first(form, "objective", "모름") or "모름",
+        weekly_capacity=_first(form, "weekly_capacity", "모름") or "모름",
+        campaign_start=_first(form, "campaign_start"),
+        campaign_end=_first(form, "campaign_end"),
     )
+    validate_answers(answers)
+    return answers
 
 
 def generate_page(form: dict[str, list[str]]) -> str:
@@ -81,9 +107,9 @@ def generate_page(form: dict[str, list[str]]) -> str:
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    def _send_html(self, body: str) -> None:
+    def _send_html(self, body: str, status: int = 200) -> None:
         encoded = body.encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
@@ -105,7 +131,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             declared = 0
         length = max(0, min(declared, _MAX_BODY))
         form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
-        self._send_html(generate_page(form))
+        try:
+            self._send_html(generate_page(form))
+        except OnboardingError as exc:
+            message = html.escape(exc.reason)
+            self._send_html(f"<h1>입력 내용을 확인해 주세요</h1><p>{message}</p>", 400)
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
