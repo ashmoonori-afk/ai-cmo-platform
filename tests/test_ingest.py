@@ -17,7 +17,7 @@ def _write(path: Path, content: str) -> None:
 
 
 def test_parse_urls_filters_and_dedupes() -> None:
-    text = "\n".join(
+    text = "\n".join(  # noqa: FLY002 — line list mirrors inbox contents
         [
             "# 오늘 본 기사",
             "https://a.example/one",
@@ -86,7 +86,7 @@ def engine_repo(repo_root: Path) -> Path:
     )
     _write(
         repo_root / "workflows" / "content-engine.workflow.yaml",
-        "\n".join(
+        "\n".join(  # noqa: FLY002 — line list mirrors workflow YAML
             [
                 "id: content-engine",
                 "name: Content Engine",

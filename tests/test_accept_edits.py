@@ -24,7 +24,7 @@ def _write(path: Path, content: str) -> None:
 def approval_repo(repo_root: Path) -> Path:
     _write(
         repo_root / "workflows" / "approval-edit.workflow.yaml",
-        "\n".join(
+        "\n".join(  # noqa: FLY002 — line list mirrors workflow YAML
             [
                 "id: approval-edit",
                 "name: Approval Edit Flow",
@@ -128,7 +128,8 @@ def test_accept_edits_blesses_before_approval_row(approval_repo: Path) -> None:
     _OrderProbeStore.calls.clear()
     runner.approve("run_order", "owner_gate", "owner", "ok", accept_edits=True)
     calls = _OrderProbeStore.calls
-    assert "approve" in calls and "bless" in calls
+    assert "approve" in calls
+    assert "bless" in calls
     assert calls.index("bless") < calls.index("approve")
 
 

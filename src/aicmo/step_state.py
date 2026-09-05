@@ -170,7 +170,7 @@ class WorkflowStepStore(WorkflowRunStore):
             guard += " and locked_by = ? and status = 'running'"
             guard_params = (*guard_params, owner)
         cursor = connection.execute(
-            f"update steps set {set_clause}, locked_by = null, locked_at = null {guard}",
+            f"update steps set {set_clause}, locked_by = null, locked_at = null {guard}",  # noqa: S608 — set_clause is an internal constant; values are bound
             (*params, *guard_params),
         )
         return cursor.rowcount == 1

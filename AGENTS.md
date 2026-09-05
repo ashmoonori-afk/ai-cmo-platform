@@ -135,10 +135,10 @@ aicmo capabilities                            # 레지스트리 조회 (agents/m
 ### 폴터 구조 (요약)
 
 ```
-agents/              서브에이전트 프롬프트 (13)
-playbooks/           실행 가능한 SOP (13개 모듈, 81개)
+agents/              서브에이전트 프롬프트 (registry 기준)
+playbooks/           실행 가능한 SOP (modules·수량은 scripts/doc_counts.py 참조)
 registry/            capabilities.yaml — 기계 판독 레지스트리
-workflows/           aicmo run용 워크플로우 스펙 (5개)
+workflows/           aicmo run용 워크플로우 스펙 (*.workflow.yaml)
 prompts/shared/      공유 프롬프트 (gate-check, deliverable-standard 등)
 clients/             클라이언트 설정 (_template + sample-client-a~e)
 outputs/             대화형 실행 산출물 / artifacts/ 엔진 실행물

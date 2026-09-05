@@ -74,7 +74,8 @@ def parse_input_pairs(pairs: list[str]) -> dict[str, str]:
     for pair in pairs:
         key, separator, value = pair.partition("=")
         if not separator or not key.strip():
-            raise typer.BadParameter(f"expected key=value, got: {pair!r}")
+            message = f"expected key=value, got: {pair!r}"
+            raise typer.BadParameter(message)
         parsed[key.strip()] = value
     return parsed
 

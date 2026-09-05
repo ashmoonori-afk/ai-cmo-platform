@@ -1,25 +1,12 @@
-import re
 from pathlib import Path
 
+from aicmo.capabilities import load_capabilities
+
 _ROOT = Path(__file__).resolve().parents[1]
-_ROUTING_ROW = re.compile(r"^\| \d+ \|")
 
 
 def _markdown_count(directory: Path) -> int:
     return sum(1 for path in directory.glob("*.md") if path.is_file())
-
-
-def _routing_row_count() -> int:
-    lines = (_ROOT / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
-    section_start = next(
-        index for index, line in enumerate(lines) if line.startswith("## 3.")
-    )
-    section_end = next(
-        index
-        for index, line in enumerate(lines[section_start + 1 :], section_start + 1)
-        if line.startswith("## 4")
-    )
-    return sum(1 for line in lines[section_start + 1 : section_end] if _ROUTING_ROW.match(line))
 
 
 def _test_function_count() -> int:
@@ -31,16 +18,19 @@ def _test_function_count() -> int:
 
 
 def main() -> None:
+    registry = load_capabilities(_ROOT)
     playbooks_root = _ROOT / "playbooks"
     playbook_rows = [
         (f"playbooks/{directory.name}", _markdown_count(directory))
         for directory in sorted(path for path in playbooks_root.iterdir() if path.is_dir())
     ]
     rows = [
-        ("agents", _markdown_count(_ROOT / "agents")),
+        ("agents (registry)", len(registry["agents"])),
+        ("agents (files)", _markdown_count(_ROOT / "agents")),
         *playbook_rows,
         ("playbooks total", sum(count for _, count in playbook_rows)),
-        ("routing rows", _routing_row_count()),
+        ("capability mappings", len(registry["mappings"])),
+        ("executable workflows", len(list((_ROOT / "workflows").glob("*.workflow.yaml")))),
         ("shared prompts", _markdown_count(_ROOT / "prompts" / "shared")),
         ("test functions", _test_function_count()),
     ]

@@ -8,9 +8,10 @@ from typing import Annotated
 import typer
 
 from aicmo.feedback import record_artifact_feedback
-from aicmo.ingest import archive_item, retain_failed_urls, scan_inbox
+from aicmo.ingest import InboxItem, archive_item, retain_failed_urls, scan_inbox
 from aicmo.phase_git import PhaseGitMode, run_phase_git
 from aicmo.redaction import redact
+from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 
 from ._options import (
@@ -61,13 +62,13 @@ def run_workflow(
         typer.Option("--artifact-format", help="Requested artifact format, e.g. markdown, json."),
     ] = None,
     extra_inputs: Annotated[
-        list[str],
+        list[str] | None,
         typer.Option(
             "--input",
             help="Extra workflow input as key=value (repeatable), e.g. "
             "--input source_url=https://example.com/article",
         ),
-    ] = [],
+    ] = None,
     feedback: Annotated[
         str | None,
         typer.Option("--feedback", help="Artifact feedback to persist for engine improvement."),
@@ -87,7 +88,7 @@ def run_workflow(
     review_anthropic: ReviewAnthropicOpt = False,
 ) -> None:
     inputs = {
-        **parse_input_pairs(extra_inputs),
+        **parse_input_pairs(extra_inputs or []),
         **compact_inputs(
             {
                 "client": client,
@@ -123,6 +124,41 @@ def run_workflow(
     elif phase_git != PhaseGitMode.OFF:
         emit_phase_git_result(run_phase_git(repo_root, phase_git, run_id_value, "workflow"))
     emit_result(result)
+
+def _ingest_item(runner: WorkflowRunner, item: InboxItem, client: str, repo_root: Path) -> bool:
+    failed_urls: list[str] = []
+    for url in item.urls:
+        run_id = generated_run_id()
+        console.print(f"{item.source_file.name} -> {run_id}: {redact(url)}", markup=False)
+        try:
+            result = runner.run(
+                workflow_id="content-engine",
+                run_id=run_id,
+                inputs={"client": client, "source_url": url},
+            )
+        except Exception as exc:  # noqa: BLE001 — keep ingesting the remaining URLs
+            console.print(redact(f"  failed: {type(exc).__name__}: {exc}"), markup=False)
+            failed_urls.append(url)
+            continue
+        console.print(f"  {result.status}", markup=False)
+        if result.status not in ("success", "waiting_approval"):
+            failed_urls.append(url)
+
+    if not item.urls:
+        console.print(f"skipped (no urls): {item.source_file.name}", markup=False)
+    elif not failed_urls:
+        archived = archive_item(item)
+        console.print(f"archived: {archived.relative_to(repo_root)}", markup=False)
+    elif len(failed_urls) < len(item.urls):
+        retain_failed_urls(item, failed_urls)
+        console.print(
+            f"retained {len(failed_urls)} failed url(s) in {item.source_file.name} for retry",
+            markup=False,
+        )
+    else:
+        console.print(f"kept for retry: {item.source_file.name}", markup=False)
+    return bool(failed_urls)
+
 
 def ingest_inbox(
     client: Annotated[str, typer.Option("--client", help="Client slug (inbox/<client>/)")],
@@ -163,46 +199,12 @@ def ingest_inbox(
         repo_root,
         db,
         select_adapter(executor, executor_cmd, anthropic),
-        select_review_adapter(review, review_cmd, False),
+        select_review_adapter(review, review_cmd, review_anthropic=False),
         emit_phase_deliverables,
     )
     any_failed = False
     for item in items:
-        failed_urls: list[str] = []
-        for url in item.urls:
-            run_id = generated_run_id()
-            console.print(f"{item.source_file.name} -> {run_id}: {redact(url)}", markup=False)
-            try:
-                result = runner.run(
-                    workflow_id="content-engine",
-                    run_id=run_id,
-                    inputs={"client": client, "source_url": url},
-                )
-            except Exception as exc:  # noqa: BLE001 — keep ingesting the remaining URLs
-                console.print(redact(f"  failed: {type(exc).__name__}: {exc}"), markup=False)
-                failed_urls.append(url)
-                continue
-            console.print(f"  {result.status}", markup=False)
-            if result.status not in ("success", "waiting_approval"):
-                failed_urls.append(url)
-        if not item.urls:
-            console.print(f"skipped (no urls): {item.source_file.name}", markup=False)
-        elif not failed_urls:
-            archived = archive_item(item)
-            console.print(f"archived: {archived.relative_to(repo_root)}", markup=False)
-        else:
-            any_failed = True
-            if len(failed_urls) < len(item.urls):
-                # Keep only the failed URLs so the next pass never duplicates
-                # runs that already reached the owner gate.
-                retain_failed_urls(item, failed_urls)
-                console.print(
-                    f"retained {len(failed_urls)} failed url(s) in "
-                    f"{item.source_file.name} for retry",
-                    markup=False,
-                )
-            else:
-                console.print(f"kept for retry: {item.source_file.name}", markup=False)
+        any_failed |= _ingest_item(runner, item, client, repo_root)
     if any_failed:
         raise typer.Exit(EXIT_FAILED)
 

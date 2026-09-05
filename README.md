@@ -12,11 +12,11 @@ and Baemin, where global marketing tools fall short.
   as-is), opens with a plain-language one-page summary, and ends with "next
   steps" — modeled on what Korean agencies actually sell for ₩300k–1M/month.
 - **Korea runs on different rails.** Search = Naver, retention = KakaoTalk,
-  neighborhood = Daangn, food = Baemin. 68 playbooks cover them with cited,
-  current (2024–2026) research — every claim carries its source inline.
+  neighborhood = Daangn, food = Baemin. The playbook library covers them with
+  cited, current (2024–2026) research — every claim carries its source inline.
 - **It's an engine, not a prompt pile.** A resumable workflow runner (SQLite
   state, approval gates, lease-based concurrency, content-hash resume,
-  100 passing tests) executes the playbooks as reproducible DAGs. No API key
+  automated tests) executes registered workflow specs as reproducible DAGs. No API key
   needed — live generation pipes through the `claude` CLI you already run.
 
 ## 60-second try
@@ -26,7 +26,7 @@ git clone <this-repo> && cd ai-cmo-platform
 uv sync && uv run pytest -q          # 전체 테스트
 uv run aicmo run launch-pack --client sample-client-a --run-id demo1
 uv run aicmo approve demo1 owner_gate --reviewer owner --notes ok
-uv run aicmo resume demo1            # 13 linear steps -> 5 deliverables + HTML
+uv run aicmo resume demo1            # approval gate 이후 실행 재개
 ```
 
 Or open the repo in Claude Code and just say: `런치팩 해줘 — 새 클라이언트: {회사명}`
@@ -34,9 +34,19 @@ Or open the repo in Claude Code and just say: `런치팩 해줘 — 새 클라�
 | At a glance | |
 |---|---|
 | Deliverable pipeline | consultation → strategy → channel mix → hooking copy → brand kit → homepage → channel execution packs |
-| Coverage | 11 specialist agents · 68 playbooks · 12 modules (incl. Naver search ads, Meta ads, ad strategy library, GEO/AI-search) |
+| Coverage | `registry/capabilities.yaml`이 agent·SOP 매핑 기준이며 실제 수량은 `uv run python scripts/doc_counts.py`로 확인 |
 | Engine | `aicmo` CLI — run/resume/approve, artifact ledger, evaluation scorer, HTML mockup, local web form |
 | Quality bar | umbrella deliverable standard + reviewer gate + scam-guard (anti "guaranteed ranking" patterns) |
+
+### Capability status
+
+| Surface | Current support | Practical meaning |
+|---|---|---|
+| Natural-language requests | `registry/capabilities.yaml` mappings | 요청을 SOP/agent 조합으로 안내할 수 있음. 자동 실행을 보장하지 않음 |
+| Executable workflows | `workflows/*.workflow.yaml` | `aicmo run/resume/approve`로 실제 DAG 실행 가능 |
+| Local web | `aicmo serve` | 온보딩 입력과 mockup 확인용 로컬 UI |
+| Generation | deterministic stub by default; optional configured executor | stub 결과는 데모이며 고객 납품용 생성물이 아님 |
+| Publish and live integrations | human approval required | 외부 발행·발송·결제·연동 완료를 자동으로 주장하지 않음 |
 
 ---
 
@@ -51,7 +61,7 @@ AI CMO Platform은 한 명의 마케터가 머릿속으로 처리하던 업무 �
 문서화된 운영체계로 바꾼 저장소입니다.
 
 - 자연어 요청을 워크플로우 매핑으로 분류합니다.
-- 11개 specialist role과 68개 playbook으로 실행합니다 (로컬 실행 SOP 7개 +
+- registry에 등록된 specialist role과 playbook으로 실행합니다 (로컬 실행 SOP +
   유료 광고 SOP 3개 포함 — 네이버 플레이스·카톡채널·당근·배달앱·오프라인·
   네이버 검색광고·메타광고·광고 전략 라이브러리. 근거 리서치 다이제스트는
   운영자 비공개 레이어 `docs/research/`(gitignore, 로컬 전용)에 유지 — SOP 본문에 핵심 출처 인라인 인용).
@@ -435,6 +445,8 @@ git diff --check
 | `sales-writer` | 아웃바운드, 콜프렙, 제안서, 피치덱 | sonnet |
 | `reporter` | 주간 리포트, KB 기록, 후속 액션 정리 | sonnet |
 | `reviewer` | 최종 품질, 근거, 안전성 검증 | sonnet |
+| `community-manager` | Reddit, Hacker News 등 커뮤니티 초안 운영 | sonnet |
+| `growth-engineer` | 자동화·실험·성장 인프라 설계 | sonnet |
 
 > 모델은 워크플로우 spec의 per-step `model` 필드로도 덮어쓸 수 있습니다(§7 튜닝).
 
@@ -454,13 +466,13 @@ git diff --check
 ai-cmo-platform/
 ├── CLAUDE.md                 # system brain / routing
 ├── README.md
-├── agents/                   # 11 specialist prompts
+├── agents/                   # specialist prompts
 ├── clients/                  # _template + sample-client-a..e
 ├── docs/                     # dogfooding, product, role-sop, system
 ├── handoff/                  # Hermes / OpenClaw transfer package
 ├── integrations/birkin/
 ├── knowledge-base/           # Reporter-owned, append-only
-├── playbooks/                # 00-chains, 01-strategy … 08-design, 08-role-sops … (68개)
+├── playbooks/                # 00-chains, 01-strategy … 11-community
 ├── prompts/shared/           # gate-check, knowledge-update, boilerplate
 ├── references/
 ├── skills/birkin/            # Neurosis, Odyssey, Morpheus, codex-image-gen

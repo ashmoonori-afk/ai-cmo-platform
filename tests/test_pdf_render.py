@@ -11,7 +11,10 @@ if TYPE_CHECKING:
 
 
 def test_render_pdf_without_playwright(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aicmo.mockup.importlib.util.find_spec", lambda _name: None)
+    def missing_playwright(_name: str) -> None:
+        return None
+
+    monkeypatch.setattr("aicmo.mockup.importlib.util.find_spec", missing_playwright)
 
     status = render_pdf(tmp_path / "page.html", tmp_path / "page.pdf")
 
@@ -19,7 +22,10 @@ def test_render_pdf_without_playwright(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 def test_render_pdf_generates_valid_pdf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aicmo.mockup.importlib.util.find_spec", lambda _name: object())
+    def installed_playwright(_name: str) -> object:
+        return object()
+
+    monkeypatch.setattr("aicmo.mockup.importlib.util.find_spec", installed_playwright)
 
     def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         Path(argv[-1]).write_bytes(b"%PDF-1.4\ncontent")
@@ -33,13 +39,14 @@ def test_render_pdf_generates_valid_pdf(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_render_pdf_process_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aicmo.mockup.importlib.util.find_spec", lambda _name: object())
-    monkeypatch.setattr(
-        "aicmo.mockup.subprocess.run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess(
-            [], 1, "", "browser failed"
-        ),
-    )
+    def installed_playwright(_name: str) -> object:
+        return object()
+
+    def failed_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 1, "", "browser failed")
+
+    monkeypatch.setattr("aicmo.mockup.importlib.util.find_spec", installed_playwright)
+    monkeypatch.setattr("aicmo.mockup.subprocess.run", failed_run)
 
     assert render_pdf(tmp_path / "page.html", tmp_path / "page.pdf") == (
         "unavailable: playwright error: browser failed"
@@ -47,7 +54,10 @@ def test_render_pdf_process_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 def test_render_pdf_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aicmo.mockup.importlib.util.find_spec", lambda _name: object())
+    def installed_playwright(_name: str) -> object:
+        return object()
+
+    monkeypatch.setattr("aicmo.mockup.importlib.util.find_spec", installed_playwright)
 
     def timeout(*_args: object, **_kwargs: object) -> None:
         raise subprocess.TimeoutExpired(cmd="playwright", timeout=1)
