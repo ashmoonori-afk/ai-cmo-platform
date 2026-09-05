@@ -50,8 +50,10 @@ Or open the repo in Claude Code and just say: `런치팩 해줘 — 새 클라�
 
 ---
 
-Claude Code에서 실행하는 공유용 AI CMO 운영체계입니다. 판매용 제품이 아니라
-누구나 가져다 쓰고 고칠 수 있도록 공유하는 저장소입니다. 사용자의 자연어
+Claude Code에서 실행하는 AI CMO 운영체계입니다. 현재 루트 `LICENSE`가 없어
+제3자에게 코드 재배포·수정 권리를 명시적으로 부여하지 않은 상태입니다. 권리자의
+자체 호스팅 가능 여부는 기여 권리를 확인한 뒤 판단합니다. 운영 범위와 정책은
+[`docs/product/decisions/2026-09-05-paid-operation-rights-decision.md`](docs/product/decisions/2026-09-05-paid-operation-rights-decision.md)에서 확정합니다. 사용자의 자연어
 마케팅 요청을 intake, triage, role SOP, reviewer gate, Reporter knowledge
 record로 연결해서 반복 가능한 산출물로 만듭니다.
 
