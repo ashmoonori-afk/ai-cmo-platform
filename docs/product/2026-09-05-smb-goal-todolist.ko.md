@@ -70,7 +70,7 @@ G02의 운영자 결정이 필요하면 자료를 완성해 한 번에 요청합
   - 출력: `onboarding.py`, 온보딩 보존 회귀검사.
   - 완료: 기존 insights/winning-copy/lessons-learned가 수정 전후 바이트 단위 보존; 중간 쓰기 실패 후 복구 가능; 새 클라이언트 생성도 정상.
 
-- [ ] **G04 · 데모·실행 성공·납품 가능 상태 분리** — D / 개발·reviewer / L / 선행 G01, G03
+- [x] **G04 · 데모·실행 성공·납품 가능 상태 분리** — D / 개발·reviewer / L / 선행 G01, G03
   - 근거: F02/F04. 스텁 WARN이 run success로 진행 가능.
   - 작업: demo 출력은 명시 표시하고 판매용 내보내기 차단. 유료 경로에 실제 생성·의미 검토 설정 필수. 결과 파일/버전별 검토 manifest와 사람이 이해할 사유 저장. 긴 파일·후반부 위험도 검사.
   - 출력: `gate.py`, `step_executor.py`, `reviewer_contract.py`, 모델/워크플로 정책 및 테스트.

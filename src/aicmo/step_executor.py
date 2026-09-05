@@ -14,6 +14,7 @@ from uuid import uuid4
 from aicmo.adapters import (
     ARTIFACT_REF_CONTENT_BUDGET,
     ARTIFACT_REF_TRUNCATION_MARKER,
+    OFFLINE_STUB_MARKER,
     AgentRequest,
     ArtifactRef,
     LocalAdapter,
@@ -40,6 +41,7 @@ from aicmo.reviewer_contract import (
     REVIEW_CLIENT_CRITERIA_LIMIT,
     REVIEW_CONTRACT,
     REVIEW_INPUT_LIMIT,
+    ReviewerResolution,
     resolve_reviewer_output,
 )
 from aicmo.store import WorkflowStore
@@ -47,6 +49,7 @@ from aicmo.store import WorkflowStore
 PhaseAnnouncer = Callable[[WorkflowStep, tuple[str, ...]], None]
 PhaseCompletionHook = Callable[[WorkflowStep, tuple[str, ...]], None]
 type _LeaseSignal = Future[None]
+DELIVERY_MANIFEST_SCHEMA_VERSION = "aicmo.delivery-manifest.v1"
 
 
 def _sha256(path: Path) -> str:
@@ -206,7 +209,7 @@ class WorkflowStepExecutor:
                 # (and must not re-snapshot files the owner may be editing).
                 return self.store.get_step_outputs(run_id, step.id)
             self._snapshot_run_artifacts(run_id, step.id, context, lease_signal)
-            payload = self._gate_payload(step, GateDecision.WAITING_APPROVAL, context)
+            payload = self._gate_payload(run_id, step, GateDecision.WAITING_APPROVAL, context)
             outputs = self._write_outputs(
                 step,
                 context,
@@ -238,12 +241,11 @@ class WorkflowStepExecutor:
             raise WorkflowExecutionError(step.id, "manual gate rejected")
         # Approved manual gates pass on the human's authority; auto gates are evaluated
         # against the gated artifacts so a stub/empty/incomplete output cannot pass silently.
-        decision = (
-            GateDecision.PASS
-            if approval == ApprovalDecision.APPROVED
-            else self._evaluate_gate(run_id, step, context)
-        )
-        payload = self._gate_payload(step, decision, context)
+        if approval == ApprovalDecision.APPROVED:
+            decision, semantic_review = GateDecision.PASS, None
+        else:
+            decision, semantic_review = self._evaluate_gate(run_id, step, context)
+        payload = self._gate_payload(run_id, step, decision, context, semantic_review)
         outputs = self._write_outputs(
             step,
             context,
@@ -389,31 +391,37 @@ class WorkflowStepExecutor:
         run_id: str,
         step: WorkflowStep,
         context: dict[str, str],
-    ) -> GateDecision:
+    ) -> tuple[GateDecision, ReviewerResolution | None]:
+        texts = self._gate_texts(run_id, step)
+        if not texts:
+            # Fail closed: an auto gate with no gated artifact text cannot validate
+            # anything, so it must block rather than silently pass.
+            return GateDecision.FAIL, None
+        deterministic = evaluate_artifacts(texts).status
+        if deterministic == GateDecision.FAIL or self.review_adapter is None:
+            return deterministic, None
+        review = self._semantic_review(step, context, texts)
+        return stricter(deterministic, review.decision), review
+
+    def _gate_texts(self, run_id: str, step: WorkflowStep) -> list[str]:
         texts: list[str] = []
         for dependency in step.depends_on:
             for relative in self.store.get_step_outputs(run_id, dependency):
                 source = self._stored_artifact_path(relative)
                 if source is not None and source.exists():
                     texts.append(source.read_text(encoding="utf-8"))
-        if not texts:
-            # Fail closed: an auto gate with no gated artifact text cannot validate
-            # anything, so it must block rather than silently pass.
-            return GateDecision.FAIL
-        deterministic = evaluate_artifacts(texts).status
-        if deterministic == GateDecision.FAIL or self.review_adapter is None:
-            return deterministic
-        return stricter(deterministic, self._semantic_review(step, context, texts))
+        return texts
 
     def _semantic_review(
         self,
         step: WorkflowStep,
         context: dict[str, str],
         texts: list[str],
-    ) -> GateDecision:
+    ) -> ReviewerResolution:
         review_adapter = self.review_adapter
         if review_adapter is None:
-            return GateDecision.PASS
+            msg = "semantic review requires a configured reviewer"
+            raise RuntimeError(msg)
         review_input = "\n\n---\n\n".join(texts)[:REVIEW_INPUT_LIMIT]
         policy_sources: list[str] = []
         role_contracts = [REVIEW_CONTRACT]
@@ -484,7 +492,7 @@ class WorkflowStepExecutor:
                 "artifact_ref_count": str(len(request.artifact_refs)),
             },
         )
-        return resolution.decision
+        return resolution
 
     def _run_kb_update(
         self,
@@ -513,17 +521,92 @@ class WorkflowStepExecutor:
 
     def _gate_payload(
         self,
+        run_id: str,
         step: WorkflowStep,
         status: GateDecision,
         context: dict[str, str],
-    ) -> dict[str, str]:
-        return {
+        semantic_review: ReviewerResolution | None = None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
             "step_id": step.id,
             "status": status.value,
-            "run_id": context["run_id"],
+            "run_id": run_id,
             "workflow_id": context["workflow_id"],
             "pass_if": step.pass_if or "status in ['PASS','WARN']",
         }
+        if not step.terminal_delivery:
+            return payload
+
+        texts = self._gate_texts(run_id, step)
+        combined = "\n\n---\n\n".join(texts)
+        refs = self._artifact_refs(run_id, step)
+        deterministic = evaluate_artifacts(texts)
+        reasons = list(deterministic.reasons)
+        demo = isinstance(self.adapter, LocalAdapter) or any(
+            OFFLINE_STUB_MARKER in text for text in texts
+        )
+        review_truncated = len(combined) > REVIEW_INPUT_LIMIT
+        if self.review_adapter is None:
+            reasons.append("semantic reviewer was not configured")
+        if semantic_review is not None and semantic_review.decision != GateDecision.PASS:
+            reasons.append(semantic_review.reason)
+        elif status != GateDecision.PASS and not deterministic.reasons:
+            reasons.append(f"review gate returned {status.value}")
+        if review_truncated:
+            reasons.append("semantic review input was truncated")
+        if any(ref.truncated for ref in refs):
+            reasons.append("artifact reference was truncated")
+        if not refs:
+            reasons.append("no versioned artifact reference was produced")
+        deliverable = (
+            not demo
+            and self.review_adapter is not None
+            and status == GateDecision.PASS
+            and not review_truncated
+            and bool(refs)
+            and not any(ref.truncated for ref in refs)
+        )
+        payload.update(
+            {
+                "schema_version": DELIVERY_MANIFEST_SCHEMA_VERSION,
+                "delivery_status": (
+                    "deliverable" if deliverable else "demo" if demo else "blocked"
+                ),
+                "deliverable": deliverable,
+                "reasons": list(dict.fromkeys(reasons)),
+                "generator": type(self.adapter).__name__,
+                "reviewer": (
+                    type(self.review_adapter).__name__
+                    if self.review_adapter is not None
+                    else None
+                ),
+                "semantic_review": (
+                    {
+                        "status": semantic_review.decision.value,
+                        "reason": semantic_review.reason,
+                        "outcome": semantic_review.outcome,
+                    }
+                    if semantic_review is not None
+                    else None
+                ),
+                "review_input": {
+                    "characters_total": len(combined),
+                    "characters_reviewed": min(len(combined), REVIEW_INPUT_LIMIT),
+                    "truncated": review_truncated,
+                },
+                "artifacts": [
+                    {
+                        "version": ref.version,
+                        "producer_step_id": ref.producer_step_id,
+                        "path": ref.path,
+                        "sha256": ref.sha256,
+                        "truncated": ref.truncated,
+                    }
+                    for ref in refs
+                ],
+            },
+        )
+        return payload
 
     def _write_outputs(
         self,

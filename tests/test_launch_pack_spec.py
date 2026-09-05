@@ -89,10 +89,18 @@ def test_all_repo_workflow_specs_reference_existing_files() -> None:
 
 _DELIVERY_PRODUCERS = {
     "approval-demo": ("report",),
-    "blog-article": ("report",),
-    "content-engine": ("publish_pack",),
-    "daily-cmo-loop": ("daily_feed",),
-    "launch-pack": ("report",),
+    "blog-article": ("report", "draft"),
+    "content-engine": ("publish_pack", "source_report", "posts_generate", "image_pack"),
+    "daily-cmo-loop": ("daily_feed", "digest", "seo_scan", "community_scan", "channel_drafts"),
+    "launch-pack": (
+        "report",
+        "launch_strategy",
+        "channel_mix",
+        "hooking_copy",
+        "brand_kit",
+        "homepage_copy",
+        "homepage_html",
+    ),
 }
 
 _HANDOFF_INPUTS = {

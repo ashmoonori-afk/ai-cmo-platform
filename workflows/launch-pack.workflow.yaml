@@ -113,7 +113,7 @@ steps:
     role: reviewer
     prompt: prompts/shared/gate-check.md
     terminal_delivery: true
-    depends_on: [report]
+    depends_on: [report, launch_strategy, channel_mix, hooking_copy, brand_kit, homepage_copy, homepage_html]
     pass_if: "status in ['PASS','WARN']"
     outputs:
       - artifacts/${run_id}/delivery-review.json

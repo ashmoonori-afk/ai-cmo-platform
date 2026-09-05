@@ -81,7 +81,7 @@ steps:
     role: reviewer
     prompt: prompts/shared/gate-check.md
     terminal_delivery: true
-    depends_on: [daily_feed]
+    depends_on: [daily_feed, digest, seo_scan, community_scan, channel_drafts]
     pass_if: "status in ['PASS','WARN']"
     outputs:
       - artifacts/${run_id}/delivery-review.json

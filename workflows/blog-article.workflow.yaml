@@ -50,7 +50,7 @@ steps:
     role: reviewer
     prompt: prompts/shared/gate-check.md
     terminal_delivery: true
-    depends_on: [report]
+    depends_on: [report, draft]
     pass_if: "status in ['PASS','WARN']"
     outputs:
       - artifacts/${run_id}/delivery-review.json

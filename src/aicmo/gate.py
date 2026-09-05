@@ -14,6 +14,25 @@ from aicmo.models import GateDecision
 
 _INCOMPLETE_MARKERS = ("TODO", "TBD", "FIXME", "입력 필요", "작성 필요", "[작성")
 _UNFILLED_TOKEN = re.compile(r"\{\{[A-Za-z_][A-Za-z0-9_]*\}\}")
+_UNSOURCED_PRICE = re.compile(
+    r"(?:[$€¥₩]\s*\d[\d,.]*|\d[\d,.]*(?:\s*[만천백])?(?:\s*\d+\s*[천백])?\s*원|"
+    r"\d[\d,.]*\s*(?:달러|USD|KRW))",
+    re.IGNORECASE,
+)
+_PRICE_SOURCE = re.compile(
+    r"(?:(?:출처|source)\s*:\s*\S+|pricing-rules\.md|config\.md|\[(?:추정|미확인)\])",
+    re.IGNORECASE,
+)
+_UNSAFE_CLAIM = re.compile(
+    r"(?:(?:매출|검색\s*1위|1위)[^.!?\n]{0,12}보장|100\s*%[^.!?\n]{0,12}보장|"
+    r"무조건\s*1위|guaranteed ranking)",
+    re.IGNORECASE,
+)
+_OPTIONAL_UNKNOWN_MARKERS = ("[미확인", "[추정]")
+_CLAIM_SEGMENT = re.compile(
+    r"(?:\r?\n|(?<=[.!?\N{IDEOGRAPHIC FULL STOP}"
+    r"\N{FULLWIDTH EXCLAMATION MARK}\N{FULLWIDTH QUESTION MARK}])\s+)",
+)
 _STATUS_TOKEN = re.compile(r"'([A-Z]+)'")
 _THIN_LENGTH = 80
 _DEFAULT_ALLOWED = frozenset({"PASS", "WARN"})
@@ -78,8 +97,8 @@ def _reject_duplicate_keys(
 def evaluate_artifacts(texts: list[str]) -> GateOutcome:
     """Deterministic completeness/safety gate over the gated artifacts.
 
-    FAIL on empty content, an incomplete marker (TODO/TBD/...), or an unfilled
-    template token. WARN on unusually thin content. PASS otherwise.
+    FAIL on empty, incomplete, unsafe, or unreferenced price content. WARN on
+    explicit estimates/unknowns and unusually thin content. PASS otherwise.
     """
     combined = "".join(texts).strip()
     if not combined:
@@ -95,8 +114,18 @@ def evaluate_artifacts(texts: list[str]) -> GateOutcome:
         )
         if _UNFILLED_TOKEN.search(text):
             reasons.append("unfilled placeholder token present")
+        if _UNSAFE_CLAIM.search(text):
+            reasons.append("unsafe marketing claim present")
+        if any(
+            _UNSOURCED_PRICE.search(segment) and not _PRICE_SOURCE.search(segment)
+            for segment in _CLAIM_SEGMENT.split(text)
+        ):
+            reasons.append("price claim has no source or estimate tag")
     if reasons:
         return GateOutcome(GateDecision.FAIL, tuple(dict.fromkeys(reasons)))
+    if any(marker in text for text in texts for marker in _OPTIONAL_UNKNOWN_MARKERS):
+        reason = "artifact contains an explicit estimate or unknown"
+        return GateOutcome(GateDecision.WARN, (reason,))
     if len(combined) < _THIN_LENGTH:
         return GateOutcome(GateDecision.WARN, ("content is unusually thin",))
     return GateOutcome(GateDecision.PASS, ())
