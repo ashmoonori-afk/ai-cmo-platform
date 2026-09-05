@@ -178,7 +178,7 @@ def test_stolen_lease_allows_only_new_owner_to_reach_success(repo_root: Path) ->
         assert blocker.started.wait(timeout=5)
 
         # When: runner B steals the stale lease and completes before A returns.
-        winner = runner_b.resume("r_stolen")
+        winner = runner_b.resume("r_stolen", allow_policy_change=True)
     finally:
         blocker.release.set()
         thread.join(timeout=5)
@@ -248,7 +248,7 @@ def test_lease_loss_after_prewrite_check_cannot_replace_winner(
         assert before_stale_write.wait(timeout=5)
 
         # When: runner B reclaims and completes while A remains before replacement.
-        winner = runner_b.resume("r_write_race")
+        winner = runner_b.resume("r_write_race", allow_policy_change=True)
         artifact = repo_root / "artifacts" / "r_write_race" / "keyword-brief.md"
         assert OFFLINE_STUB_MARKER in artifact.read_text(encoding="utf-8")
     finally:

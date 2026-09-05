@@ -40,3 +40,9 @@ class StoreDb:
                 connection.execute("alter table runs add column spec_digest text")
             if "spec_revision" not in columns:
                 connection.execute("alter table runs add column spec_revision integer")
+            policy_columns = {
+                str(row["name"])
+                for row in connection.execute("pragma table_info(run_policies)")
+            }
+            if "execution_policy_json" not in policy_columns:
+                connection.execute("alter table run_policies add column execution_policy_json text")

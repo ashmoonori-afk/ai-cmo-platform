@@ -1,19 +1,31 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Self
 
+from aicmo.adapters import CommandAdapter, StepAdapter
+from aicmo.anthropic_adapter import AnthropicAdapter, resolve_model
 from aicmo.errors import (
     RunConflictError,
     StepTransitionError,
     WorkflowExecutionError,
     WorkflowSpecError,
 )
-from aicmo.models import ApprovalDecision, RunResult, StepStatus, WorkflowSpec, WorkflowStep
+from aicmo.models import (
+    ApprovalDecision,
+    RunResult,
+    RunStatus,
+    StepStatus,
+    WorkflowSpec,
+    WorkflowStep,
+)
 from aicmo.paths import parse_safe_id
 from aicmo.redaction import contains_raw_secret
 from aicmo.spec import load_workflow_spec
 from aicmo.step_executor import WorkflowStepExecutor
+from aicmo.step_state import MAX_STEP_ATTEMPTS
 
 _OPERATING_INPUTS = {"artifact_format", "feedback"}
 
@@ -27,21 +39,73 @@ class WorkflowRunner(WorkflowStepExecutor):
         self._validate_inputs(spec, inputs)
         self.store.initialize()
         self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
+        self.store.ensure_execution_policy(run_id, self._execution_policy(spec))
         self.store.record_event(run_id, None, "run.started", f"Started {workflow_id}", inputs)
         return self._execute(spec, run_id, inputs)
 
-    def resume(self: Self, run_id: str) -> RunResult:
+    def resume(self: Self, run_id: str, *, allow_policy_change: bool = False) -> RunResult:
         self.store.initialize()
         run = self.store.get_run(run_id)
         inputs = self.store.get_inputs(run_id)
         try:
             spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
             self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
+            changed = self.store.ensure_execution_policy(
+                run_id,
+                self._execution_policy(spec),
+                allow_change=allow_policy_change,
+            )
         except WorkflowSpecError as exc:
             reason = f"current specification cannot be verified ({exc}); start a new run"
             raise RunConflictError(run_id, reason) from None
+        if changed:
+            self.store.record_event(
+                run_id,
+                None,
+                "run.policy_changed",
+                "Executor, reviewer, or model policy changed by explicit request",
+            )
         self.store.record_event(run_id, None, "run.resumed", f"Resumed {run_id}")
         return self._execute(spec, run_id, inputs)
+
+    def cancel(self: Self, run_id: str) -> None:
+        self.store.initialize()
+        self.store.cancel_run(run_id)
+        self.store.record_event(run_id, None, "run.cancelled", f"Cancelled {run_id}")
+
+    def _execution_policy(self: Self, spec: WorkflowSpec) -> str:
+        return json.dumps(
+            {
+                "schema_version": "aicmo.run-policy.v1",
+                "executor": self._adapter_identity(self.adapter),
+                "reviewer": (
+                    self._adapter_identity(self.review_adapter)
+                    if self.review_adapter is not None
+                    else None
+                ),
+                "models": {step.id: step.model or "" for step in spec.steps},
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _adapter_identity(adapter: StepAdapter) -> dict[str, str]:
+        identity = f"{type(adapter).__module__}.{type(adapter).__qualname__}"
+        if isinstance(adapter, CommandAdapter):
+            command = json.dumps(adapter.command, separators=(",", ":"))
+            return {
+                "type": identity,
+                "command_sha256": hashlib.sha256(command.encode()).hexdigest(),
+                "timeout_seconds": f"{adapter.timeout_seconds:g}",
+            }
+        if isinstance(adapter, AnthropicAdapter):
+            return {
+                "type": identity,
+                "default_model": resolve_model("", adapter.default_model),
+                "max_tokens": str(adapter.max_tokens),
+            }
+        return {"type": identity}
 
     def approve(
         self: Self,
@@ -130,13 +194,9 @@ class WorkflowRunner(WorkflowStepExecutor):
                     continue
                 self._reopen_successes_and_dependents(spec, run_id, {step.id})
                 status = StepStatus.PENDING
-            if not self._dependencies_done(run_id, step):
-                return self._fail(
-                    run_id,
-                    step.id,
-                    "dependency did not complete",
-                    owner=None,
-                )
+            halted = self._before_step(run_id, step, status)
+            if halted is not None:
+                return halted
             try:
                 artifact_refs = self._artifact_refs(run_id, step)
                 outputs = self._execute_step(run_id, step, context, status, artifact_refs)
@@ -169,9 +229,40 @@ class WorkflowRunner(WorkflowStepExecutor):
             )
             if after_step is not None:
                 return after_step
-        self.store.mark_run_success(run_id)
+        return self._complete_run(run_id)
+
+    def _before_step(
+        self: Self,
+        run_id: str,
+        step: WorkflowStep,
+        status: StepStatus,
+    ) -> RunResult | None:
+        if self.store.is_run_cancelled(run_id):
+            return RunResult(status=RunStatus.CANCELLED.value, run_id=run_id)
+        if (
+            status != StepStatus.WAITING_APPROVAL
+            and self.store.get_step_attempt(run_id, step.id) >= MAX_STEP_ATTEMPTS
+        ):
+            self.store.record_event(
+                run_id,
+                step.id,
+                "step.retry_exhausted",
+                f"Step attempt limit reached ({MAX_STEP_ATTEMPTS})",
+            )
+            return RunResult(
+                status=RunStatus.FAILED.value,
+                run_id=run_id,
+                failed_step_id=step.id,
+            )
+        if not self._dependencies_done(run_id, step):
+            return self._fail(run_id, step.id, "dependency did not complete", owner=None)
+        return None
+
+    def _complete_run(self: Self, run_id: str) -> RunResult:
+        if not self.store.mark_run_success(run_id):
+            return RunResult(status=RunStatus.CANCELLED.value, run_id=run_id)
         self.store.record_event(run_id, None, "run.success", f"Completed {run_id}")
-        return RunResult(status="success", run_id=run_id)
+        return RunResult(status=RunStatus.SUCCESS.value, run_id=run_id)
 
     def _dependencies_done(self: Self, run_id: str, step: WorkflowStep) -> bool:
         return all(
@@ -231,6 +322,8 @@ class WorkflowRunner(WorkflowStepExecutor):
         return RunResult(status="failed", run_id=run_id, failed_step_id=step_id)
 
     def _lost_lease(self: Self, run_id: str, step_id: str, message: str) -> RunResult:
+        if self.store.is_run_cancelled(run_id):
+            return RunResult(status=RunStatus.CANCELLED.value, run_id=run_id)
         self.store.record_event(run_id, step_id, "step.lost_lease", message)
         return RunResult(status="failed", run_id=run_id, failed_step_id=step_id)
 

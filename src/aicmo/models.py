@@ -23,6 +23,7 @@ class StepStatus(StrEnum):
     SUCCESS = "success"
     FAILED = "failed"
     WAITING_APPROVAL = "waiting_approval"
+    CANCELLED = "cancelled"
 
 
 class RunStatus(StrEnum):
@@ -30,6 +31,7 @@ class RunStatus(StrEnum):
     SUCCESS = "success"
     FAILED = "failed"
     WAITING_APPROVAL = "waiting_approval"
+    CANCELLED = "cancelled"
 
 
 class GateDecision(StrEnum):
@@ -159,11 +161,18 @@ class WorkflowSpec(BaseModel):
 
     @model_validator(mode="after")
     def validate_terminal_topology(self) -> WorkflowSpec:
-        terminal_ids = {step.id for step in self.steps if step.terminal_delivery}
+        terminal_steps = tuple(step for step in self.steps if step.terminal_delivery)
+        if len(terminal_steps) > 1:
+            msg = "workflow may define only one terminal delivery gate"
+            raise ValueError(msg)
+        terminal_ids = {step.id for step in terminal_steps}
         for step in self.steps:
             if any(dependency in terminal_ids for dependency in step.depends_on):
                 msg = "terminal delivery gate must be a leaf"
                 raise ValueError(msg)
+        if terminal_steps and self.execution_order()[-1] != terminal_steps[0]:
+            msg = "terminal delivery gate must be the final step"
+            raise ValueError(msg)
         return self
 
     def _validate_acyclic(self) -> None:

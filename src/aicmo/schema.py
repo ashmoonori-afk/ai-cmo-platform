@@ -31,7 +31,8 @@ SCHEMA = (
         run_id text primary key,
         phase_git_mode text not null check (
             phase_git_mode in ('off', 'dry-run', 'commit', 'push', 'merge')
-        )
+        ),
+        execution_policy_json text
     )
     """,
     """

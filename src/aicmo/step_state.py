@@ -15,6 +15,7 @@ from aicmo.redaction import redact
 from aicmo.run_state import WorkflowRunStore
 
 _DEFAULT_LEASE_TTL = 300.0
+MAX_STEP_ATTEMPTS = 3
 _STEP_OUTPUTS_ADAPTER = TypeAdapter(list[str])
 
 
@@ -41,6 +42,14 @@ class WorkflowStepStore(WorkflowRunStore):
         if row is None:
             return StepStatus.PENDING
         return StepStatus(row["status"])
+
+    def get_step_attempt(self: Self, run_id: str, step_id: str) -> int:
+        with self.connect() as connection:
+            row = connection.execute(
+                "select attempt from steps where run_id = ? and step_id = ?",
+                (run_id, step_id),
+            ).fetchone()
+        return 0 if row is None else int(row["attempt"])
 
     def get_step_outputs(self: Self, run_id: str, step_id: str) -> list[str]:
         with self.connect() as connection:
@@ -107,8 +116,23 @@ class WorkflowStepStore(WorkflowRunStore):
                     locked_at = current_timestamp
                 where run_id = ? and step_id = ?
                   and (status != 'running' or locked_by is null or locked_at <= ?)
+                  and attempt < ?
+                  and status != ?
+                  and exists (
+                      select 1 from runs
+                      where runs.run_id = steps.run_id and runs.status != ?
+                  )
                 """,
-                (StepStatus.RUNNING.value, owner, run_id, step.id, threshold),
+                (
+                    StepStatus.RUNNING.value,
+                    owner,
+                    run_id,
+                    step.id,
+                    threshold,
+                    MAX_STEP_ATTEMPTS,
+                    StepStatus.CANCELLED.value,
+                    RunStatus.CANCELLED.value,
+                ),
             )
             claimed = cursor.rowcount == 1
             if claimed:
@@ -240,9 +264,54 @@ class WorkflowStepStore(WorkflowRunStore):
             self._mark_run(connection, run_id, RunStatus.FAILED, step_id, step_id)
         return True
 
-    def mark_run_success(self: Self, run_id: str) -> None:
+    def mark_run_success(self: Self, run_id: str) -> bool:
         with self.connect() as connection:
-            self._mark_run(connection, run_id, RunStatus.SUCCESS, None, None, completed=True)
+            cursor = connection.execute(
+                """
+                update runs set status = ?, current_step_id = null, failed_step_id = null,
+                    updated_at = current_timestamp, completed_at = current_timestamp
+                where run_id = ? and status != ?
+                """,
+                (RunStatus.SUCCESS.value, run_id, RunStatus.CANCELLED.value),
+            )
+        return cursor.rowcount == 1
+
+    def cancel_run(self: Self, run_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute(
+                "select status from runs where run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise StepTransitionError(run_id, "run", "run does not exist")
+            if row["status"] == RunStatus.SUCCESS.value:
+                raise StepTransitionError(run_id, "run", "successful run cannot be cancelled")
+            unfinished = connection.execute(
+                "select 1 from steps where run_id = ? and status != ? limit 1",
+                (run_id, StepStatus.SUCCESS.value),
+            ).fetchone()
+            if unfinished is None:
+                raise StepTransitionError(
+                    run_id,
+                    "run",
+                    "all steps finished; cancellation is no longer available",
+                )
+            connection.execute(
+                """
+                update steps set status = ?, completed_at = current_timestamp,
+                    locked_by = null, locked_at = null
+                where run_id = ? and status != ?
+                """,
+                (StepStatus.CANCELLED.value, run_id, StepStatus.SUCCESS.value),
+            )
+            self._mark_run(
+                connection,
+                run_id,
+                RunStatus.CANCELLED,
+                None,
+                completed=True,
+            )
 
     def _reset_to_pending(
         self: Self,
@@ -307,13 +376,15 @@ class WorkflowStepStore(WorkflowRunStore):
         step_id: str,
     ) -> None:
         row = connection.execute(
-            "select status, step_type from steps where run_id = ? and step_id = ?",
+            "select status, step_type, attempt from steps where run_id = ? and step_id = ?",
             (run_id, step_id),
         ).fetchone()
         if row is None:
             raise StepTransitionError(run_id, step_id, "step does not exist")
         if row["status"] != StepStatus.FAILED.value:
             raise StepTransitionError(run_id, step_id, "step is not failed")
+        if int(row["attempt"]) >= MAX_STEP_ATTEMPTS:
+            raise StepTransitionError(run_id, step_id, "step attempt limit reached")
         if row["step_type"] != "gate":
             return
         approval = connection.execute(

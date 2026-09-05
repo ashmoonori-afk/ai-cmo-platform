@@ -355,6 +355,8 @@ class WorkflowStepExecutor:
         run_id: str,
         context: dict[str, str],
     ) -> None:
+        if self.store.is_run_cancelled(run_id):
+            return
         stale: set[str] = set()
         for step in spec.execution_order():
             if self.store.get_step_status(run_id, step.id) != StepStatus.SUCCESS:

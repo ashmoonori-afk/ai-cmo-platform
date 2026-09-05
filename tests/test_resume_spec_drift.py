@@ -164,11 +164,15 @@ def test_initialize_adds_nullable_specification_identity_to_legacy_runs(tmp_path
 
     with closing(sqlite3.connect(db_path)) as connection:
         columns = {str(row[1]) for row in connection.execute("pragma table_info(runs)")}
+        policy_columns = {
+            str(row[1]) for row in connection.execute("pragma table_info(run_policies)")
+        }
         identity = connection.execute(
             "select spec_digest, spec_revision from runs where run_id = ?",
             ("legacy_run",),
         ).fetchone()
     assert {"spec_digest", "spec_revision"} <= columns
+    assert "execution_policy_json" in policy_columns
     assert identity == (None, None)
 
 

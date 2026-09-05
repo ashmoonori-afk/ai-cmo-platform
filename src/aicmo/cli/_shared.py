@@ -20,6 +20,7 @@ console = Console()
 err_console = Console(stderr=True)
 
 EXIT_FAILED = 1
+EXIT_CANCELLED = 2
 EXIT_WAITING_APPROVAL = 75  # EX_TEMPFAIL: paused for approval; resume after the gate is approved
 type PhaseAnnouncer = Callable[[WorkflowStep, tuple[str, ...]], None]
 
@@ -29,6 +30,8 @@ def exit_code_for(status: str) -> int:
         return EXIT_FAILED
     if status == RunStatus.WAITING_APPROVAL.value:
         return EXIT_WAITING_APPROVAL
+    if status == RunStatus.CANCELLED.value:
+        return EXIT_CANCELLED
     return 0
 
 def emit_result(result: RunResult) -> None:

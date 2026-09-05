@@ -225,6 +225,13 @@ def resume_run(
     review: ReviewOpt = None,
     review_cmd: ReviewCmdOpt = None,
     review_anthropic: ReviewAnthropicOpt = False,
+    allow_policy_change: Annotated[
+        bool,
+        typer.Option(
+            "--allow-policy-change",
+            help="Explicitly resume with different executor, reviewer, or model settings.",
+        ),
+    ] = False,
 ) -> None:
     repo_root = repo.resolve()
     policy_store = WorkflowStore(db or default_db(repo_root))
@@ -241,8 +248,17 @@ def resume_run(
         emit_phase_deliverables,
         phase_git_callback(repo_root, selected_mode, run_id),
     )
-    result = runner.resume(run_id)
+    result = runner.resume(run_id, allow_policy_change=allow_policy_change)
     emit_result(result)
+
+
+def cancel_run(
+    run_id: Annotated[str, typer.Argument()],
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+) -> None:
+    make_runner(repo, db).cancel(run_id)
+    console.print(f"{run_id}: cancelled")
 
 def retry_step(
     run_id: Annotated[str, typer.Argument()],
@@ -263,3 +279,4 @@ def register(app: typer.Typer, run_id_factory: Callable[[], str]) -> None:
 
 def register_retry(app: typer.Typer) -> None:
     app.command("retry")(retry_step)
+    app.command("cancel")(cancel_run)

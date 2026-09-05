@@ -223,3 +223,45 @@ def test_terminal_delivery_gate_must_be_a_leaf() -> None:
                 ],
             },
         )
+
+
+def test_terminal_delivery_gate_must_be_unique_and_final() -> None:
+    with pytest.raises(ValueError, match="final step"):
+        WorkflowSpec.model_validate(
+            {
+                "id": "later-independent-step",
+                "name": "Later Independent Step",
+                "steps": [
+                    {"id": "artifact", "type": "agent"},
+                    {
+                        "id": "delivery_gate",
+                        "type": "gate",
+                        "depends_on": ["artifact"],
+                        "terminal_delivery": True,
+                    },
+                    {"id": "later", "type": "agent"},
+                ],
+            },
+        )
+    with pytest.raises(ValueError, match="only one terminal delivery gate"):
+        WorkflowSpec.model_validate(
+            {
+                "id": "two-delivery-gates",
+                "name": "Two Delivery Gates",
+                "steps": [
+                    {"id": "artifact", "type": "agent"},
+                    {
+                        "id": "first_delivery",
+                        "type": "gate",
+                        "depends_on": ["artifact"],
+                        "terminal_delivery": True,
+                    },
+                    {
+                        "id": "second_delivery",
+                        "type": "gate",
+                        "depends_on": ["artifact"],
+                        "terminal_delivery": True,
+                    },
+                ],
+            },
+        )
