@@ -4,6 +4,7 @@ from typing import Annotated
 
 import typer
 
+from aicmo.capabilities import find_mapping, load_capabilities
 from aicmo.evaluate import evaluate_asset, render_report
 from aicmo.mockup import brief_from_answers, render_landing_mockup, render_pdf, render_png
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
@@ -21,6 +22,7 @@ def emit_onboarding(result: OnboardingResult) -> None:
         console.print(f"  {path}")
     console.print(f"pdf: {result.pdf_status}")
 
+
 def onboard_client(
     client: Annotated[str, typer.Option("--client", help="Client slug (folder under clients/)")],
     answers: Annotated[Path, typer.Option("--from", help="Path to the 7-answer JSON file")],
@@ -36,12 +38,14 @@ def onboard_client(
     result = scaffold_client(repo.resolve(), loaded, force=force, pdf=pdf)
     emit_onboarding(result)
 
+
 def serve_cmd(
     host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
     port: Annotated[int, typer.Option("--port")] = 8765,
 ) -> None:
     console.print(f"AI CMO web: http://{host}:{port}  (Ctrl-C to stop)")
     run_server(host, port)
+
 
 def mockup_cmd(
     source: Annotated[Path, typer.Option("--from", help="Onboarding answers JSON")],
@@ -55,6 +59,7 @@ def mockup_cmd(
     if png is not None:
         console.print(f"png: {render_png(out, png)}")
 
+
 def primer_cmd(
     source: Annotated[Path, typer.Option("--from", help="Onboarding answers JSON")],
     out: Annotated[Path, typer.Option("--out", help="HTML primer output path")],
@@ -66,6 +71,7 @@ def primer_cmd(
     console.print(f"primer: {out}")
     if pdf is not None:
         console.print(f"pdf: {render_pdf(out, pdf)}")
+
 
 def evaluate_cmd(
     source: Annotated[Path, typer.Option("--from", help="Asset markdown to score")],
@@ -85,6 +91,7 @@ def evaluate_cmd(
         out.write_text(render_report(result, title or source.stem), encoding="utf-8")
         console.print(f"scorecard: {out}")
 
+
 def kb_flush(
     client: Annotated[str | None, typer.Option("--client")] = None,
     repo: Annotated[Path, typer.Option("--repo")] = Path(),
@@ -96,6 +103,43 @@ def kb_flush(
     console.print(f"kb-flush: {count} queued update(s) appended to knowledge-base")
 
 
+def capabilities_cmd(
+    query: Annotated[
+        str | None, typer.Argument(help="Natural-language query to match against mapping triggers.")
+    ] = None,
+    agents: Annotated[bool, typer.Option("--agents", help="List the 13 sub-agents.")] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Machine-readable JSON output.")] = False,
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+) -> None:
+    registry = load_capabilities(repo.resolve())
+    if query:
+        matches = find_mapping(registry, query)
+        if as_json:
+            console.print_json(data=matches)
+            return
+        if not matches:
+            console.print(f"no mapping matched: {query}")
+            return
+        for m in matches:
+            target = m.get("playbook") or " -> ".join(m.get("chain", []))
+            console.print(f"[{m['id']}] {target}")
+            console.print(f"    agents: {m['agents']} | model: {m['model']}")
+        return
+    if agents:
+        items = registry["agents"]
+        if as_json:
+            console.print_json(data=items)
+            return
+        for a in items:
+            console.print(f"{a['name']} ({a['model']}) — {a['role']} [{a['path']}]")
+        return
+    console.print(
+        f"agents: {len(registry['agents'])} | mappings: {len(registry['mappings'])}"
+        f" | modules: {len(registry['modules'])}"
+    )
+    console.print('usage: aicmo capabilities "블로그" | --agents | --json')
+
+
 def register(app: typer.Typer) -> None:
     app.command("onboard")(onboard_client)
     app.command("serve")(serve_cmd)
@@ -103,3 +147,4 @@ def register(app: typer.Typer) -> None:
     app.command("mockup")(mockup_cmd)
     app.command("evaluate")(evaluate_cmd)
     app.command("kb-flush")(kb_flush)
+    app.command("capabilities")(capabilities_cmd)

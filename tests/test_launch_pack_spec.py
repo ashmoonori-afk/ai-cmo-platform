@@ -91,6 +91,7 @@ _DELIVERY_PRODUCERS = {
     "approval-demo": ("report",),
     "blog-article": ("report",),
     "content-engine": ("publish_pack",),
+    "daily-cmo-loop": ("daily_feed",),
     "launch-pack": ("report",),
 }
 
@@ -113,6 +114,15 @@ _HANDOFF_INPUTS = {
         "brand_kit",
         "homepage_copy",
         "homepage_html",
+        "quality_gate",
+        "owner_gate",
+        "kb_queue",
+    ),
+    "daily-cmo-loop": (
+        "digest",
+        "seo_scan",
+        "community_scan",
+        "channel_drafts",
         "quality_gate",
         "owner_gate",
         "kb_queue",
