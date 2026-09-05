@@ -10,8 +10,9 @@ import typer
 from aicmo.feedback import record_artifact_feedback
 from aicmo.ingest import InboxItem, archive_item, retain_failed_urls, scan_inbox
 from aicmo.phase_git import PhaseGitMode, run_phase_git
-from aicmo.redaction import redact
+from aicmo.redaction import minimize_customer_pii, redact
 from aicmo.runner import WorkflowRunner
+from aicmo.source_input import source_checked_date
 from aicmo.store import WorkflowStore
 
 from ._options import (
@@ -50,6 +51,10 @@ class _RunIdFactory:
 
 
 generated_run_id = _RunIdFactory()
+
+
+def _safe_display(value: object) -> str:
+    return minimize_customer_pii(redact(str(value)))
 
 
 def run_workflow(
@@ -129,15 +134,29 @@ def _ingest_item(runner: WorkflowRunner, item: InboxItem, client: str, repo_root
     failed_urls: list[str] = []
     for url in item.urls:
         run_id = generated_run_id()
-        console.print(f"{item.source_file.name} -> {run_id}: {redact(url)}", markup=False)
+        console.print(
+            _safe_display(f"{item.source_file.name} -> {run_id}: {url}"),
+            markup=False,
+        )
         try:
+            inputs = {"client": client, "source_url": url}
+            if item.source_text:
+                inputs.update(
+                    {
+                        "source_text": item.source_text,
+                        "source_checked_at": source_checked_date().isoformat(),
+                    },
+                )
             result = runner.run(
                 workflow_id="content-engine",
                 run_id=run_id,
-                inputs={"client": client, "source_url": url},
+                inputs=inputs,
             )
         except Exception as exc:  # noqa: BLE001 — keep ingesting the remaining URLs
-            console.print(redact(f"  failed: {type(exc).__name__}: {exc}"), markup=False)
+            console.print(
+                _safe_display(f"  failed: {type(exc).__name__}: {exc}"),
+                markup=False,
+            )
             failed_urls.append(url)
             continue
         console.print(f"  {result.status}", markup=False)
@@ -145,18 +164,20 @@ def _ingest_item(runner: WorkflowRunner, item: InboxItem, client: str, repo_root
             failed_urls.append(url)
 
     if not item.urls:
-        console.print(f"skipped (no urls): {item.source_file.name}", markup=False)
+        console.print(_safe_display(f"skipped (no urls): {item.source_file.name}"), markup=False)
     elif not failed_urls:
         archived = archive_item(item)
-        console.print(f"archived: {archived.relative_to(repo_root)}", markup=False)
+        console.print(_safe_display(f"archived: {archived.relative_to(repo_root)}"), markup=False)
     elif len(failed_urls) < len(item.urls):
         retain_failed_urls(item, failed_urls)
         console.print(
-            f"retained {len(failed_urls)} failed url(s) in {item.source_file.name} for retry",
+            _safe_display(
+                f"retained {len(failed_urls)} failed url(s) in {item.source_file.name} for retry"
+            ),
             markup=False,
         )
     else:
-        console.print(f"kept for retry: {item.source_file.name}", markup=False)
+        console.print(_safe_display(f"kept for retry: {item.source_file.name}"), markup=False)
     return bool(failed_urls)
 
 
@@ -184,14 +205,22 @@ def ingest_inbox(
     repo_root = repo.resolve()
     items = scan_inbox(repo_root, client)
     if not items:
-        console.print(f"inbox empty: inbox/{client}/ (drop .txt/.md files with one URL per line)")
+        message = f"inbox empty: inbox/{client}/ (drop .txt/.md files with one URL per line)"
+        console.print(
+            _safe_display(message)
+        )
         return
     if dry_run:
         for item in items:
-            console.print(f"{item.source_file.name}: {len(item.urls)} url(s)", markup=False)
+            console.print(
+                _safe_display(f"{item.source_file.name}: {len(item.urls)} url(s)"),
+                markup=False,
+            )
             for url in item.urls:
+                source_status = "provided source" if item.source_text else "URL only: unavailable"
+                plan = _safe_display(f"source_url={url} ({source_status})")
                 console.print(
-                    f"  would run content-engine --input source_url={redact(url)}",
+                    f"  would run content-engine --input {plan}",
                     markup=False,
                 )
         return

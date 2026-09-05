@@ -52,7 +52,13 @@ CONTENT_ENGINE_ORDER = (
 
 def test_content_engine_spec_is_linear() -> None:
     spec = load_workflow_spec(REPO_ROOT, "content-engine")
-    assert spec.inputs == {"client": "required", "source_url": "required", "channels": "optional"}
+    assert spec.inputs == {
+        "client": "required",
+        "source_url": "required",
+        "source_text": "required",
+        "source_checked_at": "required",
+        "channels": "optional",
+    }
     assert tuple(step.id for step in spec.execution_order()) == CONTENT_ENGINE_ORDER
     steps = {step.id: step for step in spec.steps}
     assert steps["owner_gate"].requires_approval

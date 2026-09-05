@@ -22,12 +22,13 @@ from aicmo.models import (
     WorkflowStep,
 )
 from aicmo.paths import parse_safe_id
-from aicmo.redaction import contains_raw_secret
+from aicmo.redaction import contains_raw_secret, minimize_customer_pii
+from aicmo.source_input import PreparedInputs, operating_inputs, prepare_workflow_inputs
 from aicmo.spec import load_workflow_spec
 from aicmo.step_executor import WorkflowStepExecutor
 from aicmo.step_state import MAX_STEP_ATTEMPTS
 
-_OPERATING_INPUTS = {"artifact_format", "feedback"}
+_OPERATING_INPUTS = {"artifact_format", "feedback", *operating_inputs()}
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,10 +37,13 @@ class WorkflowRunner(WorkflowStepExecutor):
         parse_safe_id("workflow_id", workflow_id)
         parse_safe_id("run_id", run_id)
         spec = load_workflow_spec(self.repo_root, workflow_id)
+        prepared = prepare_workflow_inputs(spec.inputs, inputs)
+        inputs = prepared.values
         self._validate_inputs(spec, inputs)
         self.store.initialize()
         self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
         self.store.ensure_execution_policy(run_id, self._execution_policy(spec))
+        self._write_source_manifest(run_id, prepared)
         self.store.record_event(run_id, None, "run.started", f"Started {workflow_id}", inputs)
         return self._execute(spec, run_id, inputs)
 
@@ -50,6 +54,7 @@ class WorkflowRunner(WorkflowStepExecutor):
         try:
             spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
             self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
+            self._write_source_manifest(run_id, prepare_workflow_inputs(spec.inputs, inputs))
             changed = self.store.ensure_execution_policy(
                 run_id,
                 self._execution_policy(spec),
@@ -107,6 +112,18 @@ class WorkflowRunner(WorkflowStepExecutor):
             }
         return {"type": identity}
 
+    def _write_source_manifest(self: Self, run_id: str, prepared: PreparedInputs) -> None:
+        if prepared.source_manifest is None:
+            return
+        target = self.repo_root / "artifacts" / run_id / "source-manifest.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(prepared.source_manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(target)
+
     def approve(
         self: Self,
         run_id: str,
@@ -132,8 +149,15 @@ class WorkflowRunner(WorkflowStepExecutor):
                     "--accept-edits requires a gate in waiting_approval",
                 )
             changed = self._accept_artifact_edits(run_id, step_id)
-        self.store.approve(run_id, step_id, ApprovalDecision.APPROVED, reviewer, notes)
-        self.store.record_event(run_id, step_id, "gate.approved", notes, {"reviewer": reviewer})
+        safe_notes = minimize_customer_pii(notes)
+        self.store.approve(run_id, step_id, ApprovalDecision.APPROVED, reviewer, safe_notes)
+        self.store.record_event(
+            run_id,
+            step_id,
+            "gate.approved",
+            safe_notes,
+            {"reviewer": reviewer},
+        )
         if accept_edits:
             self.store.record_event(
                 run_id,
@@ -172,9 +196,16 @@ class WorkflowRunner(WorkflowStepExecutor):
 
     def reject(self: Self, run_id: str, step_id: str, reviewer: str, notes: str) -> None:
         self.store.initialize()
-        self.store.approve(run_id, step_id, ApprovalDecision.REJECTED, reviewer, notes)
+        safe_notes = minimize_customer_pii(notes)
+        self.store.approve(run_id, step_id, ApprovalDecision.REJECTED, reviewer, safe_notes)
         self.store.mark_step_failed(run_id, step_id, "manual gate rejected")
-        self.store.record_event(run_id, step_id, "gate.rejected", notes, {"reviewer": reviewer})
+        self.store.record_event(
+            run_id,
+            step_id,
+            "gate.rejected",
+            safe_notes,
+            {"reviewer": reviewer},
+        )
 
     def retry(self: Self, run_id: str, step_id: str) -> None:
         self.store.initialize()

@@ -6,7 +6,7 @@ import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, InvalidStateError
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import assert_never
 from uuid import uuid4
@@ -36,6 +36,7 @@ from aicmo.models import (
     WorkflowStep,
 )
 from aicmo.paths import resolve_inside_repo
+from aicmo.redaction import minimize_customer_pii
 from aicmo.reviewer_contract import (
     REVIEW_CLIENT_CRITERIA,
     REVIEW_CLIENT_CRITERIA_LIMIT,
@@ -188,10 +189,40 @@ class WorkflowStepExecutor:
             model=step.model or "",
             artifact_refs=artifact_refs,
         )
+        request = replace(
+            request,
+            artifact_refs=self._minimize_artifact_refs(request.artifact_refs, context),
+        )
         result = self.adapter.generate(request)
         if not result.ok:
-            raise WorkflowExecutionError(step.id, f"agent executor failed: {result.detail}")
+            detail = self._minimize_pii(result.detail, context)
+            raise WorkflowExecutionError(step.id, f"agent executor failed: {detail}")
         return self._write_outputs(step, context, result.text, lease_signal)
+
+    @staticmethod
+    def _minimize_pii(text: str, context: dict[str, str]) -> str:
+        allowed = (
+            (context.get("public_store_phone", ""),)
+            if context.get("public_contact_approved", "false").casefold() == "true"
+            else ()
+        )
+        return minimize_customer_pii(text, allowed=allowed)
+
+    def _minimize_artifact_refs(
+        self,
+        refs: tuple[ArtifactRef, ...],
+        context: dict[str, str],
+    ) -> tuple[ArtifactRef, ...]:
+        return tuple(
+            ArtifactRef(
+                producer_step_id=ref.producer_step_id,
+                path=ref.path,
+                sha256=ref.sha256,
+                content_excerpt=self._minimize_pii(ref.content_excerpt, context),
+                truncated=ref.truncated,
+            )
+            for ref in refs
+        )
 
     def _run_gate(
         self,
@@ -424,7 +455,10 @@ class WorkflowStepExecutor:
         if review_adapter is None:
             msg = "semantic review requires a configured reviewer"
             raise RuntimeError(msg)
-        review_input = "\n\n---\n\n".join(texts)[:REVIEW_INPUT_LIMIT]
+        review_input = self._minimize_pii(
+            "\n\n---\n\n".join(texts)[:REVIEW_INPUT_LIMIT],
+            context,
+        )
         policy_sources: list[str] = []
         role_contracts = [REVIEW_CONTRACT]
         declared_policy_sources = tuple(
@@ -447,7 +481,10 @@ class WorkflowStepExecutor:
             relative = f"clients/{client}/{filename}"
             source = self._resolve(relative, {})
             if source.is_file() and criteria_remaining:
-                content = source.read_text(encoding="utf-8")[:criteria_remaining]
+                content = self._minimize_pii(
+                    source.read_text(encoding="utf-8")[:criteria_remaining],
+                    context,
+                )
                 client_criteria.append({"path": relative, "content": content})
                 criteria_remaining -= len(content)
         request = AgentRequest(
@@ -468,7 +505,10 @@ class WorkflowStepExecutor:
                 separators=(",", ":"),
             ),
             model=step.model or "",
-            artifact_refs=self._artifact_refs(context["run_id"], step),
+            artifact_refs=self._minimize_artifact_refs(
+                self._artifact_refs(context["run_id"], step),
+                context,
+            ),
         )
         result = review_adapter.generate(request)
         resolution = resolve_reviewer_output(review_adapter, request, result)
@@ -617,6 +657,7 @@ class WorkflowStepExecutor:
         content: str,
         lease_signal: _LeaseSignal,
     ) -> list[str]:
+        content = self._minimize_pii(content, context)
         written: list[str] = []
         for output_template in self._output_templates(step):
             target = self._resolve(output_template, context)
