@@ -54,7 +54,13 @@ class WorkflowRunner(WorkflowStepExecutor):
         try:
             spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
             self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
-            self._write_source_manifest(run_id, prepare_workflow_inputs(spec.inputs, inputs))
+            prepared = prepare_workflow_inputs(spec.inputs, inputs)
+            if prepared.values != inputs:
+                raise RunConflictError(
+                    run_id,
+                    "stored inputs do not meet current privacy rules; start a new run",
+                )
+            self._write_source_manifest(run_id, prepared)
             changed = self.store.ensure_execution_policy(
                 run_id,
                 self._execution_policy(spec),

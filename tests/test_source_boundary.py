@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -12,7 +13,7 @@ from aicmo.adapters import AgentRequest, AgentResult
 from aicmo.errors import WorkflowExecutionError
 from aicmo.redaction import is_customer_phone, minimize_customer_pii
 from aicmo.runner import WorkflowRunner
-from aicmo.source_input import source_checked_date
+from aicmo.source_input import prepare_workflow_inputs, source_checked_date
 from aicmo.store import WorkflowStore
 from tests.conftest import lines, write_text
 
@@ -64,6 +65,12 @@ NAME_CONTEXT_VARIANTS = (
     "고객명 김민수",
     "고객명 - 김민수",
     "작성자 박서연",
+)
+US_PRIVATE_TEXT = (
+    "Customer name: Jane Doe; phone: +1 (202) 555-0100\n"
+    "Customer address: 123 Example Street, Washington DC 20001\n"
+    '{"customer_name": "Alex O\'Connell", "phone": "202.555.0199"}\n'
+    "https://example.test/?customer_name=Jordan%20Smith&phone=%2B12025550188\n"
 )
 
 
@@ -118,6 +125,7 @@ def test_customer_pii_is_removed_before_prompt_log_and_output(repo_root: Path) -
         + "\n"
         + "\n".join(NAME_CONTEXT_VARIANTS)
         + "\n"
+        + US_PRIVATE_TEXT
     )
     config.write_text(config.read_text("utf-8") + source_text, encoding="utf-8")
     adapter = CaptureAdapter()
@@ -149,11 +157,7 @@ def test_customer_pii_is_removed_before_prompt_log_and_output(repo_root: Path) -
             union all select message || ' ' || payload_json from events
             union all select coalesce(error_json, '') from steps
         """
-        persisted = "\n".join(
-            str(value)
-            for row in connection.execute(query)
-            for value in row
-        )
+        persisted = "\n".join(str(value) for row in connection.execute(query) for value in row)
     prompt = "\n".join(
         part
         for request in adapter.requests
@@ -163,8 +167,7 @@ def test_customer_pii_is_removed_before_prompt_log_and_output(repo_root: Path) -
         )
     )
     artifacts = "\n".join(
-        path.read_text("utf-8")
-        for path in (repo_root / "artifacts" / "source_safe").glob("*")
+        path.read_text("utf-8") for path in (repo_root / "artifacts" / "source_safe").glob("*")
     )
     combined = persisted + prompt + artifacts
 
@@ -179,6 +182,13 @@ def test_customer_pii_is_removed_before_prompt_log_and_output(repo_root: Path) -
     assert "[customer-email]" in combined
     assert "[customer-phone]" in combined
     assert PUBLIC_PHONE in combined
+    for private in ("Jane Doe", "Alex O'Connell", "Jordan", "123 Example Street"):
+        assert private not in combined
+    assert "555-0100" not in combined
+    assert "555.0199" not in combined
+    assert "5550188" not in combined
+    assert "[customer-address]" in combined
+    assert '"anonymization_status": "not_verified"' in artifacts
     assert '"content_status": "provided_by_user"' in artifacts
 
 
@@ -237,12 +247,7 @@ def test_customer_pii_is_removed_before_prompt_log_and_output(repo_root: Path) -
             "valid UTF-8 percent encoding",
         ),
         (
-            {
-                "source_url": (
-                    "https://e.test/?phone=%FF%30%31%30%2D%39%38"
-                    "%37%36%2D%35%34%33%32"
-                )
-            },
+            {"source_url": ("https://e.test/?phone=%FF%30%31%30%2D%39%38%37%36%2D%35%34%33%32")},
             "valid UTF-8 percent encoding",
         ),
         ({"public_store_phone": PUBLIC_PHONE}, "requires public_contact_approved=true"),
@@ -375,3 +380,112 @@ def test_pii_minimizer_preserves_percent_encoded_korean_url(url: str) -> None:
 @pytest.mark.parametrize("phone", ["0507-1234-5678", "070-1234-5678", "1588-1234"])
 def test_common_public_store_phone_formats_are_valid(phone: str) -> None:
     assert is_customer_phone(phone)
+
+
+@pytest.mark.parametrize(
+    "phone",
+    [
+        "+1 (202) 555-0100",
+        "202-555-0100",
+        "202.555.0100",
+        "2025550100",
+        "+12025550100",
+        "(202) 555-0100",
+        _fullwidth("202-555-0100"),
+    ],
+)
+def test_north_american_phone_minimization_and_public_phone_validation(phone: str) -> None:
+    assert minimize_customer_pii(phone) == "[customer-phone]"
+    assert is_customer_phone(phone)
+    assert minimize_customer_pii(phone, allowed=(phone,)) == phone
+
+
+@pytest.mark.parametrize(
+    "ordinary",
+    [
+        "Order 123456789012345; revenue 1,202,555,0100; date 2026-09-06",
+        "Company name: Example Store; address: 123 Main Street",
+        "https://example.test/search?q=Jane%20Doe",
+        "https://example.test/?company_name=Example%20Store",
+        "company_name=ExampleStore",
+        "https://example.test/name/about",
+        "https://example.test/?name=coffee",
+        "https://example.test/customer/support",
+        "https://example.test/?customer=business",
+        "https://example.test/?name=coffee%20beans",
+        "https://example.test/customer/help%20center",
+        "https://example.test/?name=Coffee%20Beans",
+        "https://example.test/?Name=Jane+Doe",
+        "https://example.test/Name/Jane+Doe",
+    ],
+)
+def test_customer_minimization_preserves_business_context(ordinary: str) -> None:
+    assert minimize_customer_pii(ordinary) == ordinary
+
+
+def test_structured_customer_fields_are_minimized_without_their_labels() -> None:
+    prepared = prepare_workflow_inputs(
+        {},
+        {
+            "customer_name": "Jane Doe",
+            "customer_address": "123 Example Street",
+            "company_name": "Example Store",
+            "neighborhood": "Washington DC",
+        },
+    )
+    assert prepared.values == {
+        "customer_name": "[customer-name]",
+        "customer_address": "[customer-address]",
+        "company_name": "Example Store",
+        "neighborhood": "Washington DC",
+    }
+
+
+@pytest.mark.parametrize("value", ["", "  "])
+def test_empty_customer_fields_do_not_become_valid_required_input(value: str) -> None:
+    assert prepare_workflow_inputs({}, {"customer_name": value}).values["customer_name"] == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Customer name - Jane Doe; Shipping address - 123 Main Street",
+        '{"customer":{"name":"Jane Doe","address":"123 Main Street"},"reviewer":null}',
+        '{"customer":{"profile":{"name":"Jane Doe","address":"123 Main Street"}}}',
+        '{"reviewer":{"name":"Jane Doe","address":"123 Main Street"}}',
+        '{"customerName":"Jane Doe","customerAddress":"123 Main Street"}',
+    ],
+)
+def test_labeled_and_nested_customer_details_are_masked_idempotently(value: str) -> None:
+    result = minimize_customer_pii(value)
+    assert "Jane Doe" not in result
+    assert "123 Main Street" not in result
+    assert minimize_customer_pii(result) == result
+    if value.startswith("{"):
+        parsed = json.loads(result)
+        assert parsed is not None
+        if '"reviewer":null' in value:
+            assert parsed["reviewer"] is None
+            assert parsed["customer"]["name"] == "[customer-name]"
+
+
+def test_excessive_json_nesting_fails_closed_before_storage_or_model(repo_root: Path) -> None:
+    _source_repo(repo_root)
+    value = '{"customer":' + '{"profile":' * 1000 + '{"name":"Jane Doe"}' + "}" * 1001
+    adapter = CaptureAdapter()
+    store = WorkflowStore(repo_root / ".aicmo" / "runs.sqlite3")
+    runner = WorkflowRunner(repo_root=repo_root, store=store, adapter=adapter)
+    with pytest.raises(WorkflowExecutionError, match="JSON nesting exceeds privacy"):
+        runner.run(
+            "source-demo",
+            "deep_json",
+            {
+                "client": "sample-client-a",
+                "source_url": "https://example.test/source",
+                "source_text": value,
+                "source_checked_at": "2026-09-06",
+            },
+        )
+    assert not adapter.requests
+    assert not (repo_root / "artifacts" / "deep_json").exists()
+    assert not (repo_root / ".aicmo" / "runs.sqlite3").exists()

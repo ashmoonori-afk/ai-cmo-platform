@@ -8,7 +8,12 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from urllib.parse import unquote, urlsplit
 
 from aicmo.errors import WorkflowExecutionError
-from aicmo.redaction import is_customer_phone, minimize_customer_pii
+from aicmo.redaction import (
+    CUSTOMER_FIELD_MARKERS,
+    is_customer_phone,
+    minimize_customer_pii,
+    normalize_customer_key,
+)
 
 SOURCE_MANIFEST_SCHEMA_VERSION = "aicmo.source-manifest.v1"
 MAX_SOURCE_TEXT_BYTES = 64 * 1024
@@ -22,9 +27,7 @@ _HTML_LINK = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _URL = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
-_SOURCE_LINK_WORDS = re.compile(
-    r"(?i)\b(?:see|source|original|link|url|available|at|here|is)\b"
-)
+_SOURCE_LINK_WORDS = re.compile(r"(?i)\b(?:see|source|original|link|url|available|at|here|is)\b")
 _SOURCE_LINK_KOREAN = re.compile(
     r"(?:원문|출처|링크|주소|여기|보기|참조|참고|확인|있습니다|있어요|은|는|이|가|에)"
 )
@@ -71,7 +74,10 @@ def _minimize_inputs(inputs: dict[str, str]) -> dict[str, str]:
         key: (
             value
             if key == "public_store_phone" and approved == "true"
-            else minimize_customer_pii(value)
+            else (
+                CUSTOMER_FIELD_MARKERS.get(normalize_customer_key(key)) if value.strip() else None
+            )
+            or minimize_customer_pii(value)
         )
         for key, value in inputs.items()
     }
@@ -154,6 +160,8 @@ def prepare_workflow_inputs(  # noqa: C901 — sequential fail-closed source val
         "content_status": "provided_by_user",
         "external_fetch": "unavailable",
         "pii_minimized": True,
+        "pii_minimization_method": "recognized_contact_and_labeled_field_masking",
+        "anonymization_status": "not_verified",
         "content_bytes": len(safe_text.encode("utf-8")),
         "content_sha256": hashlib.sha256(safe_text.encode()).hexdigest(),
     }

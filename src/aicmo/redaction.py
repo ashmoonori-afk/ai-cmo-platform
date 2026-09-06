@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from urllib.parse import unquote
+
+from aicmo.errors import WorkflowExecutionError
 
 REDACTED = "[redacted]"
 CUSTOMER_EMAIL_REDACTED = "[customer-email]"
 CUSTOMER_PHONE_REDACTED = "[customer-phone]"
 CUSTOMER_NAME_REDACTED = "[customer-name]"
+CUSTOMER_ADDRESS_REDACTED = "[customer-address]"
+CUSTOMER_FIELD_MARKERS = {
+    **dict.fromkeys(
+        (
+            "customer_name",
+            "customer",
+            "reviewer",
+            "reviewer_name",
+            "full_name",
+            "first_name",
+            "last_name",
+        ),
+        CUSTOMER_NAME_REDACTED,
+    ),
+    **dict.fromkeys(
+        ("customer_address", "home_address", "shipping_address", "billing_address"),
+        CUSTOMER_ADDRESS_REDACTED,
+    ),
+}
 
 # Each pattern either captures a prefix to keep (group 1: the key name / scheme up to
 # its separator) followed by the secret value, or matches a bare token wholesale.
@@ -82,6 +104,14 @@ _PHONE_CANDIDATE_PATTERN = re.compile(
     rf"(?:{_D1}(?:{_D5}|{_D6}|{_D8}){_D}{{2}}{_PHONE_SEPARATOR}{_D}{{4}}))"
     rf"(?!{_D})"
 )
+_NANP_FIRST = r"[2-9\N{FULLWIDTH DIGIT TWO}-\N{FULLWIDTH DIGIT NINE}]"
+_NANP_AREA = rf"{_NANP_FIRST}{_D}{{2}}"
+_NANP_PHONE_PATTERN = re.compile(
+    r"(?<![\w+])(?:[+\N{FULLWIDTH PLUS SIGN}]?"
+    rf"{_D1}{_PHONE_SEPARATOR})?"
+    rf"(?:\({_NANP_AREA}\)|{_NANP_AREA}){_PHONE_SEPARATOR}"
+    rf"{_NANP_FIRST}{_D}{{2}}{_PHONE_SEPARATOR}{_D}{{4}}(?!\w)"
+)
 _GAP = r"[\s\u200b\u200c\u200d\u2060\ufeff]*"
 _REQUIRED_GAP = r"[\s\u200b\u200c\u200d\u2060\ufeff]+"
 _LABELED_NAME_PATTERN = re.compile(
@@ -91,16 +121,30 @@ _LABELED_NAME_PATTERN = re.compile(
     rf"(?:{_GAP}[:=\uff1a-]{_GAP}|{_REQUIRED_GAP}))"
     rf"(?P<name>[^,;/\n]{{2,40}})"
 )
+_PERSON_NAME = r"[가-힣]{2,4}"
 _URL_NAME_PATTERN = re.compile(
-    r"(?i)(?P<label>(?:customer[_-]?name|customer|reviewer|name)=|"
+    r"(?i)(?P<label>(?<![\w-])(?:customer[_-]?name|customer|reviewer|name)=|"
     r"/(?:customer[_-]?name|customer|reviewer|name)/)"
-    r"(?P<name>[가-힣]{2,4})(?![가-힣])"
+    rf"(?P<name>{_PERSON_NAME})(?![\w'-])"
+)
+_URL_CUSTOMER_NAME_PATTERN = re.compile(
+    r"(?i)(?P<label>(?<![\w-])(?:customer[_-]?name|reviewer[_-]?name)(?:=|/))"
+    r"[^/?&#\s\"'<>\[\]]+"
+)
+_ENGLISH_NAME_PATTERN = re.compile(
+    r"(?im)(?P<label>(?:^\s*name|(?<![\w?&/-])(?:customer(?:[ _-]+name)?|"
+    r"reviewer(?:[ _-]+name)?|(?:full|first|last)[ _-]+name))"
+    r"[ \t]*[\"']?[ \t]*(?:[:=]| - )[ \t]*)"
+    r"(?P<value>\"[^\"\r\n]*\"|'[^'\r\n]*'|[^,;/\r\n&\"<>\[\]{}]+)"
+)
+_CUSTOMER_ADDRESS_PATTERN = re.compile(
+    r"(?im)(?P<label>(?<![\w-])(?:customer|home|shipping|billing)[ _-]+address"
+    r"[ \t]*[\"']?[ \t]*(?:[:=]| - )[ \t]*)"
+    r"(?P<value>\"[^\"\r\n]*\"|'[^'\r\n]*'|[^;\r\n&\"<>\[\]{}]+)"
 )
 _CUSTOMER_NAME_PATTERN = re.compile(r"(?<![가-힣])(?P<name>[가-힣]{2,4})(?=\s*고객(?:님)?)")
 _INVISIBLE_CHARACTERS = dict.fromkeys(map(ord, "\u200b\u200c\u200d\u2060\ufeff"))
-_PERCENT_COMPONENT = re.compile(
-    r"(?=[^/?#&=\s]*%[0-9A-Fa-f]{2})[^/?#&=\s]+"
-)
+_PERCENT_COMPONENT = re.compile(r"(?=[^/?#&=\s]*%[0-9A-Fa-f]{2})[^/?#&=\s]+")
 
 
 def _normalized_pii_candidate(value: str) -> str:
@@ -145,19 +189,107 @@ def _minimize_clear_customer_pii(text: str, allow: frozenset[str]) -> str:
         return match.group(0) if normalized in allow else CUSTOMER_PHONE_REDACTED
 
     result = _PHONE_CANDIDATE_PATTERN.sub(replace_phone, result)
+    result = _NANP_PHONE_PATTERN.sub(
+        lambda match: (
+            match.group(0)
+            if _normalized_pii_candidate(match.group(0)) in allow
+            else CUSTOMER_PHONE_REDACTED
+        ),
+        result,
+    )
     result = _LABELED_NAME_PATTERN.sub(
         lambda match: f"{match.group('label')}{CUSTOMER_NAME_REDACTED}",
         result,
     )
-    result = _URL_NAME_PATTERN.sub(
-        lambda match: f"{match.group('label')}{CUSTOMER_NAME_REDACTED}",
-        result,
-    )
+    for pattern in (_URL_NAME_PATTERN, _URL_CUSTOMER_NAME_PATTERN):
+        result = pattern.sub(
+            lambda match: f"{match.group('label')}{CUSTOMER_NAME_REDACTED}",
+            result,
+        )
+    for pattern, marker in (
+        (_ENGLISH_NAME_PATTERN, CUSTOMER_NAME_REDACTED),
+        (_CUSTOMER_ADDRESS_PATTERN, CUSTOMER_ADDRESS_REDACTED),
+    ):
+
+        def mask_field(match: re.Match[str], marker: str = marker) -> str:
+            value = match.group("value")
+            if not value.strip() or value.strip() in {"null", "true", "false"}:
+                return match.group(0)
+            quote = value[0] if value[0] in "\"'" and value[-1] == value[0] else ""
+            return f"{match.group('label')}{quote}{marker}{quote}"
+
+        result = pattern.sub(mask_field, result)
     return _CUSTOMER_NAME_PATTERN.sub(CUSTOMER_NAME_REDACTED, result)
 
 
+type _JsonValue = str | int | float | bool | None | list[_JsonValue] | dict[str, _JsonValue]
+
+
+def normalize_customer_key(key: str) -> str:
+    return (
+        re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", key).casefold().replace("-", "_").replace(" ", "_")
+    )
+
+
+def _minimize_json_fields(
+    value: _JsonValue,
+    allowed: tuple[str, ...],
+    *,
+    customer_context: bool = False,
+) -> _JsonValue:
+    if isinstance(value, dict):
+        result: dict[str, _JsonValue] = {}
+        for key, item in value.items():
+            field = normalize_customer_key(key)
+            marker = CUSTOMER_FIELD_MARKERS.get(field)
+            if customer_context and field in {"name", "address"}:
+                marker = CUSTOMER_NAME_REDACTED if field == "name" else CUSTOMER_ADDRESS_REDACTED
+            result[key] = (
+                marker
+                if marker and isinstance(item, str) and item.strip()
+                else _minimize_json_fields(
+                    item,
+                    allowed,
+                    customer_context=customer_context
+                    or field
+                    in {
+                        "customer",
+                        "customers",
+                        "reviewer",
+                        "reviewers",
+                    },
+                )
+            )
+        return result
+    if isinstance(value, list):
+        return [
+            _minimize_json_fields(item, allowed, customer_context=customer_context)
+            for item in value
+        ]
+    if isinstance(value, str):
+        return minimize_customer_pii(value, allowed=allowed)
+    return value
+
+
 def minimize_customer_pii(text: str, *, allowed: tuple[str, ...] = ()) -> str:
-    """Remove customer contact details and explicitly labelled names from model data."""
+    """Mask recognized contacts and labelled fields; this is not anonymization.
+
+    ponytail: free-text identity inference is not covered; minimize structured inputs
+    first and review residual text before enabling additional personal-data use.
+    """
+    if text.lstrip().startswith(("{", "[")):
+        try:
+            data: _JsonValue = json.loads(text)
+            minimized = _minimize_json_fields(data, allowed)
+            return (
+                text if minimized == data else json.dumps(minimized, ensure_ascii=False, indent=2)
+            )
+        except RecursionError:
+            step_id = "privacy"
+            reason = "JSON nesting exceeds privacy inspection limits; provide shallower data"
+            raise WorkflowExecutionError(step_id, reason) from None
+        except ValueError:
+            pass
     allow = frozenset(_normalized_pii_candidate(value) for value in allowed if value)
 
     def replace_encoded(match: re.Match[str]) -> str:
@@ -172,6 +304,7 @@ def minimize_customer_pii(text: str, *, allowed: tuple[str, ...] = ()) -> str:
                 CUSTOMER_NAME_REDACTED,
                 CUSTOMER_EMAIL_REDACTED,
                 CUSTOMER_PHONE_REDACTED,
+                CUSTOMER_ADDRESS_REDACTED,
             )
             if marker in minimized
         )
@@ -179,10 +312,10 @@ def minimize_customer_pii(text: str, *, allowed: tuple[str, ...] = ()) -> str:
             return "".join(markers)
         prefix = text[max(0, match.start() - 32) : match.start()]
         name_context = re.search(
-            r"(?i)(?:name|customer|reviewer|customer[_-]name|고객명|이름)(?:=|/)$",
+            r"(?i)(?<![\w-])(?:name|customer|reviewer|customer[_-]name|고객명|이름)(?:=|/)$",
             prefix,
         )
-        if name_context and re.fullmatch(r"[가-힣]{2,4}", decoded):
+        if name_context and re.fullmatch(_PERSON_NAME, decoded):
             return CUSTOMER_NAME_REDACTED
         return match.group(0)
 
@@ -192,7 +325,13 @@ def minimize_customer_pii(text: str, *, allowed: tuple[str, ...] = ()) -> str:
 
 def is_customer_phone(value: str) -> bool:
     normalized = _normalized_pii_candidate(value).strip()
-    return _CANONICAL_PHONE_PATTERN.fullmatch(normalized) is not None
+    return any(
+        pattern.fullmatch(normalized)
+        for pattern in (
+            _CANONICAL_PHONE_PATTERN,
+            _NANP_PHONE_PATTERN,
+        )
+    )
 
 
 def contains_raw_secret(value: str) -> bool:
