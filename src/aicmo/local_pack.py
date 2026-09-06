@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from aicmo.errors import WorkflowExecutionError
+from aicmo.photos import parse_photos
 from aicmo.source_input import JsonValue
 
 WORKFLOW_ID = "local-store-pack"
@@ -17,13 +18,14 @@ MAX_PACK_BYTES = 12 * 1024
 LOW_CAPACITY_MINUTES = 20
 INPUT_STEP = "inputs"
 DRAFT_STEP = "drafts"
+NO_PHOTO = "사진 파일이 없습니다. 실제 사진은 직접 선택하세요."
+PROVIDED_PHOTO = "첨부한 photos/news-N.png에서 소식 번호에 맞는 사진을 직접 선택하세요."
 
 
 def _visible_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value)
-    if (
-        not any(unicodedata.category(char)[0] in "LNPS" for char in normalized)
-        or any(unicodedata.category(char) == "Cc" and char not in "\r\n\t" for char in normalized)
+    if not any(unicodedata.category(char)[0] in "LNPS" for char in normalized) or any(
+        unicodedata.category(char) == "Cc" and char not in "\r\n\t" for char in normalized
     ):
         reason = "text must contain visible content without control characters"
         raise ValueError(reason)
@@ -63,8 +65,11 @@ class NewsItem(BaseModel):
     cta: Text
     period: Text
     source_index: int = Field(ge=0, le=1)
-    photo_instruction: Literal["사진 파일이 없습니다. 실제 사진은 직접 선택하세요."]
-    visual_asset_status: Literal["unavailable"]
+    photo_instruction: Literal[
+        "사진 파일이 없습니다. 실제 사진은 직접 선택하세요.",
+        "첨부한 photos/news-N.png에서 소식 번호에 맞는 사진을 직접 선택하세요.",
+    ]
+    visual_asset_status: Literal["unavailable", "provided"]
     status: Literal["draft"]
 
 
@@ -124,13 +129,20 @@ def parse_brief(inputs: dict[str, str]) -> PackBrief:
         raise WorkflowExecutionError(INPUT_STEP, "local pack brief exceeds 12 KiB")
     try:
         json.loads(raw, object_pairs_hook=_unique_pairs)
-        return PackBrief.model_validate_json(raw)
+        brief = PackBrief.model_validate_json(raw)
     except (ValueError, RecursionError):
         # Never echo raw customer input from Pydantic's error payload.
         raise WorkflowExecutionError(
             INPUT_STEP,
             "invalid local pack brief: check channel, capacity, facts and review limits",
         ) from None
+    photos = parse_photos(inputs).photos
+    brief = brief.model_copy(update={"photo_available": bool(photos)})
+    if any(photo.news_index >= brief.news_count for photo in photos):
+        raise WorkflowExecutionError(
+            INPUT_STEP, "photo refers to news outside this pack's capacity"
+        )
+    return brief
 
 
 def validate_pack(text: str, inputs: dict[str, str]) -> LocalPack:
@@ -154,6 +166,11 @@ def validate_pack(text: str, inputs: dict[str, str]) -> LocalPack:
         raise WorkflowExecutionError(
             DRAFT_STEP, "local pack differs from supplied facts or capacity"
         )
+    provided = {photo.news_index for photo in parse_photos(inputs).photos}
+    for index, item in enumerate(pack.news):
+        expected = ("provided", PROVIDED_PHOTO) if index in provided else ("unavailable", NO_PHOTO)
+        if (item.visual_asset_status, item.photo_instruction) != expected:
+            raise WorkflowExecutionError(DRAFT_STEP, "photo claim differs from supplied files")
     return pack
 
 
@@ -167,7 +184,7 @@ def render_pack(pack: LocalPack) -> dict[str, str]:
         "## 한 장 요약",
         _markdown_text(pack.summary),
         "AI가 작성하고 검토·승인한 문안입니다. 외부 게시 완료를 뜻하지 않습니다.",
-        "채널: 네이버 스마트플레이스 / 사진 파일: 제공되지 않음",
+        "채널: 네이버 스마트플레이스 / 사진 파일: 아래 소식별 첨부 안내 확인",
     ]
     files: dict[str, str] = {}
     for index, item in enumerate(pack.news, 1):
@@ -180,6 +197,9 @@ def render_pack(pack: LocalPack) -> dict[str, str]:
                 f"기간: {_markdown_text(item.period)}",
                 f"출처: {_markdown_text(pack.sources[item.source_index])}",
                 f"사진 안내: {_markdown_text(item.photo_instruction)}",
+                f"첨부: photos/news-{index}.png"
+                if item.visual_asset_status == "provided"
+                else "첨부: 없음",
                 "상태: 승인된 문안 / 직접 게시 전 최종 확인",
             ]
         )

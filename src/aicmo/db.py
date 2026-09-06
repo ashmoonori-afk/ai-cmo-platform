@@ -46,3 +46,8 @@ class StoreDb:
             }
             if "execution_policy_json" not in policy_columns:
                 connection.execute("alter table run_policies add column execution_policy_json text")
+            approval_columns = {
+                str(row["name"]) for row in connection.execute("pragma table_info(approvals)")
+            }
+            if "photo_manifest_sha256" not in approval_columns:
+                connection.execute("alter table approvals add column photo_manifest_sha256 text")

@@ -15,7 +15,10 @@
 팩당 건수와 시간 기준은 제품의 보수적 작업 한도이며 채널의 공식 권장 수치가 아니다.
 20분 미만이거나 사진이 없으면 소식 1건으로 줄인다. 그 외에는 사실 개수만큼 최대 2건이다.
 20분 미만이면 앞의 리뷰 최대 2개만 답글을 작성하고 그 외는 최대 5개다.
-사진은 입력 여부에 관계없이 이 버전에서 수집·생성·첨부하지 않는다.
+`photo_available`은 이전 입력과의 호환을 위해 받지만 실제 보유 판정은 `photos_json`만 사용한다.
+사장님이 `--photos-file`로 제공한 JPEG/PNG 최대 2개는 방향을 반영하고 메타데이터를 제거한 PNG로 첨부한다.
+`photos.json`의 selection.photos를 확인한다. news_index는 0부터 시작하며 각 소식에 최대 1개다.
+사진 생성이나 모델의 실제 픽셀 검토를 수행했다고 주장하지 않는다.
 
 ## 생성 계약
 
@@ -35,9 +38,11 @@ config, brand-guidelines, pricing-rules, copy-patterns와 제공된 사실을 �
 - `channel`: `naver`
 - `sources`: 최소화된 brief_json.facts를 원순서로 그대로 복사
 - `news`: 각 객체에 `title`, `body`, `cta`, `period`, `source_index`(0부터 순서대로),
-  `photo_instruction`, `visual_asset_status`(항상 unavailable), `status`(항상 draft)
-- `photo_instruction`은 항상 `사진 파일이 없습니다. 실제 사진은 직접 선택하세요.`라는 고정 문구다.
-  사진 보유 입력이 true여도 이 팩에서 생성·첨부 완료로 바꿀 수 없다.
+  `photo_instruction`, `visual_asset_status`(provided 또는 unavailable), `status`(항상 draft)
+- 소식의 source_index와 같은 news_index의 사진이 있을 때만 visual_asset_status를 provided로 쓴다.
+  photo_instruction은 `첨부한 photos/news-N.png에서 소식 번호에 맞는 사진을 직접 선택하세요.`로 고정한다.
+  해당 사진이 없으면 unavailable과 `사진 파일이 없습니다. 실제 사진은 직접 선택하세요.`로 고정한다.
+  사진 설명을 근거로 픽셀 안의 상품·인물·권리를 확인했다고 주장하지 않는다.
 - `replies`: 제공 리뷰 순서대로 `review_index`(0부터), `body`, `status`(draft)
 - `weekly_actions`: 2~3개, 각각 `action`, `when`, `minutes`(양의 정수).
   합계는 owner_minutes 이하. 예상 작업 계획이며 실제 소요시간 측정이라고 하지 않는다.
@@ -52,6 +57,8 @@ config, brand-guidelines, pricing-rules, copy-patterns와 제공된 사실을 �
 ## 검토와 전달
 
 사장님이 drafts를 검토·수정한 다음 owner_gate를 승인한다.
+사진이 있으면 photo-preview로 정규화된 실제 파일과 개인정보·사용권을 확인한 뒤 --photos-reviewed로 승인한다.
+--accept-edits는 local-pack.json 문안만 허용한다. 사진 또는 사진 목록 변경은 새 실행과 승인이 필요하다.
 최종 reviewer는 수정된 최신 문안, 입력과 참조 문서의 일치·주장·브랜드·실행성을 확인한다.
 모든 공통 기준은 prompts/shared/gate-check.md 및 deliverable-standard.md를 따른다.
 JSON의 summary와 next_steps가 공통 문서의 한 장 요약·다음 단계에 대응한다.

@@ -111,9 +111,12 @@ class _OrderProbeStore(WorkflowStore):
         decision: ApprovalDecision,
         reviewer: str,
         notes: str,
+        photo_manifest_sha256: str | None = None,
     ) -> None:
         _OrderProbeStore.calls.append("approve")
-        WorkflowStore.approve(self, run_id, step_id, decision, reviewer, notes)
+        WorkflowStore.approve(
+            self, run_id, step_id, decision, reviewer, notes, photo_manifest_sha256
+        )
 
 
 def test_accept_edits_blesses_before_approval_row(approval_repo: Path) -> None:

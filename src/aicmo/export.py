@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 EXPORT_STEP = "export"
 
 
-def verified_delivery(  # noqa: C901 — sequential fail-closed delivery checks
+def verified_delivery(  # noqa: C901, PLR0912 — sequential fail-closed delivery checks
     runner: WorkflowStepExecutor,
     run_id: str,
     workflow_id: str,
@@ -50,6 +50,8 @@ def verified_delivery(  # noqa: C901 — sequential fail-closed delivery checks
             and runner.store.approval_for(run_id, step.id) != ApprovalDecision.APPROVED
         ):
             raise WorkflowExecutionError(EXPORT_STEP, "owner approval is required")
+    if workflow_id == WORKFLOW_ID:
+        runner.verified_photos(run_id, require_approval=True)
     contents = runner.verified_export_outputs(spec, run_id, inputs)
     try:
         manifest = cast(
@@ -97,7 +99,7 @@ def verified_delivery(  # noqa: C901 — sequential fail-closed delivery checks
     return inputs, contents
 
 
-def _verified_pack(runner: WorkflowStepExecutor, run_id: str) -> tuple[str, dict[str, str]]:
+def _verified_pack(runner: WorkflowStepExecutor, run_id: str) -> tuple[str, dict[str, bytes]]:
     inputs, contents = verified_delivery(runner, run_id, WORKFLOW_ID)
     raw_pack = contents[f"artifacts/{run_id}/local-pack.json"]
     pack_text = raw_pack.decode("utf-8")
@@ -116,28 +118,36 @@ def _verified_pack(runner: WorkflowStepExecutor, run_id: str) -> tuple[str, dict
     ):
         raise WorkflowExecutionError(EXPORT_STEP, "reviewed pack version does not match")
     pack = validate_pack(pack_text, inputs)
-    files = render_pack(pack)
+    files = {name: text.encode("utf-8") for name, text in render_pack(pack).items()}
+    photo_digest, photos = runner.verified_photos(run_id, require_approval=True)
+    files.update(photos)
+    files["photos.json"] = contents[f"artifacts/{run_id}/photos.json"]
+    hashes = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
+    bundle_digest = hashlib.sha256(
+        json.dumps(
+            {"pack": digest, "photos": photo_digest, "files": hashes}, sort_keys=True
+        ).encode()
+    ).hexdigest()
     files["manifest.json"] = (
         json.dumps(
             {
                 "schema_version": "aicmo.local-export.v1",
                 "run_id": run_id,
                 "source_sha256": digest,
+                "photo_manifest_sha256": photo_digest,
+                "bundle_sha256": bundle_digest,
                 "approval": "approved",
                 "review": "PASS",
                 "external_publish_status": "not_published",
-                "visual_asset_status": "unavailable",
-                "files": {
-                    name: hashlib.sha256(text.encode("utf-8")).hexdigest()
-                    for name, text in files.items()
-                },
+                "visual_asset_status": "provided" if photos else "unavailable",
+                "files": hashes,
             },
             ensure_ascii=False,
             indent=2,
         )
         + "\n"
-    )
-    return digest, files
+    ).encode("utf-8")
+    return bundle_digest, files
 
 
 def export_local_pack(runner: WorkflowStepExecutor, run_id: str) -> Path:
@@ -151,10 +161,10 @@ def export_local_pack(runner: WorkflowStepExecutor, run_id: str) -> Path:
         digest, files = _verified_pack(runner, run_id)
         buffer = io.BytesIO()
         with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
-            for name, text in files.items():
+            for name, data in files.items():
                 info = ZipInfo(name)
                 info.compress_type = ZIP_DEFLATED
-                archive.writestr(info, text.encode("utf-8"))
+                archive.writestr(info, data)
         payload = buffer.getvalue()
         target = resolve_inside_repo(
             runner.repo_root,

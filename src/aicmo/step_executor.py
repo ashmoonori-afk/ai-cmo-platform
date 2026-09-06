@@ -42,6 +42,7 @@ from aicmo.models import (
 )
 from aicmo.outcomes import parse_channel, weekly_outcomes_report
 from aicmo.paths import resolve_inside_repo
+from aicmo.photos import PHOTO_STEP, parse_photos, photo_manifest, verify_photo_manifest
 from aicmo.redaction import minimize_customer_pii
 from aicmo.reviewer_contract import (
     REVIEW_CLIENT_CRITERIA,
@@ -82,6 +83,39 @@ class WorkflowStepExecutor:
     phase_announcer: PhaseAnnouncer | None = None
     phase_completed: PhaseCompletionHook | None = None
 
+    def verified_photos(
+        self, run_id: str, *, require_approval: bool = False
+    ) -> tuple[str, dict[str, bytes]]:
+        inputs = self.store.get_inputs(run_id)
+        relative = f"artifacts/{run_id}/photos.json"
+        source = self._stored_artifact_path(relative)
+        if (
+            self.store.get_step_status(run_id, "photos") != StepStatus.SUCCESS
+            or source is None
+            or not source.is_file()
+        ):
+            raise WorkflowExecutionError(PHOTO_STEP, "verified photo manifest is required")
+        with source.open("rb") as stream:
+            raw = stream.read(8193)
+        digest = hashlib.sha256(raw).hexdigest()
+        if self.store.get_output_hashes(run_id, "photos") != {relative: digest}:
+            raise WorkflowExecutionError(PHOTO_STEP, "photo manifest changed; start a new run")
+        files = verify_photo_manifest(self.repo_root, inputs, raw)
+        if require_approval and parse_photos(inputs).photos:
+            with self.store.connect() as connection:
+                row = connection.execute(
+                    "select decision, photo_manifest_sha256 from approvals "
+                    "where run_id=? and step_id='owner_gate'",
+                    (run_id,),
+                ).fetchone()
+            if (
+                row is None
+                or row["decision"] != "approved"
+                or row["photo_manifest_sha256"] != digest
+            ):
+                raise WorkflowExecutionError(PHOTO_STEP, "owner must review this photo version")
+        return digest, files
+
     def verified_export_outputs(
         self,
         spec: WorkflowSpec,
@@ -121,7 +155,7 @@ class WorkflowStepExecutor:
                 contents[relative] = data
         return contents
 
-    def _execute_step(
+    def _execute_step(  # noqa: PLR0911 — one return per native step type
         self,
         run_id: str,
         step: WorkflowStep,
@@ -158,6 +192,10 @@ class WorkflowStepExecutor:
                         parse_channel(context.get("channel", "naver")),
                     )
                     return self._write_outputs(step, context, content, lease_signal)
+                case StepType.PHOTOS_PREPARE:
+                    return self._write_outputs(
+                        step, context, photo_manifest(self.repo_root, context), lease_signal
+                    )
                 case StepType.FEEDBACK_REPORT | StepType.LEARNING_CONTEXT:
                     from aicmo.learning import (  # noqa: PLC0415 — runner-backed verification is loaded after runner initialization
                         feedback_report,
@@ -392,6 +430,11 @@ class WorkflowStepExecutor:
         lease_signal: _LeaseSignal,
     ) -> list[str]:
         approval = self.store.approval_for(run_id, step.id)
+        if context.get("workflow_id") == LOCAL_PACK_WORKFLOW:
+            self.verified_photos(
+                run_id,
+                require_approval=approval == ApprovalDecision.APPROVED or step.terminal_delivery,
+            )
         if step.requires_approval and approval is None:
             if status == StepStatus.WAITING_APPROVAL:
                 # Idempotent re-wait: the step already holds its waiting state and

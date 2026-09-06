@@ -13,7 +13,8 @@ from aicmo.adapters import AgentRequest, AgentResult
 from aicmo.cli import app
 from aicmo.errors import WorkflowExecutionError
 from aicmo.export import export_local_pack
-from aicmo.local_pack import parse_brief, render_pack, validate_pack
+from aicmo.local_pack import NO_PHOTO, PROVIDED_PHOTO, parse_brief, render_pack, validate_pack
+from aicmo.photos import parse_photos
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 from tests.conftest import write_text
@@ -45,6 +46,7 @@ def _brief(*, minutes: int = 30, photos: bool = True, reviews: int = 5) -> dict[
 
 def _content(inputs: dict[str, str]) -> str:
     brief = parse_brief(inputs)
+    photos = {photo.news_index for photo in parse_photos(inputs).photos}
     return json.dumps(
         {
             "schema_version": "aicmo.local-pack.v1",
@@ -58,8 +60,8 @@ def _content(inputs: dict[str, str]) -> str:
                     "cta": "방문 전 안내를 확인해 주세요.",
                     "period": "상시 안내",
                     "source_index": n,
-                    "photo_instruction": "사진 파일이 없습니다. 실제 사진은 직접 선택하세요.",
-                    "visual_asset_status": "unavailable",
+                    "photo_instruction": PROVIDED_PHOTO if n in photos else NO_PHOTO,
+                    "visual_asset_status": "provided" if n in photos else "unavailable",
                     "status": "draft",
                 }
                 for n in range(brief.news_count)
@@ -132,7 +134,7 @@ def _approve(runner: WorkflowRunner) -> None:
 @pytest.mark.parametrize(
     ("minutes", "photos", "reviews", "news_count", "reply_count"),
     [
-        (30, True, 5, 2, 5),
+        (30, True, 5, 1, 5),
         (30, False, 0, 1, 0),
         (5, True, 5, 1, 2),
     ],

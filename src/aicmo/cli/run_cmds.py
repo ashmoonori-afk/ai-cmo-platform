@@ -11,6 +11,7 @@ from aicmo.ingest import InboxItem, archive_item, retain_failed_urls, scan_inbox
 from aicmo.learning import read_feedback_file
 from aicmo.local_pack import read_brief_file
 from aicmo.phase_git import PhaseGitMode, run_phase_git
+from aicmo.photos import import_photos
 from aicmo.redaction import minimize_customer_pii, redact
 from aicmo.runner import WorkflowRunner
 from aicmo.source_input import source_checked_date
@@ -59,7 +60,7 @@ def _safe_display(value: object) -> str:
     return minimize_customer_pii(redact(str(value)))
 
 
-def run_workflow(
+def run_workflow(  # noqa: C901 — explicit mutually exclusive file inputs
     workflow_id: Annotated[str, typer.Argument(help="Workflow id under workflows/*.workflow.yaml")],
     client: Annotated[str | None, typer.Option("--client")] = None,
     topic: Annotated[str | None, typer.Option("--topic")] = None,
@@ -82,6 +83,9 @@ def run_workflow(
     ] = None,
     feedback_file: Annotated[
         Path | None, typer.Option("--feedback-file", help="UTF-8 JSON for local-pack-feedback")
+    ] = None,
+    photos_file: Annotated[
+        Path | None, typer.Option("--photos-file", help="JPEG/PNG upload JSON for local-store-pack")
     ] = None,
     feedback: Annotated[
         str | None,
@@ -126,6 +130,11 @@ def run_workflow(
     if feedback and client:
         prepare_feedback(client, run_id_value, artifact_format or "unspecified", feedback)
     repo_root = repo.resolve()
+    if photos_file is not None:
+        if workflow_id != "local-store-pack" or not inputs.get("client") or "photos_json" in inputs:
+            reason = "use --photos-file only with local-store-pack and client, without photos_json"
+            raise typer.BadParameter(reason)
+        inputs["photos_json"] = import_photos(repo_root, inputs["client"], photos_file)
     runner = make_runner(
         repo_root,
         db,

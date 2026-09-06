@@ -11,6 +11,12 @@ def approve_gate(
     step_id: Annotated[str, typer.Argument()],
     reviewer: Annotated[str, typer.Option("--reviewer")] = "owner",
     notes: Annotated[str, typer.Option("--notes")] = "Approved",
+    photos_reviewed: Annotated[
+        bool,
+        typer.Option(
+            "--photos-reviewed", help="Confirm viewing photos and checking rights/privacy"
+        ),
+    ] = False,
     accept_edits: Annotated[
         bool,
         typer.Option(
@@ -29,6 +35,7 @@ def approve_gate(
         reviewer,
         notes,
         accept_edits=accept_edits,
+        photos_reviewed=photos_reviewed,
     )
     console.print(f"{run_id}/{step_id}: approved")
     if accept_edits:
@@ -38,6 +45,7 @@ def approve_gate(
                 console.print(f"  {path}")
         else:
             console.print("edits accepted: no artifact changes detected")
+
 
 def reject_gate(
     run_id: Annotated[str, typer.Argument()],

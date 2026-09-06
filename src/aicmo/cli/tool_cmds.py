@@ -12,12 +12,29 @@ from aicmo.learning import learn_feedback
 from aicmo.mockup import brief_from_answers, render_landing_mockup, render_pdf, render_png
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
 from aicmo.outcomes import METRICS, import_outcomes, parse_channel, preview_outcomes
+from aicmo.paths import parse_safe_id, resolve_inside_repo
+from aicmo.photos import photo_preview
 from aicmo.primer import render_primer_html
 from aicmo.reporter import flush_kb_updates
 from aicmo.store import WorkflowStore
 from aicmo.web import run_server
 
 from ._shared import console, default_db, make_runner
+
+
+def photo_preview_cmd(
+    run_id: Annotated[str, typer.Argument()],
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+) -> None:
+    parse_safe_id("run_id", run_id)
+    runner = make_runner(repo.resolve(), db)
+    runner.store.initialize()
+    runner.verified_photos(run_id)
+    html = photo_preview(runner.repo_root, runner.store.get_inputs(run_id))
+    target = resolve_inside_repo(runner.repo_root, f"artifacts/{run_id}/photo-preview.html", {})
+    target.write_text(html, encoding="utf-8")
+    console.print(str(target), markup=False)
 
 
 def emit_onboarding(result: OnboardingResult) -> None:
@@ -227,6 +244,7 @@ def outcomes_cmd(
 
 
 def register(app: typer.Typer) -> None:
+    app.command("photo-preview")(photo_preview_cmd)
     app.command("learn-feedback")(learn_feedback_cmd)
     app.command("outcomes")(outcomes_cmd)
     app.command("onboard")(onboard_client)

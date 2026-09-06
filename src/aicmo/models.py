@@ -18,6 +18,7 @@ class StepType(StrEnum):
     METRICS_REPORT = "metrics.report"
     FEEDBACK_REPORT = "feedback.report"
     LEARNING_CONTEXT = "learning.context"
+    PHOTOS_PREPARE = "photos.prepare"
 
 
 class StepStatus(StrEnum):
@@ -108,6 +109,7 @@ class WorkflowStep(BaseModel):
                 | StepType.METRICS_REPORT
                 | StepType.FEEDBACK_REPORT
                 | StepType.LEARNING_CONTEXT
+                | StepType.PHOTOS_PREPARE
             ):
                 msg = "terminal delivery step must be an automatic gate"
                 raise ValueError(msg)

@@ -15,8 +15,8 @@ from aicmo.errors import (
 )
 from aicmo.export import verified_delivery
 from aicmo.learning import parse_feedback
+from aicmo.local_pack import DRAFT_STEP, parse_brief, validate_pack
 from aicmo.local_pack import WORKFLOW_ID as LOCAL_PACK_WORKFLOW
-from aicmo.local_pack import parse_brief
 from aicmo.models import (
     ApprovalDecision,
     RunResult,
@@ -26,6 +26,7 @@ from aicmo.models import (
     WorkflowStep,
 )
 from aicmo.paths import parse_safe_id
+from aicmo.photos import PHOTO_STEP, parse_photos, verify_photo_assets
 from aicmo.quota import QuotaError
 from aicmo.redaction import contains_raw_secret, minimize_customer_pii
 from aicmo.source_input import PreparedInputs, operating_inputs, prepare_workflow_inputs
@@ -49,6 +50,7 @@ class WorkflowRunner(WorkflowStepExecutor):
             }
         if spec.id == LOCAL_PACK_WORKFLOW:
             parse_brief(inputs)
+            verify_photo_assets(self.repo_root, inputs)
         prepared = prepare_workflow_inputs(spec.inputs, inputs)
         inputs = prepared.values
         if spec.id == LOCAL_PACK_WORKFLOW:
@@ -157,6 +159,7 @@ class WorkflowRunner(WorkflowStepExecutor):
         reviewer: str,
         notes: str,
         accept_edits: bool = False,
+        photos_reviewed: bool = False,
     ) -> list[str]:
         """Record a manual approval. With accept_edits, bless human edits made to
         successful steps' artifacts while the gate was waiting: their hashes are
@@ -166,6 +169,20 @@ class WorkflowRunner(WorkflowStepExecutor):
         open a window where that resume regenerates over the owner's edits.
         Returns the list of artifact paths whose content changed since generation."""
         self.store.initialize()
+        photo_digest = None
+        local_pack = self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW
+        if local_pack:
+            inputs = self.store.get_inputs(run_id)
+            photo_digest, _ = self.verified_photos(run_id)
+            if parse_photos(inputs).photos and not photos_reviewed:
+                raise WorkflowExecutionError(
+                    PHOTO_STEP, "review photo-preview, then use --photos-reviewed"
+                )
+            if accept_edits:
+                source = self._stored_artifact_path(f"artifacts/{run_id}/local-pack.json")
+                if source is None or not source.is_file():
+                    raise WorkflowExecutionError(DRAFT_STEP, "edited pack is missing")
+                validate_pack(source.read_text("utf-8"), inputs)
         changed: list[str] = []
         if accept_edits:
             if self.store.get_step_status(run_id, step_id) != StepStatus.WAITING_APPROVAL:
@@ -176,7 +193,9 @@ class WorkflowRunner(WorkflowStepExecutor):
                 )
             changed = self._accept_artifact_edits(run_id, step_id)
         safe_notes = minimize_customer_pii(notes)
-        self.store.approve(run_id, step_id, ApprovalDecision.APPROVED, reviewer, safe_notes)
+        self.store.approve(
+            run_id, step_id, ApprovalDecision.APPROVED, reviewer, safe_notes, photo_digest
+        )
         self.store.record_event(
             run_id,
             step_id,
@@ -196,10 +215,13 @@ class WorkflowRunner(WorkflowStepExecutor):
 
     def _accept_artifact_edits(self: Self, run_id: str, gate_step_id: str) -> list[str]:
         changed: list[str] = []
+        local_pack = self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW
         for row in self.store.list_steps(run_id):
             if row["status"] != StepStatus.SUCCESS.value:
                 continue
             step_id = str(row["step_id"])
+            if local_pack and step_id != "drafts":
+                continue
             outputs = self.store.get_step_outputs(run_id, step_id)
             if not outputs:
                 continue
@@ -238,7 +260,9 @@ class WorkflowRunner(WorkflowStepExecutor):
         self.store.retry_step(run_id, step_id)
         self.store.record_event(run_id, step_id, "step.retry", f"Retry requested for {step_id}")
 
-    def _execute(self: Self, spec: WorkflowSpec, run_id: str, inputs: dict[str, str]) -> RunResult:
+    def _execute(  # noqa: C901 — sequential workflow and immutable photo checks
+        self: Self, spec: WorkflowSpec, run_id: str, inputs: dict[str, str]
+    ) -> RunResult:
         with self.store.connect() as connection:
             credited = connection.execute(
                 "select 1 from product_usage where run_id=? and state='credited'", (run_id,)
@@ -247,6 +271,14 @@ class WorkflowRunner(WorkflowStepExecutor):
             reason = "credited run cannot resume; create a new run"
             raise QuotaError(reason)
         context = {**inputs, "run_id": run_id, "workflow_id": spec.id}
+        if spec.id == LOCAL_PACK_WORKFLOW:
+            verify_photo_assets(self.repo_root, inputs)
+            if self.store.get_step_status(run_id, "photos") == StepStatus.SUCCESS:
+                self.verified_photos(
+                    run_id,
+                    require_approval=self.store.approval_for(run_id, "owner_gate")
+                    == ApprovalDecision.APPROVED,
+                )
         self._reopen_stale_successes(spec, run_id, context)
         for step in spec.execution_order():
             status = self.store.get_step_status(run_id, step.id)
@@ -328,6 +360,11 @@ class WorkflowRunner(WorkflowStepExecutor):
         return None
 
     def _complete_run(self: Self, run_id: str) -> RunResult:
+        if self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW:
+            try:
+                self.verified_photos(run_id, require_approval=True)
+            except WorkflowExecutionError as exc:
+                return self._fail(run_id, "delivery_gate", str(exc), owner=None)
         digest = None
         reviewed_digest = None
         with self.store.connect() as connection:

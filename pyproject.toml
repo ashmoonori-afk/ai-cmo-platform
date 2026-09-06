@@ -5,6 +5,7 @@ description = "Markdown-first AI CMO workflow operating system with a thin DAG r
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "pillow>=12.3.0",
     "pydantic>=2.11",
     "pyyaml>=6.0.2",
     "rich>=14.0",

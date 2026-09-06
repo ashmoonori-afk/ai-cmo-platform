@@ -3,6 +3,7 @@ name: 국내 가게 주간 실행팩
 inputs:
   client: required
   brief_json: required
+  photos_json: optional
 steps:
   - id: load_context
     type: file.load
@@ -15,23 +16,26 @@ steps:
   - id: drafts
     type: agent
     role: copywriter
-    depends_on: [load_context, learning_context]
+    depends_on: [load_context, learning_context, photos]
     prompt: playbooks/09-local/local-store-pack.md
     outputs: ["artifacts/${run_id}/local-pack.json"]
   - id: learning_context
     type: learning.context
     role: reporter
     outputs: ["artifacts/${run_id}/learning-context.json"]
+  - id: photos
+    type: photos.prepare
+    outputs: ["artifacts/${run_id}/photos.json"]
   - id: owner_gate
     type: gate
     requires_approval: true
-    depends_on: [drafts]
+    depends_on: [drafts, photos]
     outputs: ["artifacts/${run_id}/owner-approval.json"]
   - id: delivery_gate
     type: gate
     role: reviewer
     terminal_delivery: true
-    depends_on: [drafts, owner_gate]
+    depends_on: [drafts, photos, owner_gate]
     prompt: playbooks/09-local/local-store-pack.md
     pass_if: "status in ['PASS','WARN']"
     outputs: ["artifacts/${run_id}/delivery-review.json"]

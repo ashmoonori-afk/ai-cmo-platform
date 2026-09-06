@@ -145,6 +145,7 @@ SCHEMA = (
         decision text not null,
         reviewer text not null,
         notes text not null,
+        photo_manifest_sha256 text,
         created_at text not null default current_timestamp,
         unique (run_id, step_id),
         foreign key (run_id, step_id) references steps(run_id, step_id)
