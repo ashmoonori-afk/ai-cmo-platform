@@ -852,6 +852,14 @@ mappings:
   chain_note: 'CLI: aicmo run local-store-pack --client {slug} --brief-file brief.json; 사장님 승인 후 최종 검토 및 로컬 내보내기'
   agents: copywriter → reviewer
   model: sonnet
+- id: 76
+  triggers:
+  - 가게 문안 피드백
+  - 채택과 수정 학습
+  playbook: playbooks/07-operations/local-pack-feedback.md
+  chain_note: 'CLI: aicmo run local-pack-feedback --client {slug} --feedback-file feedback.json; owner 승인과 reviewer PASS 후 learn-feedback으로 반영'
+  agents: reporter → reviewer
+  model: sonnet
 gates:
   reviewer_required: true
   exempt:

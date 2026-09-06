@@ -15,9 +15,13 @@ steps:
   - id: drafts
     type: agent
     role: copywriter
-    depends_on: [load_context]
+    depends_on: [load_context, learning_context]
     prompt: playbooks/09-local/local-store-pack.md
     outputs: ["artifacts/${run_id}/local-pack.json"]
+  - id: learning_context
+    type: learning.context
+    role: reporter
+    outputs: ["artifacts/${run_id}/learning-context.json"]
   - id: owner_gate
     type: gate
     requires_approval: true

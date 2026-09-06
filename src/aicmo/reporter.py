@@ -23,6 +23,12 @@ _INSIGHTS_HEADER = (
 _STORAGE_STEP = "knowledge-storage"
 
 
+def record_block(marker: str, heading: str, content: str) -> bytes:
+    safe = safe_kb_text(content)
+    literal = "\n".join("    " + line for line in safe.split("\n"))
+    return f"\n{marker}\n### {heading}\n\n{literal}\n\n---\n".encode()
+
+
 def append_record(
     target: Path,
     marker: str,
@@ -49,10 +55,8 @@ def append_record(
         normalized = b"\n" + existing.replace(b"\r\n", b"\n") + b"\n"
         if any(f"\n{item}\n".encode() in normalized for item in candidates):
             return False
-        safe = safe_kb_text(content)
         # Indentation keeps untrusted text literal and prevents top-level marker spoofing.
-        literal = "\n".join("    " + line for line in safe.split("\n"))
-        block = f"\n{marker}\n### {heading}\n\n{literal}\n\n---\n".encode()
+        block = record_block(marker, heading, content)
         with NamedTemporaryFile(
             dir=target.parent, prefix=target.name + ".", suffix=".tmp", delete=False
         ) as handle:

@@ -8,6 +8,7 @@ import typer
 
 from aicmo.feedback import prepare_feedback, record_artifact_feedback
 from aicmo.ingest import InboxItem, archive_item, retain_failed_urls, scan_inbox
+from aicmo.learning import read_feedback_file
 from aicmo.local_pack import read_brief_file
 from aicmo.phase_git import PhaseGitMode, run_phase_git
 from aicmo.redaction import minimize_customer_pii, redact
@@ -78,6 +79,9 @@ def run_workflow(
         Path | None,
         typer.Option("--brief-file", help="UTF-8 JSON brief for local-store-pack"),
     ] = None,
+    feedback_file: Annotated[
+        Path | None, typer.Option("--feedback-file", help="UTF-8 JSON for local-pack-feedback")
+    ] = None,
     feedback: Annotated[
         str | None,
         typer.Option("--feedback", help="Artifact feedback to persist for engine improvement."),
@@ -112,6 +116,11 @@ def run_workflow(
             reason = "use either --brief-file or --input brief_json, not both"
             raise typer.BadParameter(reason)
         inputs["brief_json"] = read_brief_file(brief_file)
+    if feedback_file is not None:
+        if workflow_id != "local-pack-feedback" or "feedback_json" in inputs:
+            reason = "use --feedback-file only for local-pack-feedback, without feedback_json"
+            raise typer.BadParameter(reason)
+        inputs["feedback_json"] = read_feedback_file(feedback_file)
     run_id_value = run_id or generated_run_id()
     if feedback and client:
         prepare_feedback(client, run_id_value, artifact_format or "unspecified", feedback)

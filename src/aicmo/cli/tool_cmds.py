@@ -8,6 +8,7 @@ from rich.table import Table
 from aicmo.capabilities import find_mapping, load_capabilities
 from aicmo.evaluate import evaluate_asset, render_report
 from aicmo.export import export_local_pack
+from aicmo.learning import learn_feedback
 from aicmo.mockup import brief_from_answers, render_landing_mockup, render_pdf, render_png
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
 from aicmo.outcomes import METRICS, import_outcomes, parse_channel, preview_outcomes
@@ -104,6 +105,16 @@ def kb_flush(
     store = WorkflowStore(db or default_db(repo_root))
     count = flush_kb_updates(repo_root, store, client)
     console.print(f"kb-flush: {count} queued update(s) appended to knowledge-base")
+
+
+def learn_feedback_cmd(
+    run_id: Annotated[str, typer.Argument(help="Owner-approved and reviewer-passed feedback run")],
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+) -> None:
+    runner = make_runner(repo, db)
+    target = learn_feedback(runner, run_id)
+    console.print(f"approved feedback: {target.relative_to(repo.resolve())}")
 
 
 def capabilities_cmd(
@@ -216,6 +227,7 @@ def outcomes_cmd(
 
 
 def register(app: typer.Typer) -> None:
+    app.command("learn-feedback")(learn_feedback_cmd)
     app.command("outcomes")(outcomes_cmd)
     app.command("onboard")(onboard_client)
     app.command("serve")(serve_cmd)

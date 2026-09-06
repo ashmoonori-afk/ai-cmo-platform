@@ -2,6 +2,25 @@ from __future__ import annotations
 
 SCHEMA = (
     """
+    create table if not exists learned_feedback (
+        event_sha256 text primary key,
+        client text not null,
+        feedback_run_id text not null,
+        insight text not null,
+        created_at text not null default current_timestamp
+    )
+    """,
+    """
+    create table if not exists approval_snapshots (
+        run_id text not null,
+        gate_id text not null,
+        source_path text not null,
+        snapshot_path text not null,
+        sha256 text not null,
+        primary key (run_id, gate_id, source_path)
+    )
+    """,
+    """
     create table if not exists manual_outcome_imports (
         confirmation_sha256 text primary key,
         client text not null,

@@ -1,0 +1,10 @@
+{
+  "schema_version": "aicmo.pack-feedback.v1",
+  "source_run_id": "source",
+  "item": "news-1.txt",
+  "observed_on": "2026-09-06",
+  "adoption": "used",
+  "reason": "사장님은 짧은 안내를 선호해 CTA를 한 문장으로 줄였습니다.",
+  "insight": "이 가게의 안내 문안은 CTA를 한 문장으로 짧게 씁니다.",
+  "weekly_report_run_id": null
+}

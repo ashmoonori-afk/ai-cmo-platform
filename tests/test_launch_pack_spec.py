@@ -94,6 +94,7 @@ def test_all_repo_workflow_specs_reference_existing_files() -> None:
 
 
 _DELIVERY_PRODUCERS = {
+    "local-pack-feedback": ("candidate", "owner_gate"),
     "weekly-report": ("report",),
     "local-store-pack": ("drafts", "owner_gate"),
     "approval-demo": ("report",),
@@ -112,8 +113,9 @@ _DELIVERY_PRODUCERS = {
 }
 
 _HANDOFF_INPUTS = {
+    "local-pack-feedback": (),
     "weekly-report": ("load_context",),
-    "local-store-pack": ("load_context",),
+    "local-store-pack": ("load_context", "learning_context"),
     "approval-demo": ("owner_gate",),
     "blog-article": ("draft", "review"),
     "content-engine": (

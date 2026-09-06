@@ -1,0 +1,23 @@
+id: local-pack-feedback
+name: 가게 문안 채택과 수정 피드백
+inputs:
+  client: required
+  feedback_json: required
+steps:
+  - id: candidate
+    type: feedback.report
+    role: reporter
+    outputs: ["artifacts/${run_id}/feedback.json"]
+  - id: owner_gate
+    type: gate
+    requires_approval: true
+    depends_on: [candidate]
+    outputs: ["artifacts/${run_id}/owner-approval.json"]
+  - id: delivery_gate
+    type: gate
+    role: reviewer
+    terminal_delivery: true
+    depends_on: [candidate, owner_gate]
+    prompt: playbooks/07-operations/local-pack-feedback.md
+    pass_if: "status in ['PASS','WARN']"
+    outputs: ["artifacts/${run_id}/delivery-review.json"]

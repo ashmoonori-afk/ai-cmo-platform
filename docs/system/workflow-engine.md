@@ -187,6 +187,15 @@ next generation. Historical entries are not retroactively cleaned; pattern-based
 minimization does not recognize all personal data. This local-file design assumes
 cooperating writers and does not claim power-loss durability or tenant isolation.
 
+The separate `local-pack-feedback` workflow now verifies a pack item's original
+snapshot, final approved copy, and optional reviewed weekly report. Owner approval
+and terminal semantic PASS precede explicit `learn-feedback`. Reporter appends the
+exact KB block before committing its SQLite receipt; replay uses one evidence ID
+and can replace an older proof with a newly verified feedback run. New store packs
+consume only bounded, reverified receipts through `learning.context`. See
+[the feedback learning guide](../FEEDBACK_LEARNING.md) for commands, recovery,
+and the distinction between user-reported preferences and actual causal evidence.
+
 ## Product Phases
 
 | Phase | Scope |

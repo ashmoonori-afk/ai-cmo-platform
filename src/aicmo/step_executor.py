@@ -82,6 +82,45 @@ class WorkflowStepExecutor:
     phase_announcer: PhaseAnnouncer | None = None
     phase_completed: PhaseCompletionHook | None = None
 
+    def verified_export_outputs(
+        self,
+        spec: WorkflowSpec,
+        run_id: str,
+        inputs: dict[str, str],
+    ) -> dict[str, bytes]:
+        """Capture only current successful outputs whose dependency/version hashes match."""
+        context = {**inputs, "run_id": run_id, "workflow_id": spec.id}
+        step_id = "export"
+        contents: dict[str, bytes] = {}
+        for step in spec.execution_order():
+            outputs = self.store.get_step_outputs(run_id, step.id)
+            hashes = self.store.get_output_hashes(run_id, step.id)
+            if (
+                self.store.get_step_status(run_id, step.id) != StepStatus.SUCCESS
+                or set(outputs) != set(self._declared_outputs(step, context))
+                or set(outputs) != set(hashes)
+                or (
+                    step.depends_on
+                    and self.store.get_consumed_ref_digest(run_id, step.id)
+                    != self._consumed_ref_digest(self._artifact_refs(run_id, step))
+                )
+            ):
+                raise WorkflowExecutionError(
+                    step_id, "stale or incomplete approval/review; resume first"
+                )
+            for relative in outputs:
+                path = resolve_inside_repo(self.repo_root, relative, {})
+                try:
+                    data = path.read_bytes()
+                except OSError:
+                    raise WorkflowExecutionError(step_id, "required artifact is missing") from None
+                if hashlib.sha256(data).hexdigest() != hashes[relative]:
+                    raise WorkflowExecutionError(
+                        step_id, "artifact changed after review; resume first"
+                    )
+                contents[relative] = data
+        return contents
+
     def _execute_step(
         self,
         run_id: str,
@@ -117,6 +156,18 @@ class WorkflowStepExecutor:
                         context.get("client", ""),
                         context.get("week_start", ""),
                         parse_channel(context.get("channel", "naver")),
+                    )
+                    return self._write_outputs(step, context, content, lease_signal)
+                case StepType.FEEDBACK_REPORT | StepType.LEARNING_CONTEXT:
+                    from aicmo.learning import (  # noqa: PLC0415 — runner-backed verification is loaded after runner initialization
+                        feedback_report,
+                        learning_context,
+                    )
+
+                    content = (
+                        feedback_report(self, context)
+                        if step.type == StepType.FEEDBACK_REPORT
+                        else learning_context(self, context.get("client", ""))
                     )
                     return self._write_outputs(step, context, content, lease_signal)
                 case unreachable:
@@ -416,10 +467,45 @@ class WorkflowStepExecutor:
         for row in self.store.list_steps(run_id):
             if row["status"] != StepStatus.SUCCESS.value:
                 continue
-            for relative in self.store.get_step_outputs(run_id, str(row["step_id"])):
+            producer = str(row["step_id"])
+            hashes = self.store.get_output_hashes(run_id, producer)
+            for relative in self.store.get_step_outputs(run_id, producer):
                 source = self._stored_artifact_path(relative)
                 if source is None or not source.exists():
                     continue
+                content = source.read_bytes()
+                digest = hashlib.sha256(content).hexdigest()
+                if hashes.get(relative) != digest:
+                    raise WorkflowExecutionError(
+                        step_id, "artifact changed before approval snapshot"
+                    )
+                version = self._resolve(f".aicmo/snapshots/{digest}", context)
+                if version.exists():
+                    if version.read_bytes() != content:
+                        raise WorkflowExecutionError(step_id, "approval snapshot has changed")
+                else:
+                    active = self._check_lease(run_id, step_id, lease_signal)
+                    version.parent.mkdir(parents=True, exist_ok=True)
+                    temp = version.with_name(f"{version.name}.{self.runner_token}.tmp")
+                    try:
+                        temp.write_bytes(content)
+                        self._replace_output(run_id, step_id, lease_signal, active, temp, version)
+                    finally:
+                        temp.unlink(missing_ok=True)
+                self._check_lease(run_id, step_id, lease_signal)
+                with self.store.connect() as connection:
+                    connection.execute(
+                        "insert into approval_snapshots values (?, ?, ?, ?, ?) "
+                        "on conflict(run_id, gate_id, source_path) do update set "
+                        "snapshot_path=excluded.snapshot_path, sha256=excluded.sha256",
+                        (
+                            run_id,
+                            step_id,
+                            relative,
+                            str(version.relative_to(self.repo_root)).replace("\\", "/"),
+                            digest,
+                        ),
+                    )
                 target = snapshot_root / relative
                 if target.exists():
                     continue
@@ -427,7 +513,7 @@ class WorkflowStepExecutor:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 tmp = target.with_name(f"{target.name}.{self.runner_token}.tmp")
                 try:
-                    tmp.write_bytes(source.read_bytes())
+                    tmp.write_bytes(content)
                     self._replace_output(run_id, step_id, lease_signal, active, tmp, target)
                 finally:
                     tmp.unlink(missing_ok=True)
@@ -441,10 +527,10 @@ class WorkflowStepExecutor:
         candidate = Path(relative)
         if candidate.is_absolute() or ".." in candidate.parts:
             return None
-        resolved = (self.repo_root / candidate).resolve()
-        if not resolved.is_relative_to(self.repo_root.resolve()):
+        try:
+            return resolve_inside_repo(self.repo_root, relative, {})
+        except WorkflowExecutionError:
             return None
-        return resolved
 
     def _artifact_refs(self, run_id: str, step: WorkflowStep) -> tuple[ArtifactRef, ...]:
         remaining = ARTIFACT_REF_CONTENT_BUDGET

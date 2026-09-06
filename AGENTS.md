@@ -23,7 +23,7 @@
 **`registry/capabilities.yaml`**이 디스패치의 단일 기계 판독 소스다:
 
 - `agents`: 13개 서브에이전트 (name, role, model, path)
-- `mappings`: 자연어 트리거 → 플레이북/체인 + 에이전트 조합 + 모델 (75개)
+- `mappings`: 자연어 트리거 → 플레이북/체인 + 에이전트 조합 + 모델 (76개)
 - `modules`: 플레이북 모듈 폴터 → 출력 모듈 폴터
 - `unmapped_playbooks`: 매핑 없는 플레이북과 사유
 - `gates`: 검증/승인 규칙
@@ -123,6 +123,8 @@ aicmo capabilities                            # 레지스트리 조회 (agents/m
 온볼딩 → 키워드 리서치(3클로스터) → 블로그 1편 → SNS 3개 → 주간 리포트. GTM/포지셔닝/피칭덱/GA 감사 등은 제외.
 
 국내 가게의 소식·입력 리뷰 답글 요청은 매핑 75의 `local-store-pack`을 사용한다.
+
+매핑 76의 `local-pack-feedback`은 문안 한 건의 사용자 보고 채택/수정 이유와 승인된 원본·최종본을 검토한다. owner 승인·terminal reviewer PASS 후 명시적 `learn-feedback`만 Reporter KB에 반영한다. 다음 실행팩의 learning-context는 유효한 승인 기록만 읽으며 운영 상태 큐나 임의 KB 문장을 학습으로 취급하지 않는다.
 주력 네이버 1채널로 소식 최대 2건·입력 답글 최대 5건·주간 실행 카드를 작성하고,
 사장님 시간·사진 유무에 따라 축소한다. 사장님 승인과 최종 reviewer PASS 뒤
 `aicmo export-local-pack {run_id}`로 로컬 파일을 준비하며 게시·발송은 자동 실행하지 않는다.

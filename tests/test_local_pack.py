@@ -104,6 +104,7 @@ def _runner(root: Path, *, reviewer: PassReviewer | None = PASS_REVIEWER) -> Wor
         "workflows/local-store-pack.workflow.yaml",
         "playbooks/09-local/local-store-pack.md",
         "agents/copywriter.md",
+        "agents/reporter.md",
         "agents/reviewer.md",
         "prompts/shared/gate-check.md",
         "prompts/shared/deliverable-standard.md",
