@@ -28,6 +28,18 @@ def parse_safe_id(kind: str, raw: str) -> str:
     return raw
 
 
+def native_io_path(path: Path) -> Path:
+    """Apply Windows long-path syntax only after logical containment has been checked."""
+    if sys.platform != "win32":
+        return path
+    absolute = str(path.absolute())
+    if absolute.startswith("\\\\?\\"):
+        return path
+    if absolute.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + absolute[2:])
+    return Path("\\\\?\\" + absolute)
+
+
 def resolve_inside_repo(repo_root: Path, path_template: str, context: dict[str, str]) -> Path:
     value = path_template
     for key, replacement in context.items():

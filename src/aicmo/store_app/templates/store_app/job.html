@@ -1,0 +1,12 @@
+{% extends "store_app/base.html" %}{% block content %}<h1>{{ job.store.name }} · 주간 실행팩</h1><p role="status"><span class="badge">{{ job.get_state_display }}</span></p>
+{% if notice %}<p role="alert">{{ notice }}</p>{% endif %}
+{% if job.cancel_requested %}<p role="status">취소를 요청했습니다. 진행 중인 호출이 끝난 뒤 반영됩니다. 이미 납품이 완료된 경우 완료 상태를 유지합니다.</p>{% endif %}
+{% if job.state == 'queued' or job.state == 'running' %}<section class="card"><h2>요청을 처리하고 있어요</h2><p>화면을 닫아도 요청은 보관됩니다. 잠시 후 새로 확인해 주세요.</p><a class="button secondary" href="{% url 'job' job.id %}">상태 새로 확인</a></section>{% endif %}
+{% if pack %}<section class="card"><h2>한 장 요약</h2><p>{{ pack.summary }}</p><p class="muted">AI가 작성한 문안입니다. 실제 외부 게시가 완료된 상태는 아닙니다.</p></section>
+{% for news in pack.news %}<article class="card"><h2>{{ news.title }}</h2><p class="copy">{{ news.body }}</p><p>{{ news.cta }}</p><p>기간: {{ news.period }}</p><p>{{ news.photo_instruction }}</p></article>{% endfor %}
+{% for reply in pack.replies %}<article class="card"><h2>리뷰 {{ reply.review_index|add:1 }} 답글</h2><p class="copy">{{ reply.body }}</p></article>{% endfor %}
+<section class="card"><h2>이번 주 실행 계획</h2>{% for action in pack.weekly_actions %}<p>{{ action.when }} · {{ action.action }} ({{ action.minutes }}분 계획)</p>{% endfor %}</section>{% endif %}
+{% if job.state == 'waiting_approval' and pack %}<section class="card"><h2>이 문안으로 최종 검토를 요청할까요?</h2><p>제목·본문·가격·기간을 확인하세요. 수정이 필요하면 운영자에게 요청해 주세요.</p><form method="post" action="{% url 'approve' job.id %}">{% csrf_token %}{{ approval_form.as_p }}<button>확인하고 최종 검토 요청</button></form></section>{% endif %}
+{% if job.state == 'success' %}<section class="card"><h2>문안을 저장할 수 있어요</h2><form method="post" action="{% url 'download' job.id %}">{% csrf_token %}<button>실행팩 ZIP 저장</button></form><p>파일 안의 안내를 따라 사장님이 직접 게시하세요.</p></section>{% endif %}
+{% if job.state == 'queued' or job.state == 'running' or job.state == 'waiting_approval' %}<form method="post" action="{% url 'cancel' job.id %}">{% csrf_token %}<button class="secondary">이 작업 취소</button></form>{% endif %}
+<p><a href="{% url 'home' %}">오늘과 최근 작업으로</a></p>{% endblock %}

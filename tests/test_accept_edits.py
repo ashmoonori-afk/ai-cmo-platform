@@ -73,6 +73,17 @@ def _start_waiting_run(repo_root: Path, run_id: str) -> WorkflowRunner:
     return runner
 
 
+def test_long_run_id_snapshot_uses_native_windows_paths(approval_repo: Path) -> None:
+    from aicmo.paths import native_io_path  # noqa: PLC0415 — targeted filesystem regression
+
+    run_id = "long-" + "x" * 123
+    runner = _start_waiting_run(approval_repo, run_id)
+    relative = f"artifacts/{run_id}/draft.md"
+    snapshot = native_io_path(approval_repo / f"artifacts/{run_id}/_pre_edit/{relative}")
+    assert snapshot.read_bytes() == (approval_repo / relative).read_bytes()
+    assert runner.resume(run_id).status == "waiting_approval"
+
+
 def test_pre_edit_snapshot_captures_original_and_is_write_once(approval_repo: Path) -> None:
     runner = _start_waiting_run(approval_repo, "run_snap")
     draft = approval_repo / "artifacts" / "run_snap" / "draft.md"

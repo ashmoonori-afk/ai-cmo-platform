@@ -359,6 +359,13 @@ class WorkflowRunner(WorkflowStepExecutor):
             return self._fail(run_id, step.id, "dependency did not complete", owner=None)
         return None
 
+    def complete_verified_local_pack(self: Self, run_id: str) -> RunResult:
+        """Recover a completed pack's final write without invoking or changing its providers."""
+        verified_delivery(
+            self, run_id, LOCAL_PACK_WORKFLOW, completing=True, require_deliverable=False
+        )
+        return self._complete_run(run_id)
+
     def _complete_run(self: Self, run_id: str) -> RunResult:
         if self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW:
             try:

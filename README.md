@@ -45,6 +45,7 @@ Or open the repo in Claude Code and just say: `런치팩 해줘 — 새 클라�
 | Natural-language requests | `registry/capabilities.yaml` mappings | 요청을 SOP/agent 조합으로 안내할 수 있음. 자동 실행을 보장하지 않음 |
 | Executable workflows | `workflows/*.workflow.yaml` | `aicmo run/resume/approve`로 실제 DAG 실행 가능 |
 | Local web | `aicmo serve` | 온보딩 입력과 mockup 확인용 로컬 UI |
+| Store app | `python -m aicmo.store_app` + `work` | 로그인·가게 권한·지속 작업·문안 확인·검증된 ZIP 저장. 운영자 설정 필요. [실행 방법](docs/STORE_APP.md) |
 | Local store pack | `local-store-pack` → owner approval → reviewer → `export-local-pack` | 네이버 소식·제공 리뷰 답글·주간 카드와 실제 TXT/Markdown ZIP. [사용법](docs/LOCAL_PACK.md) |
 | Generation | deterministic stub by default; optional configured executor | stub 결과는 데모이며 고객 납품용 생성물이 아님 |
 | Publish and live integrations | human approval required | 외부 발행·발송·결제·연동 완료를 자동으로 주장하지 않음 |

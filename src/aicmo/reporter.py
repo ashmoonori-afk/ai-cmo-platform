@@ -40,7 +40,7 @@ def append_record(
 ) -> bool:
     """Append one literal, minimized record, preserving every existing byte."""
     target.parent.mkdir(parents=True, exist_ok=True)
-    with _exclusive_file_lock(target.with_name(target.name + ".lock")):
+    with exclusive_file_lock(target.with_name(target.name + ".lock")):
         if target.is_symlink():
             reason = "knowledge file must not be a symbolic link"
             raise WorkflowExecutionError(_STORAGE_STEP, reason)
@@ -135,7 +135,7 @@ def append_insight(target: Path, row: sqlite3.Row) -> bool:
 
 
 @contextmanager
-def _exclusive_file_lock(lock_path: Path) -> Iterator[None]:
+def exclusive_file_lock(lock_path: Path) -> Iterator[None]:
     with lock_path.open("a+b") as handle:
         if sys.platform == "win32":
             locker = cast(

@@ -41,7 +41,7 @@ from aicmo.models import (
     WorkflowStep,
 )
 from aicmo.outcomes import parse_channel, weekly_outcomes_report
-from aicmo.paths import resolve_inside_repo
+from aicmo.paths import native_io_path, resolve_inside_repo
 from aicmo.photos import PHOTO_STEP, parse_photos, photo_manifest, verify_photo_manifest
 from aicmo.redaction import minimize_customer_pii
 from aicmo.reviewer_contract import (
@@ -506,7 +506,6 @@ class WorkflowStepExecutor:
         resumed wait must not capture already-edited files as the original."""
         if not context.get("run_id"):
             return
-        snapshot_root = self._resolve("artifacts/${run_id}/_pre_edit", context)
         for row in self.store.list_steps(run_id):
             if row["status"] != StepStatus.SUCCESS.value:
                 continue
@@ -529,7 +528,9 @@ class WorkflowStepExecutor:
                 else:
                     active = self._check_lease(run_id, step_id, lease_signal)
                     version.parent.mkdir(parents=True, exist_ok=True)
-                    temp = version.with_name(f"{version.name}.{self.runner_token}.tmp")
+                    temp = native_io_path(
+                        version.with_name(f"{version.name}.{self.runner_token}.tmp")
+                    )
                     try:
                         temp.write_bytes(content)
                         self._replace_output(run_id, step_id, lease_signal, active, temp, version)
@@ -549,7 +550,9 @@ class WorkflowStepExecutor:
                             digest,
                         ),
                     )
-                target = snapshot_root / relative
+                target = native_io_path(
+                    self._resolve(f"artifacts/${{run_id}}/_pre_edit/{relative}", context)
+                )
                 if target.exists():
                     continue
                 active = self._check_lease(run_id, step_id, lease_signal)
@@ -914,8 +917,8 @@ class WorkflowStepExecutor:
         for output_template in self._output_templates(step):
             target = self._resolve(output_template, context)
             active = self._check_lease(context["run_id"], step.id, lease_signal)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = target.with_name(f"{target.name}.{self.runner_token}.tmp")
+            native_io_path(target.parent).mkdir(parents=True, exist_ok=True)
+            tmp = native_io_path(target.with_name(f"{target.name}.{self.runner_token}.tmp"))
             try:
                 tmp.write_text(content.rstrip() + "\n", encoding="utf-8")
                 self._replace_output(
@@ -941,14 +944,14 @@ class WorkflowStepExecutor:
         target: Path,
     ) -> None:
         if not active:
-            tmp.replace(target)
+            tmp.replace(native_io_path(target))
             return
         with self.store.hold_lease_for_write(run_id, step_id, self.runner_token) as owned:
             if lease_signal.done():
                 lease_signal.result()
             if not owned:
                 raise WorkflowExecutionError(step_id, "step lease lost before artifact replace")
-            tmp.replace(target)
+            tmp.replace(native_io_path(target))
 
     def _output_templates(self, step: WorkflowStep) -> tuple[str, ...]:
         if step.outputs:

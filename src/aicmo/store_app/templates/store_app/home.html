@@ -1,0 +1,5 @@
+{% extends "store_app/base.html" %}{% block content %}<h1>오늘, 우리 가게에 필요한 홍보</h1>
+<p class="muted">확인한 소식으로 문안을 만들고, 직접 확인한 뒤 저장하세요.</p>
+{% for store in stores %}<section class="card"><h2>{{ store.name }}</h2><p>이번 주 소식과 리뷰 답글을 준비할 수 있어요.</p><a class="button" href="{% url 'create' store.id %}">소식 만들기</a></section>
+{% empty %}<section class="card"><h2>연결된 가게가 없습니다</h2><p>운영자에게 가게 연결을 요청해 주세요.</p></section>{% endfor %}
+<h2>최근 작업</h2>{% for job in jobs %}<article class="card"><span class="badge">{{ job.get_state_display }}</span><h2><a href="{% url 'job' job.id %}">{{ job.store.name }} · 주간 실행팩</a></h2><p class="muted">{{ job.created_at|date:"Y년 n월 j일 H:i" }}</p></article>{% empty %}<p>아직 만든 문안이 없습니다. 첫 소식을 준비해 보세요.</p>{% endfor %}{% endblock %}
