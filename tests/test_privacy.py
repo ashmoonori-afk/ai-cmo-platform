@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 from aicmo.adapters import CommandAdapter
 from aicmo.cli import app, ingest_inbox
 from aicmo.errors import WorkflowExecutionError
-from aicmo.redaction import redact
+from aicmo.redaction import contains_raw_secret, redact
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 
@@ -158,3 +158,31 @@ def test_redaction_preserves_legitimate_content() -> None:
     signed = redact("https://x.example/a.pdf?X-Amz-Signature=abc123&page=2")
     assert "abc123" not in signed
     assert "page=2" in signed
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://alice:supersecret@example.com/path",
+        "env:KEY sk-test-credential-1234567890",
+        "https://alice@example.com/path",
+        "비밀번호=supersecret",
+        "암호: supersecret",
+        "인증키=abcdefgh12345678",
+        "토큰=abcdefgh12345678",
+        "비밀번호\uff1dsupersecret",
+        "\uff50\uff41\uff53\uff53\uff57\uff4f\uff52\uff44\uff1dsupersecret",
+    ],
+)
+def test_secret_references_cannot_hide_literals(value: str) -> None:
+    assert contains_raw_secret(value)
+    assert redact(value) != value
+    assert contains_raw_secret("env:SAFE_KEY") is False
+    assert contains_raw_secret("https://example.com/@public-name") is False
+
+
+def test_secret_redaction_does_not_activate_fullwidth_markup_or_rewrite_prose() -> None:
+    original = "\uff1cscript\uff1ealert(1)\uff1c/script\uff1e \uff21\uff22\uff23 ① ㎏"
+    assert redact(original) == original
+    assert redact(original + " 비밀번호=supersecret") == original + " 비밀번호=[redacted]"
+    assert redact(original + " 비밀번호\uff1dsupersecret") == "[redacted]"

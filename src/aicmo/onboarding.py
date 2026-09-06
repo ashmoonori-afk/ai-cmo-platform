@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import unicodedata
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -13,12 +14,12 @@ from pydantic import TypeAdapter, ValidationError
 
 from aicmo import mockup, primer
 from aicmo.errors import OnboardingError
-from aicmo.paths import parse_safe_id
+from aicmo.paths import native_io_path, parse_safe_id
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates" / "onboarding"
 _TOKEN_PATTERN = re.compile(r"\{\{(\w+)\}\}")
 
-_VALID_MARKET_TYPES = frozenset({"b2b", "b2c", "both"})
+_VALID_MARKET_TYPES = frozenset({"b2b", "b2c", "both", "unknown"})
 _VALID_FACT_STATUSES = frozenset({"confirmed", "unknown", "not_applicable"})
 _CHANNEL_NAMES = (
     "네이버",
@@ -139,11 +140,7 @@ def load_answers(path: Path) -> OnboardingAnswers:
 
 def validate_answers(answers: OnboardingAnswers, *, subject: str | None = None) -> None:
     name = subject or answers.client
-    required = {
-        field: getattr(answers, field)
-        for field in _REQUIRED_FIELDS
-        if field != "client"
-    }
+    required = {field: getattr(answers, field) for field in _REQUIRED_FIELDS if field != "client"}
     missing = [field for field, value in required.items() if not value.strip()]
     if missing:
         raise OnboardingError(name, f"missing required answers: {', '.join(missing)}")
@@ -156,19 +153,7 @@ def validate_answers(answers: OnboardingAnswers, *, subject: str | None = None) 
     channel = answers.channel.strip()
     if channel not in _CHANNEL_EMPTY_VALUES and _CHANNEL_PATTERN.fullmatch(channel) is None:
         raise OnboardingError(name, "channel must name a supported channel or use 모름/해당없음")
-    price = re.sub(
-        r"(?<=[0-9원])\s+(?=[-\N{MINUS SIGN}\N{FULLWIDTH HYPHEN-MINUS}])",
-        "",
-        answers.price,
-    )
-    negative_price = re.search(
-        r"(?<![0-9원])(?:-|\N{MINUS SIGN}|\N{FULLWIDTH HYPHEN-MINUS})"
-        r"\s*(?:\N{WON SIGN}|\$|KRW)?\s*\d",
-        price,
-        re.IGNORECASE,
-    )
-    if negative_price is not None:
-        raise OnboardingError(name, "price cannot be negative")
+    _validate_price(answers.price, name)
     dates: dict[str, date] = {}
     for field in ("campaign_start", "campaign_end"):
         value = getattr(answers, field).strip()
@@ -181,6 +166,24 @@ def validate_answers(answers: OnboardingAnswers, *, subject: str | None = None) 
         dates["campaign_start"] > dates["campaign_end"]
     ):
         raise OnboardingError(name, "campaign_start cannot be after campaign_end")
+
+
+def _validate_price(raw: str, name: str) -> None:
+    price = re.sub(
+        r"(?<=[0-9원])\s+(?=[-\N{MINUS SIGN}\N{FULLWIDTH HYPHEN-MINUS}])",
+        "",
+        unicodedata.normalize("NFKC", raw),
+    )
+    if any(unicodedata.category(char).startswith("C") for char in price):
+        raise OnboardingError(name, "price cannot contain control or invisible characters")
+    negative_price = re.search(
+        r"(?<![0-9원])(?:-|\N{MINUS SIGN}|\N{FULLWIDTH HYPHEN-MINUS})"
+        r"\s*(?:\N{WON SIGN}|\$|KRW)?\s*\d",
+        price,
+        re.IGNORECASE,
+    )
+    if negative_price is not None:
+        raise OnboardingError(name, "price cannot be negative")
 
 
 def _render(template_name: str, answers: OnboardingAnswers, date: str) -> str:
@@ -233,9 +236,9 @@ def _prepare_profile_backups(backups: dict[Path, Path]) -> None:
 
 def _write_profile_files(contents: dict[Path, str], slug: str) -> None:
     """Replace profile files together; retain recoverable backups until commit."""
-    backups = {
-        target: target.with_name(f".{target.name}.onboarding.bak") for target in contents
-    }
+    # Containment is checked by scaffold_client; keep its returned paths logical.
+    contents = {native_io_path(path): content for path, content in contents.items()}
+    backups = {target: target.with_name(f".{target.name}.onboarding.bak") for target in contents}
     temporary = {target: target.with_name(f".{target.name}.onboarding.tmp") for target in contents}
     leftovers = [path for path in (*backups.values(), *temporary.values()) if path.exists()]
     if leftovers:
@@ -273,14 +276,12 @@ def _profile_contents(
     answers: OnboardingAnswers,
     date: str,
 ) -> dict[Path, str]:
-    contents = {
-        client_dir / name: _render(name, answers, date) for name in _CLIENT_TEMPLATES
-    }
+    contents = {client_dir / name: _render(name, answers, date) for name in _CLIENT_TEMPLATES}
     contents.update(
         {
             kb_dir / name: _render(name, answers, date)
             for name in _KB_TEMPLATES
-            if not (kb_dir / name).exists()
+            if not native_io_path(kb_dir / name).exists()
         }
     )
     contents[client_dir / "primer-report.html"] = primer.render_primer_html(answers, date=date)
@@ -296,10 +297,10 @@ def _remove_new_empty_directories(
 ) -> None:
     if not client_existed:
         with suppress(OSError):
-            client_dir.rmdir()
+            native_io_path(client_dir).rmdir()
     if not kb_existed:
         with suppress(OSError):
-            kb_dir.rmdir()
+            native_io_path(kb_dir).rmdir()
 
 
 def scaffold_client(
@@ -318,14 +319,14 @@ def scaffold_client(
     kb_dir = (root / "knowledge-base" / slug).resolve()
     if not client_dir.is_relative_to(root) or not kb_dir.is_relative_to(root):
         raise OnboardingError(slug, "resolved path escapes the repository root")
-    if client_dir.exists() and not force:
+    if native_io_path(client_dir).exists() and not force:
         msg = f"client already exists: {client_dir} (use force to update the profile)"
         raise OnboardingError(slug, msg)
 
-    client_existed = client_dir.exists()
-    kb_existed = kb_dir.exists()
-    client_dir.mkdir(parents=True, exist_ok=True)
-    kb_dir.mkdir(parents=True, exist_ok=True)
+    client_existed = native_io_path(client_dir).exists()
+    kb_existed = native_io_path(kb_dir).exists()
+    native_io_path(client_dir).mkdir(parents=True, exist_ok=True)
+    native_io_path(kb_dir).mkdir(parents=True, exist_ok=True)
     contents = _profile_contents(client_dir, kb_dir, answers, date)
     html_path = client_dir / "primer-report.html"
     try:

@@ -5,8 +5,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 
-def test_django_store_app(tmp_path: Path) -> None:
+
+@pytest.mark.parametrize("label", ["tests.store_app_cases", "tests.store_onboarding_cases"])
+def test_django_store_app(tmp_path: Path, label: str) -> None:
     env = {
         **os.environ,
         "DJANGO_SETTINGS_MODULE": "aicmo.store_app.settings",
@@ -15,8 +18,8 @@ def test_django_store_app(tmp_path: Path) -> None:
         "AICMO_REPO": str(Path(__file__).resolve().parents[1]),
         "AICMO_TEST_DB": str(tmp_path / "web-test.sqlite3"),
     }
-    result = subprocess.run(
-        [sys.executable, "-m", "tests.run_store_app_tests"],
+    result = subprocess.run(  # noqa: S603 — labels are the fixed parametrization above
+        [sys.executable, "-m", "tests.run_store_app_tests", label],
         env=env,
         capture_output=True,
         text=True,

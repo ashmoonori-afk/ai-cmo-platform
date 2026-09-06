@@ -1,0 +1,14 @@
+{% extends "store_app/base.html" %}{% block title %}가게 정보 {{ step }}단계 · 우리 가게 홍보{% endblock %}
+{% block content %}<p class="muted">가게 정보 · {{ step }}/3단계</p>
+<h1>{% if step == 1 %}어떤 가게를 운영하시나요?{% elif step == 2 %}상품과 운영 정보를 알려 주세요{% else %}이번에 할 홍보를 정해 볼까요?{% endif %}</h1>
+<p>실제로 확인한 내용만 적어 주세요. 선택 항목은 모르면 비워 두셔도 됩니다.</p>
+<section class="card"><form method="post">{% csrf_token %}
+{% if step == 3 %}{{ form.non_field_errors }}{{ form.revision }}
+{% for field in form %}{% if field.name == 'objective' or field.name == 'channel' or field.name == 'weekly_capacity' %}<p>{{ field.label_tag }}{{ field }}{{ field.errors }}<span class="helptext" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span></p>{% endif %}{% endfor %}
+<details {% if form.errors %}open{% endif %}><summary>추가 정보 입력하기 · 지금 건너뛰어도 돼요</summary>{% for field in form %}{% if field.name == 'market_type' or field.name == 'audience' or field.name == 'proof' or field.name == 'cta' %}<p>{{ field.label_tag }}{{ field }}{{ field.errors }}<span class="helptext" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span></p>{% endif %}{% endfor %}</details>
+{% else %}{{ form.as_p }}{% endif %}
+<div class="actions"><button name="action" value="next">{% if step == 3 %}마지막 확인으로{% else %}저장하고 다음으로{% endif %}</button>
+{% if step > 1 %}<button name="action" value="back" class="secondary" formnovalidate>저장하고 이전으로</button>{% endif %}
+<button name="action" value="save" class="secondary" formnovalidate>임시 저장하고 나가기</button></div></form></section>
+<p class="muted">비밀번호·인증 키는 입력하지 마세요. 고객 이름·연락처는 일부 표기만 자동으로 가려집니다. 남은 개인정보는 직접 확인해 주세요.</p>
+<p><a href="{% url 'onboarding-step' step %}">최신 저장 내용 열기</a> · <a href="{% url 'home' %}">오늘로 돌아가기</a></p>{% endblock %}

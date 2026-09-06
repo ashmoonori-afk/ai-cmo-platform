@@ -78,3 +78,67 @@ class LoginWindow(models.Model):
 
     def __str__(self) -> str:
         return "Login attempt window"
+
+
+class OnboardingDraft(models.Model):
+    MAX_ATTEMPTS = 3
+    id: models.UUIDField[uuid.UUID, uuid.UUID] = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False
+    )
+    owner: models.OneToOneField[User, User] = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT
+    )
+    data = models.JSONField(default=dict)
+    revision: models.PositiveBigIntegerField[int, int] = models.PositiveBigIntegerField(default=0)
+    completed_step: models.PositiveSmallIntegerField[int, int] = models.PositiveSmallIntegerField(
+        default=0
+    )
+    state: models.CharField[str, str] = models.CharField(
+        max_length=16,
+        default="draft",
+        choices=[
+            ("draft", "작성 중"),
+            ("queued", "접수됨"),
+            ("running", "가게 준비 중"),
+            ("failed", "확인 필요"),
+            ("complete", "가게 준비 완료"),
+        ],
+    )
+    output_hashes = models.JSONField(default=dict)
+    attempts: models.PositiveSmallIntegerField[int, int] = models.PositiveSmallIntegerField(
+        default=0
+    )
+    failure_code: models.CharField[str, str] = models.CharField(
+        max_length=32, blank=True, default=""
+    )
+    stage_id: models.UUIDField[uuid.UUID | None, uuid.UUID | None] = models.UUIDField(
+        null=True, blank=True, editable=False
+    )
+    store: models.OneToOneField[Store | None, Store | None] = models.OneToOneField(
+        Store, on_delete=models.PROTECT, null=True, blank=True
+    )
+    confirmed_at: models.DateTimeField[datetime | None, datetime | None] = models.DateTimeField(
+        null=True, blank=True
+    )
+    updated_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints: ClassVar = [
+            models.CheckConstraint(
+                condition=models.Q(completed_step__lte=3), name="onboarding_steps"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(state="complete", store__isnull=False)
+                    | (~models.Q(state="complete") & models.Q(store__isnull=True))
+                ),
+                name="onboarding_completed_store",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return "가게 정보 입력"
+
+    @property
+    def client(self) -> str:
+        return f"web-client-{self.id.hex}"

@@ -17,5 +17,7 @@ if "--worker" in sys.argv:
 django.setup()
 settings.DATABASES["default"]["TEST"]["NAME"] = os.environ["AICMO_TEST_DB"]
 raise SystemExit(
-    DiscoverRunner(verbosity=2, interactive=False).run_tests(["tests.store_app_cases"])
+    DiscoverRunner(verbosity=2, interactive=False).run_tests(
+        sys.argv[1:] or ["tests.store_app_cases"]
+    )
 )

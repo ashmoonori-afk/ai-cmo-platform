@@ -7,7 +7,7 @@
 
 - **온보딩 날짜**: {{date}}
 - **웹사이트**: {{website}}
-- **시장 유형 (누구에게 파나)**: {{market_type}} — b2c=일반 소비자, b2b=다른 회사, both=둘 다
+- **시장 유형 (누구에게 파나)**: {{market_type}} — b2c=일반 소비자, b2b=다른 회사, both=둘 다, unknown=미확인
 - **동네/상권**: {{neighborhood}}
 - **업종**: {{business_type}}
 - **대표 상품 가격**: {{price}}

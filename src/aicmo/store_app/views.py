@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User
 from django.db import transaction
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -12,7 +13,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from aicmo.errors import AicmoError
-from aicmo.store_app import services
+from aicmo.store_app import onboarding, services
 from aicmo.store_app.forms import ApprovalForm, PackForm
 from aicmo.store_app.models import Job
 
@@ -23,7 +24,15 @@ from aicmo.store_app.models import Job
 def home(request: HttpRequest) -> HttpResponse:
     stores = services.allowed_stores(request.user)
     jobs = Job.objects.filter(store__in=stores).select_related("store").order_by("-created_at")[:30]
-    return render(request, "store_app/home.html", {"stores": stores, "jobs": jobs})
+    return render(
+        request,
+        "store_app/home.html",
+        {
+            "stores": stores,
+            "jobs": jobs,
+            "can_onboard": isinstance(request.user, User) and onboarding.new_owner(request.user),
+        },
+    )
 
 
 @login_required

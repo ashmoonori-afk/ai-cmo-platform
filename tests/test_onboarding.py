@@ -9,10 +9,21 @@ import pytest
 
 from aicmo.errors import AicmoError, OnboardingError
 from aicmo.onboarding import OnboardingAnswers, load_answers, scaffold_client
+from aicmo.paths import native_io_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PLACEHOLDER = re.compile(r"\{\{?[A-Za-z_][A-Za-z0-9_]*\}?\}")
+
+
+def test_long_staged_profile_keeps_logical_paths(tmp_path: Path) -> None:
+    root = tmp_path / ("store-root-" + "x" * 70) / ".aicmo" / "onboarding" / ("a" * 32) / ("b" * 32)
+    answers = replace(sample_answers(), client="web-client-" + "c" * 32)
+    result = scaffold_client(root, answers, pdf=False)
+    assert len(result.created) == 8
+    for path in result.created:
+        assert path.is_relative_to(root)
+        assert native_io_path(path).read_bytes()
 
 
 def sample_answers() -> OnboardingAnswers:
@@ -138,6 +149,8 @@ def test_new_store_can_start_without_proof(tmp_path: Path) -> None:
         ({"price": "-\N{WON SIGN}1000"}, "price cannot be negative"),
         ({"price": "KRW -1000"}, "price cannot be negative"),
         ({"price": "price -1000"}, "price cannot be negative"),
+        ({"price": "-\u200b1000원"}, "price cannot contain control"),
+        ({"price": "\N{FULLWIDTH HYPHEN-MINUS}１０００원"}, "price cannot be negative"),
         (
             {"campaign_start": "2026-08-01", "campaign_end": "2026-07-01"},
             "campaign_start cannot be after campaign_end",
@@ -306,8 +319,7 @@ def test_force_update_rolls_back_all_profile_files_on_mid_write_failure(
     scaffold_client(tmp_path, answers, pdf=False)
     client_dir = tmp_path / "clients" / answers.client
     paths = [
-        client_dir / name
-        for name in ("config.md", "brand-guidelines.md", "primer-report.html")
+        client_dir / name for name in ("config.md", "brand-guidelines.md", "primer-report.html")
     ]
     before = {path: path.read_bytes() for path in paths}
     original_replace = Path.replace

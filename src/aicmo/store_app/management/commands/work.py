@@ -13,6 +13,7 @@ from aicmo.reporter import exclusive_file_lock
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 from aicmo.store_app.models import Job
+from aicmo.store_app.onboarding_publish import run_onboarding
 from aicmo.store_app.services import cancel, engine, execute
 
 
@@ -24,6 +25,8 @@ def run_one() -> bool:
 
 
 def _run_one() -> bool:
+    if run_onboarding():
+        return True
     job = (
         Job.objects.filter(Q(state__in=["queued", "running"]) | Q(cancel_requested=True))
         .order_by("created_at")

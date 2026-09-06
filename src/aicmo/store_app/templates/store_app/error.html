@@ -1,1 +1,1 @@
-{% extends "store_app/base.html" %}{% block content %}<h1>작업 상태를 다시 확인해 주세요</h1><p role="alert">{{ notice }}</p><a class="button secondary" href="{% url 'job' job.id %}">최신 작업 확인</a>{% endblock %}
+{% extends "store_app/base.html" %}{% block content %}<h1>상태를 다시 확인해 주세요</h1><p role="alert">{{ notice }}</p>{% if job %}<a class="button secondary" href="{% url 'job' job.id %}">최신 작업 확인</a>{% else %}<a class="button secondary" href="{% url 'home' %}">오늘로 돌아가기</a>{% endif %}{% endblock %}

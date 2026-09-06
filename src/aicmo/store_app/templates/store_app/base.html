@@ -10,7 +10,7 @@ a{color:#176153;text-underline-offset:4px}h1{font-size:2rem;line-height:1.25}h2{
 .muted{color:#4e635a}.badge{display:inline-block;background:#e3f0e8;padding:4px 12px;border-radius:20px}
 button,.button{display:inline-block;background:#176153;color:white;border:2px solid #176153;border-radius:10px;padding:10px 20px;font:inherit;cursor:pointer;text-decoration:none;min-height:48px}
 .secondary{background:white;color:#176153}label{display:block;font-weight:650;margin-top:20px}
-input:not([type=checkbox]),textarea{width:100%;padding:12px;border:1px solid #7c8c85;border-radius:8px;font:inherit;background:white}
+input:not([type=checkbox]),textarea,select{width:100%;padding:12px;border:1px solid #7c8c85;border-radius:8px;font:inherit;background:white}select{min-height:48px}
 input[type=checkbox]{width:24px;height:24px;vertical-align:middle}textarea{resize:vertical}
 .helptext{font-size:.9rem;color:#4e635a;display:block;margin:6px 0}.errorlist,[role=alert]{color:#9b2626;background:#fff1f0;padding:12px;border-radius:8px}
 :focus-visible{outline:3px solid #cf6f00;outline-offset:4px}.skip{position:absolute;left:-10000px}.skip:focus{left:16px;top:8px;background:white;padding:8px;z-index:2}
@@ -18,4 +18,4 @@ input[type=checkbox]{width:24px;height:24px;vertical-align:middle}textarea{resiz
 @media(max-width:480px){header,main{padding:16px}.card{padding:18px}h1{font-size:1.65rem}.actions>*{width:100%}}
 </style></head><body><a class="skip" href="#main">본문 바로가기</a><header><a href="{% url 'home' %}">우리 가게 홍보</a>
 {% if user.is_authenticated %}<form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="secondary">로그아웃</button></form>{% endif %}</header>
-<main id="main">{% block content %}{% endblock %}</main></body></html>
+<main id="main">{% for message in messages %}<p role="status">{{ message }}</p>{% endfor %}{% block content %}{% endblock %}</main></body></html>
