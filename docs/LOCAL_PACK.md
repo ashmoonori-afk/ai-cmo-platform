@@ -60,6 +60,18 @@ uv run aicmo export-local-pack shop-week-1
 [네이버 공식 답글 안내](https://help.naver.com/service/30026/contents/20493?lang=ko&osType=COMMONOS)
 (2026-09-06 확인)이며, 최종 게시 화면은 사장님이 직접 확인한다.
 
+## 호출 기록 확인
+
+```powershell
+uv run aicmo usage shop-week-1
+```
+
+생성·최종 검토·검토 JSON 형식 복구의 호출을 구분해서 보여준다. 직접 Anthropic 어댑터가
+반환한 입력·출력·캐시 토큰 수는 실패한 응답에서도 기록한다. 잘린 응답은 납품 파일로 저장하지 않는다.
+CLI executor가 사용량을 제공하지 않거나 과거 실행에 기록이 없으면 `unavailable`이다.
+사용량 0과 미확인은 다르다. 이 기록은 논리적 호출 관측이며 공급자 내부 재시도·실제 청구서 합계·
+과금 원장·요금제 잔여량을 나타내지 않는다. 호출 시작 뒤 프로세스가 중단되면 `unfinished`로 남는다.
+
 ## 다음 단계
 
 1. 사장님은 실행 전에 가게 정보와 최소한의 사실·리뷰를 준비한다.

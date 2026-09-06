@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, InvalidStateError
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from time import perf_counter
 from typing import assert_never
 from uuid import uuid4
 
@@ -16,6 +18,7 @@ from aicmo.adapters import (
     ARTIFACT_REF_TRUNCATION_MARKER,
     OFFLINE_STUB_MARKER,
     AgentRequest,
+    AgentResult,
     ArtifactRef,
     LocalAdapter,
     StepAdapter,
@@ -57,6 +60,13 @@ DELIVERY_MANIFEST_SCHEMA_VERSION = "aicmo.delivery-manifest.v1"
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _observation_text(value: object) -> str:
+    if value is None:
+        return "unavailable"
+    text = minimize_customer_pii(str(value))
+    return text if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,159}", text) else "unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +209,7 @@ class WorkflowStepExecutor:
             ref.truncated for ref in artifact_refs
         ):
             raise WorkflowExecutionError(step.id, "local pack context was truncated")
-        result = self.adapter.generate(request)
+        result = self._invoke_adapter(self.adapter, request)
         if not result.ok:
             detail = self._minimize_pii(result.detail, context)
             raise WorkflowExecutionError(step.id, f"agent executor failed: {detail}")
@@ -211,6 +221,81 @@ class WorkflowStepExecutor:
         ):
             validate_pack(content, context)
         return self._write_outputs(step, context, content, lease_signal)
+
+    def _invoke_adapter(self, adapter: StepAdapter, request: AgentRequest) -> AgentResult:
+        """Record logical adapter calls, including reviewer repair, without content or prices."""
+        started = perf_counter()
+        call_id = uuid4().hex
+        attempt = next(
+            str(row["attempt"])
+            for row in self.store.list_steps(request.run_id)
+            if row["step_id"] == request.step_id
+        )
+        base = {
+            "schema_version": "aicmo.adapter-call.v1",
+            "call_id": call_id,
+            "adapter": _observation_text(type(adapter).__name__),
+            "role": _observation_text(request.role),
+            "attempt": attempt,
+        }
+        self.store.record_event(
+            request.run_id,
+            request.step_id,
+            "agent.call_started",
+            "Adapter call started",
+            base,
+        )
+        try:
+            result = adapter.generate(request)
+        except Exception:
+            self.store.record_event(
+                request.run_id,
+                request.step_id,
+                "agent.call_finished",
+                "Adapter call raised",
+                {
+                    **base,
+                    "result": "error",
+                    "usage_status": "unavailable",
+                    "cost_status": "unavailable",
+                    "elapsed_ms": str(round((perf_counter() - started) * 1000)),
+                },
+            )
+            raise
+        usage = result.usage
+        metadata: dict[str, str] = {}
+        if usage is not None:
+            for key, value in asdict(usage).items():
+                if key.endswith("_tokens"):
+                    metadata[key] = (
+                        str(value) if type(value) is int and value >= 0 else "unavailable"
+                    )
+                else:
+                    metadata[key] = _observation_text(value)
+        measured = all(
+            metadata.get(key, "unavailable") != "unavailable"
+            for key in ("input_tokens", "output_tokens")
+        )
+        self.store.record_event(
+            request.run_id,
+            request.step_id,
+            "agent.call_finished",
+            "Adapter response recorded",
+            {
+                **base,
+                "result": "response_ok" if result.ok else "error",
+                "usage_status": "reported" if measured else "unavailable",
+                "cost_status": "not_applicable"
+                if isinstance(adapter, LocalAdapter)
+                else "unavailable",
+                "execution_mode": "demo"
+                if isinstance(adapter, LocalAdapter)
+                else "configured_executor",
+                "elapsed_ms": str(round((perf_counter() - started) * 1000)),
+                **metadata,
+            },
+        )
+        return result
 
     @staticmethod
     def _minimize_pii(text: str, context: dict[str, str]) -> str:
@@ -536,8 +621,14 @@ class WorkflowStepExecutor:
                 context,
             ),
         )
-        result = review_adapter.generate(request)
-        resolution = resolve_reviewer_output(review_adapter, request, result)
+        result = self._invoke_adapter(review_adapter, request)
+        result = replace(result, text=self._minimize_pii(result.text, context))
+        resolution = resolve_reviewer_output(
+            review_adapter,
+            request,
+            result,
+            generate=lambda repair: self._invoke_adapter(review_adapter, repair),
+        )
         self.store.record_event(
             context["run_id"],
             step.id,

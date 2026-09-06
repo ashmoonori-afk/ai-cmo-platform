@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -50,6 +51,8 @@ def resolve_reviewer_output(
     adapter: StepAdapter,
     request: AgentRequest,
     initial: AgentResult,
+    *,
+    generate: Callable[[AgentRequest], AgentResult] | None = None,
 ) -> ReviewerResolution:
     if not initial.ok:
         return ReviewerResolution(
@@ -63,7 +66,7 @@ def resolve_reviewer_output(
     try:
         parsed = parse_reviewer_decision(initial.text)
     except MalformedReviewerDecisionError:
-        repaired = adapter.generate(
+        repaired = (generate or adapter.generate)(
             AgentRequest(
                 step_id=request.step_id,
                 run_id=request.run_id,
