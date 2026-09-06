@@ -6,7 +6,7 @@ from typing import Annotated
 
 import typer
 
-from aicmo.feedback import record_artifact_feedback
+from aicmo.feedback import prepare_feedback, record_artifact_feedback
 from aicmo.ingest import InboxItem, archive_item, retain_failed_urls, scan_inbox
 from aicmo.local_pack import read_brief_file
 from aicmo.phase_git import PhaseGitMode, run_phase_git
@@ -113,6 +113,8 @@ def run_workflow(
             raise typer.BadParameter(reason)
         inputs["brief_json"] = read_brief_file(brief_file)
     run_id_value = run_id or generated_run_id()
+    if feedback and client:
+        prepare_feedback(client, run_id_value, artifact_format or "unspecified", feedback)
     repo_root = repo.resolve()
     runner = make_runner(
         repo_root,

@@ -7,7 +7,7 @@ from typing import Self
 
 from aicmo.errors import StepTransitionError
 from aicmo.models import ApprovalDecision, StepStatus
-from aicmo.redaction import redact
+from aicmo.redaction import redact, safe_kb_text
 from aicmo.step_state import WorkflowStepStore
 
 
@@ -151,6 +151,7 @@ class WorkflowLedgerStore(WorkflowStepStore):
         path: str,
         content: str,
     ) -> None:
+        content = safe_kb_text(content)
         with self.connect() as connection:
             # Idempotent: re-running a kb.update step (e.g. resume after a deleted artifact)
             # must not enqueue a duplicate. Content is regenerated deterministically per step,

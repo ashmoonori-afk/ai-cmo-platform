@@ -339,3 +339,29 @@ def contains_raw_secret(value: str) -> bool:
     if value.startswith("env:"):
         return False
     return any(pattern.search(value) for pattern in _SECRET_PATTERNS)
+
+
+MAX_KB_ENTRY_CHARS = 500
+_MAX_RAW_KB_CHARS = 16 * 1024
+
+
+def safe_kb_text(text: str) -> str:
+    """Validate/minimize new KB and feedback entries before SQLite or file persistence."""
+    step_id = "knowledge-storage"
+    if len(text) > _MAX_RAW_KB_CHARS:
+        reason = "knowledge entry is too large; provide a short summary"
+        raise WorkflowExecutionError(step_id, reason)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if any(
+        unicodedata.category(char) in {"Cc", "Cf", "Cs"} and char not in "\n\t" for char in text
+    ):
+        reason = "knowledge entry contains unsupported control or invisible characters"
+        raise WorkflowExecutionError(step_id, reason)
+    safe = minimize_customer_pii(redact(text)).strip()
+    if not safe or not any(unicodedata.category(char)[0] in "LNPS" for char in safe):
+        reason = "knowledge entry must contain visible content"
+        raise WorkflowExecutionError(step_id, reason)
+    if len(safe) > MAX_KB_ENTRY_CHARS:
+        reason = "knowledge entry exceeds 500 characters after minimization; summarize first"
+        raise WorkflowExecutionError(step_id, reason)
+    return safe

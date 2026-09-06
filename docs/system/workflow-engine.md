@@ -165,6 +165,28 @@ updates in SQLite and artifacts. Reporter remains the canonical durable KB
 writer, preserving the append-only and de-duplication rules in
 `prompts/shared/knowledge-update.md`.
 
+`run --feedback` and Reporter share the same file lock and replace-on-success
+append operation. Existing UTF-8 bytes (including BOM and CRLF) stay intact;
+invalid existing encoding stops the append. New entries are minimized for
+supported customer PII and secrets before persistence. Empty, control/invisible,
+or overlong entries fail validation: the minimized entry must fit 500 characters,
+including client/run/format metadata for feedback. Feedback is validated before
+the workflow starts; a later filesystem failure can still prevent its recording.
+
+Repeating the same minimized feedback for the same client, run and format is a
+no-op; changing the text creates a new record. Reporter recognizes both old and
+new record markers and consumes a queue row only after append or verified replay.
+On an encoding error, preserve a backup and explicitly repair the affected file
+to UTF-8 before retrying. On a permissions/lock error, resolve that cause and retry;
+do not mark a failed queue row consumed by hand.
+
+These are storage guarantees, not an approved learning pipeline. Legacy queue
+entries may describe operating status. Neither `queued-for-reporter` nor a
+successful flush proves an adopted result, reviewed insight, or its use in the
+next generation. Historical entries are not retroactively cleaned; pattern-based
+minimization does not recognize all personal data. This local-file design assumes
+cooperating writers and does not claim power-loss durability or tenant isolation.
+
 ## Product Phases
 
 | Phase | Scope |

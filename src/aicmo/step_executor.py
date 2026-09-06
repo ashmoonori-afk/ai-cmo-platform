@@ -670,17 +670,12 @@ class WorkflowStepExecutor:
         context: dict[str, str],
         lease_signal: _LeaseSignal,
     ) -> list[str]:
-        body = "\n".join(
-            [
-                f"# KB Update Queue: {step.id}",
-                "",
-                f"- client: {context.get('client', '[unknown]')}",
-                f"- run_id: {run_id}",
-                "- status: queued-for-reporter",
-                "",
-                "Reporter must verify and append durable insights.",
-                "Runner does not write directly to knowledge-base.",
-            ],
+        body = (
+            "# KB Update Queue\n\n"
+            f"- client: {context.get('client', '[unknown]')}\n"
+            "- status: queued-for-reporter\n\n"
+            "Reporter must verify and append durable insights.\n"
+            "Runner does not write directly to knowledge-base."
         )
         outputs = self._write_outputs(step, context, body, lease_signal)
         for output in outputs:
