@@ -62,7 +62,7 @@ def owned_job(user: AbstractBaseUser | AnonymousUser, job_id: uuid.UUID) -> Job:
     return job
 
 
-def engine() -> WorkflowRunner:
+def configured_commands() -> tuple[CommandAdapter, CommandAdapter]:
     def command(name: str) -> CommandAdapter:
         try:
             value = TypeAdapter(list[str]).validate_json(os.environ.get(name, "null"), strict=True)
@@ -73,12 +73,17 @@ def engine() -> WorkflowRunner:
             raise StoreActionError(reason)
         return CommandAdapter(command=tuple(value))
 
+    return command("AICMO_WEB_EXECUTOR_CMD"), command("AICMO_WEB_REVIEW_CMD")
+
+
+def engine() -> WorkflowRunner:
+    adapter, review_adapter = configured_commands()
     root = Path(settings.REPO_ROOT)
     return WorkflowRunner(
         root,
         WorkflowStore(root / ".aicmo/runs.sqlite3"),
-        adapter=command("AICMO_WEB_EXECUTOR_CMD"),
-        review_adapter=command("AICMO_WEB_REVIEW_CMD"),
+        adapter=adapter,
+        review_adapter=review_adapter,
     )
 
 

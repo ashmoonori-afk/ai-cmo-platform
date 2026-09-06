@@ -4,6 +4,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -13,7 +14,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from aicmo.errors import AicmoError
-from aicmo.store_app import onboarding, services
+from aicmo.store_app import guidance, onboarding, services
 from aicmo.store_app.forms import ApprovalForm, PackForm
 from aicmo.store_app.models import Job
 
@@ -24,11 +25,25 @@ from aicmo.store_app.models import Job
 def home(request: HttpRequest) -> HttpResponse:
     stores = services.allowed_stores(request.user)
     jobs = Job.objects.filter(store__in=stores).select_related("store").order_by("-created_at")[:30]
+    guides: list[dict[str, object]] = []
+    for store in stores:
+        hints = guidance.profile_hints(store)
+        guides.append(
+            {
+                "store": store,
+                "profile": hints,
+                "cards": guidance.task_cards(hints),
+                "allowance": guidance.allowance(store),
+                "active": guidance.active_job(store),
+            }
+        )
     return render(
         request,
         "store_app/home.html",
         {
             "stores": stores,
+            "guides": guides,
+            "service_ready": guidance.service_ready(),
             "jobs": jobs,
             "can_onboard": isinstance(request.user, User) and onboarding.new_owner(request.user),
         },
@@ -42,13 +57,40 @@ def create(request: HttpRequest, store_id: int) -> HttpResponse:
     store = services.allowed_stores(request.user).filter(pk=store_id).first()
     if store is None:
         raise Http404
+    active = guidance.active_job(store)
+    if active is not None:
+        messages.info(
+            request, "진행 중인 작업으로 이동했습니다. 확인 후 다음 요청을 진행해 주세요."
+        )
+        return redirect("job", job_id=active.id)
+    hints = guidance.profile_hints(store)
+    allowance = guidance.allowance(store)
+    requested_intent = request.GET.get("intent", "news")
+    intent = requested_intent if requested_intent in guidance.INTENTS else "news"
     form = PackForm(
         request.POST if request.method == "POST" else None,
-        initial={"submission_key": uuid.uuid4()},
+        initial={"submission_key": uuid.uuid4(), "owner_minutes": hints.minutes or 20},
     )
+    form.fields["fact"].help_text = guidance.INTENTS[intent][1]
+    context = {
+        "store": store,
+        "form": form,
+        "profile": hints,
+        "allowance": allowance,
+        "intents": guidance.INTENTS.items(),
+        "intent": intent,
+        "service_ready": guidance.service_ready(),
+    }
     if request.method == "POST" and form.is_valid():
         try:
-            services.engine()  # Require the operator's executor configuration.
+            prior = Job.objects.filter(
+                store=store, submission_key=form.cleaned_data["submission_key"]
+            ).exists()
+            if not prior and allowance["blocked"]:
+                form.add_error(None, allowance["detail"])
+                return render(request, "store_app/create.html", context, status=409)
+            if not prior:
+                services.engine()  # Require configuration only for a new request, not a replay.
             job = services.submit(
                 store, form.cleaned_data["submission_key"], form.cleaned_data["brief"]
             )
@@ -60,7 +102,7 @@ def create(request: HttpRequest, store_id: int) -> HttpResponse:
         else:
             return redirect("job", job_id=job.id)
     status = 400 if request.method == "POST" and form.errors else 200
-    return render(request, "store_app/create.html", {"store": store, "form": form}, status=status)
+    return render(request, "store_app/create.html", context, status=status)
 
 
 @login_required
@@ -83,6 +125,7 @@ def detail(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
             "pack": pack,
             "approval_form": approval_form,
             "notice": notice,
+            "allowance": guidance.allowance(job.store),
         },
     )
 

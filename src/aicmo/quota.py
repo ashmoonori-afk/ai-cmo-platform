@@ -168,11 +168,14 @@ def credit_quota(store: StoreDb, run_id: str, reason: str) -> bool:
 
 def quota_status(store: StoreDb, client: str, period: str) -> dict[str, object]:
     client, period = parse_safe_id("client", client), parse_period(period)
-    store.initialize()
+    if not store.read_only:
+        store.initialize()
     with store.connect() as connection:
         connection.execute("begin")
         row = connection.execute(
-            "select * from product_quotas where client=? and period=?", (client, period)
+            "select pack_limit,draft_limit,draft_used from product_quotas "
+            "where client=? and period=?",
+            (client, period),
         ).fetchone()
         managed = (
             connection.execute(

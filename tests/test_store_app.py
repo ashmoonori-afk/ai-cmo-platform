@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("label", ["tests.store_app_cases", "tests.store_onboarding_cases"])
+@pytest.mark.parametrize(
+    "label", ["tests.store_app_cases", "tests.store_onboarding_cases", "tests.store_guidance_cases"]
+)
 def test_django_store_app(tmp_path: Path, label: str) -> None:
     env = {
         **os.environ,

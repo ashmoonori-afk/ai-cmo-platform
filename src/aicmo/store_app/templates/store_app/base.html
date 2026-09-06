@@ -15,6 +15,7 @@ input[type=checkbox]{width:24px;height:24px;vertical-align:middle}textarea{resiz
 .helptext{font-size:.9rem;color:#4e635a;display:block;margin:6px 0}.errorlist,[role=alert]{color:#9b2626;background:#fff1f0;padding:12px;border-radius:8px}
 :focus-visible{outline:3px solid #cf6f00;outline-offset:4px}.skip{position:absolute;left:-10000px}.skip:focus{left:16px;top:8px;background:white;padding:8px;z-index:2}
 .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}.copy{white-space:pre-wrap;overflow-wrap:anywhere}code{overflow-wrap:anywhere}
+.task-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:20px}.task-grid article{border-top:1px solid #d1ddd6;padding-top:12px}.task-grid .button{width:100%;text-align:center}button:disabled{opacity:.55;cursor:not-allowed}[aria-current=page]{font-weight:bold}
 @media(max-width:480px){header,main{padding:16px}.card{padding:18px}h1{font-size:1.65rem}.actions>*{width:100%}}
 </style></head><body><a class="skip" href="#main">본문 바로가기</a><header><a href="{% url 'home' %}">우리 가게 홍보</a>
 {% if user.is_authenticated %}<form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="secondary">로그아웃</button></form>{% endif %}</header>
