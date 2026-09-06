@@ -13,6 +13,7 @@ from aicmo.errors import (
     WorkflowExecutionError,
     WorkflowSpecError,
 )
+from aicmo.export import verified_delivery
 from aicmo.learning import parse_feedback
 from aicmo.local_pack import WORKFLOW_ID as LOCAL_PACK_WORKFLOW
 from aicmo.local_pack import parse_brief
@@ -25,6 +26,7 @@ from aicmo.models import (
     WorkflowStep,
 )
 from aicmo.paths import parse_safe_id
+from aicmo.quota import QuotaError
 from aicmo.redaction import contains_raw_secret, minimize_customer_pii
 from aicmo.source_input import PreparedInputs, operating_inputs, prepare_workflow_inputs
 from aicmo.spec import load_workflow_spec
@@ -237,6 +239,13 @@ class WorkflowRunner(WorkflowStepExecutor):
         self.store.record_event(run_id, step_id, "step.retry", f"Retry requested for {step_id}")
 
     def _execute(self: Self, spec: WorkflowSpec, run_id: str, inputs: dict[str, str]) -> RunResult:
+        with self.store.connect() as connection:
+            credited = connection.execute(
+                "select 1 from product_usage where run_id=? and state='credited'", (run_id,)
+            ).fetchone()
+        if credited is not None:
+            reason = "credited run cannot resume; create a new run"
+            raise QuotaError(reason)
         context = {**inputs, "run_id": run_id, "workflow_id": spec.id}
         self._reopen_stale_successes(spec, run_id, context)
         for step in spec.execution_order():
@@ -255,6 +264,11 @@ class WorkflowRunner(WorkflowStepExecutor):
             try:
                 artifact_refs = self._artifact_refs(run_id, step)
                 outputs = self._execute_step(run_id, step, context, status, artifact_refs)
+            except QuotaError as exc:
+                self.store.record_event(run_id, step.id, "quota.blocked", str(exc))
+                return RunResult(
+                    status=RunStatus.FAILED.value, run_id=run_id, failed_step_id=step.id
+                )
             except WorkflowExecutionError as exc:
                 return self._fail(
                     run_id,
@@ -314,8 +328,34 @@ class WorkflowRunner(WorkflowStepExecutor):
         return None
 
     def _complete_run(self: Self, run_id: str) -> RunResult:
-        if not self.store.mark_run_success(run_id):
-            return RunResult(status=RunStatus.CANCELLED.value, run_id=run_id)
+        digest = None
+        reviewed_digest = None
+        with self.store.connect() as connection:
+            reserved = connection.execute(
+                "select 1 from product_usage where run_id=? and state='reserved'", (run_id,)
+            ).fetchone()
+        if reserved is not None:
+            try:
+                _, contents = verified_delivery(
+                    self, run_id, LOCAL_PACK_WORKFLOW, completing=True, require_deliverable=False
+                )
+                manifest_bytes = contents[f"artifacts/{run_id}/delivery-review.json"]
+                reviewed_digest = hashlib.sha256(manifest_bytes).hexdigest()
+                manifest = json.loads(manifest_bytes)
+                if (
+                    manifest["deliverable"] is True
+                    and manifest["status"] == "PASS"
+                    and manifest["semantic_review"].get("status") == "PASS"
+                    and all(ref["truncated"] is False for ref in manifest["artifacts"])
+                ):
+                    digest = reviewed_digest
+            except WorkflowExecutionError as exc:
+                return self._fail(run_id, "delivery_gate", str(exc), owner=None)
+        if not self.store.mark_run_success(run_id, digest, reviewed_digest):
+            status = (
+                RunStatus.CANCELLED if self.store.is_run_cancelled(run_id) else RunStatus.FAILED
+            )
+            return RunResult(status=status.value, run_id=run_id)
         self.store.record_event(run_id, None, "run.success", f"Completed {run_id}")
         return RunResult(status=RunStatus.SUCCESS.value, run_id=run_id)
 

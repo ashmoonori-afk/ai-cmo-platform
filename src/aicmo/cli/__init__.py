@@ -7,7 +7,7 @@ import typer
 
 from aicmo.errors import AicmoError
 
-from . import gate_cmds, inspect_cmds, run_cmds, tool_cmds
+from . import gate_cmds, inspect_cmds, quota_cmds, run_cmds, tool_cmds
 from ._shared import (
     adapter_for_executor as adapter_for_executor,
 )
@@ -34,6 +34,7 @@ inspect_cmds.register(app)
 gate_cmds.register(app)
 run_cmds.register_retry(app)
 tool_cmds.register(app)
+quota_cmds.register(app)
 
 
 def main() -> None:

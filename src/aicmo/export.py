@@ -24,11 +24,17 @@ EXPORT_STEP = "export"
 
 
 def verified_delivery(  # noqa: C901 — sequential fail-closed delivery checks
-    runner: WorkflowStepExecutor, run_id: str, workflow_id: str
+    runner: WorkflowStepExecutor,
+    run_id: str,
+    workflow_id: str,
+    *,
+    completing: bool = False,
+    require_deliverable: bool = True,
 ) -> tuple[dict[str, str], dict[str, bytes]]:
     parse_safe_id("run_id", run_id)
     run = runner.store.get_run(run_id)
-    if run["workflow_id"] != workflow_id or run["status"] != "success":
+    allowed = {"running", "waiting_approval", "success"} if completing else {"success"}
+    if run["workflow_id"] != workflow_id or run["status"] not in allowed:
         raise WorkflowExecutionError(EXPORT_STEP, f"a successful {workflow_id} run is required")
     inputs = runner.store.get_inputs(run_id)
     spec = load_workflow_spec(runner.repo_root, workflow_id)
@@ -51,7 +57,9 @@ def verified_delivery(  # noqa: C901 — sequential fail-closed delivery checks
         )
     except (KeyError, ValueError):
         raise WorkflowExecutionError(EXPORT_STEP, "invalid delivery artifacts") from None
-    if not isinstance(manifest, dict) or manifest.get("deliverable") is not True:
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("deliverable"), bool):
+        raise WorkflowExecutionError(EXPORT_STEP, "invalid delivery manifest")
+    if require_deliverable and manifest.get("deliverable") is not True:
         raise WorkflowExecutionError(
             EXPORT_STEP, "delivery is blocked or demo; reviewer PASS required"
         )
@@ -59,9 +67,16 @@ def verified_delivery(  # noqa: C901 — sequential fail-closed delivery checks
     if (
         manifest.get("run_id") != run_id
         or manifest.get("workflow_id") != workflow_id
-        or manifest.get("status") != "PASS"
-        or not isinstance(semantic, dict)
-        or semantic.get("status") != "PASS"
+        or manifest.get("status") not in {"PASS", "WARN", "FAIL"}
+        or (semantic is not None and not isinstance(semantic, dict))
+        or (
+            require_deliverable
+            and (
+                manifest.get("status") != "PASS"
+                or not isinstance(semantic, dict)
+                or semantic.get("status") != "PASS"
+            )
+        )
     ):
         raise WorkflowExecutionError(EXPORT_STEP, "terminal semantic PASS evidence is required")
     refs = manifest.get("artifacts")
@@ -75,7 +90,8 @@ def verified_delivery(  # noqa: C901 — sequential fail-closed delivery checks
             not isinstance(path, str)
             or path not in contents
             or ref.get("sha256") != hashlib.sha256(contents[path]).hexdigest()
-            or ref.get("truncated") is not False
+            or not isinstance(ref.get("truncated"), bool)
+            or (require_deliverable and ref.get("truncated") is not False)
         ):
             raise WorkflowExecutionError(EXPORT_STEP, "reviewed artifact version differs")
     return inputs, contents

@@ -39,6 +39,7 @@ from ._shared import (
     select_adapter,
     select_review_adapter,
 )
+from .quota_cmds import quota_notice
 
 
 class _RunIdFactory:
@@ -135,6 +136,8 @@ def run_workflow(
     )
     runner.store.initialize()
     runner.store.ensure_phase_git_mode(run_id_value, phase_git.value)
+    if workflow_id == "local-store-pack" and client:
+        quota_notice(runner.store, client)
     result = runner.run(workflow_id=workflow_id, run_id=run_id_value, inputs=inputs)
     if feedback and client:
         path = record_artifact_feedback(

@@ -5,6 +5,8 @@ from typing import Annotated, cast
 import typer
 from rich.table import Table
 
+from aicmo.quota import run_quota_status
+
 from ._shared import console, make_runner
 
 
@@ -27,6 +29,13 @@ def status_run(
             str(step["attempt"]),
         )
     console.print(table)
+    product = run_quota_status(runner.store, run_id)
+    if product is not None:
+        console.print(
+            f"Product: {product['state']} / {product['period']}; "
+            "provider cost unavailable; product credit is not a cash refund.",
+            markup=False,
+        )
 
 
 def list_runs(

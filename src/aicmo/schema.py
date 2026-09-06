@@ -2,6 +2,27 @@ from __future__ import annotations
 
 SCHEMA = (
     """
+    create table if not exists product_quotas (
+        client text not null,
+        period text not null,
+        pack_limit integer not null check (pack_limit >= 0),
+        draft_limit integer not null check (draft_limit >= 0),
+        draft_used integer not null default 0 check (draft_used >= 0),
+        primary key (client, period)
+    )
+    """,
+    """
+    create table if not exists product_usage (
+        run_id text primary key references runs(run_id),
+        client text not null,
+        period text not null,
+        state text not null check (
+            state in ('reserved','consumed','released','credited','unmetered')
+        ),
+        delivery_sha256 text
+    )
+    """,
+    """
     create table if not exists learned_feedback (
         event_sha256 text primary key,
         client text not null,
