@@ -34,20 +34,28 @@ _REQUIRED_FORM_FIELDS = frozenset(
 )
 
 
-def _field_html(name: str, label: str, placeholder: str) -> str:
+def _field_html(name: str, label: str, placeholder: str, value: str = "") -> str:
     required = " required" if name in _REQUIRED_FORM_FIELDS else ""
     input_type = "date" if name in {"campaign_start", "campaign_end"} else "text"
     return (
         f'<label class="block mt-5"><span class="font-medium">{html.escape(label)}</span>'
-        f'<input type="{input_type}" name="{name}" '
+        f'<input type="{input_type}" name="{name}" value="{html.escape(value, quote=True)}" '
         f'placeholder="{html.escape(placeholder)}"{required} '
         'class="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"></label>'
     )
 
 
-def render_form_page() -> str:
+def render_form_page(form: dict[str, list[str]] | None = None, error: str = "") -> str:
+    form = form or {}
     fields = "\n".join(
-        _field_html(name, label, placeholder) for name, label, placeholder in _QUESTIONS
+        _field_html(name, label, placeholder, _first(form, name))
+        for name, label, placeholder in _QUESTIONS
+    )
+    alert = (
+        '<div role="alert" class="mt-4 border border-red-700 p-3">'
+        f"입력 내용을 확인해 주세요: {html.escape(error)}</div>"
+        if error
+        else ""
     )
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -61,6 +69,7 @@ def render_form_page() -> str:
 <main class="max-w-xl mx-auto px-6 py-12">
   <h1 class="text-3xl font-bold">내 브랜드 시안 만들기</h1>
   <p class="mt-2 text-slate-500">쉬운 질문에 답하면 랜딩페이지 시안을 만들어 드려요.</p>
+  {alert}
   <form method="post" action="/generate">
 {fields}
     <button type="submit"
@@ -112,6 +121,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(encoded)
 
@@ -121,21 +132,55 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
+    def _validate_form_headers(self) -> int | None:
+        lengths = self.headers.get_all("Content-Length", [])
+        if self.headers.get("Transfer-Encoding") or len(lengths) > 1:
+            self.send_error(400, "Unsupported request framing")
+            return None
+        if not lengths:
+            self.send_error(411)
+            return None
+        try:
+            raw_length = lengths[0].strip()
+            if not raw_length.isascii() or not raw_length.isdecimal():
+                raise ValueError  # noqa: TRY301 — validate wire format before int conversion
+            length = int(raw_length)
+        except ValueError:
+            self.send_error(400, "Invalid Content-Length")
+            return None
+        if length > _MAX_BODY:
+            self.send_error(413)
+            return None
+        if self.headers.get_content_type() != "application/x-www-form-urlencoded":
+            self.send_error(415)
+            return None
+        return length
+
     def do_POST(self) -> None:
         if self.path != "/generate":
             self.send_error(404)
             return
+        length = self._validate_form_headers()
+        if length is None:
+            return
         try:
-            declared = int(self.headers.get("Content-Length", "0") or "0")
-        except ValueError:
-            declared = 0
-        length = max(0, min(declared, _MAX_BODY))
-        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+            self.connection.settimeout(10)
+            body = self.rfile.read(length)
+            if len(body) != length:
+                raise ValueError  # noqa: TRY301 — reject truncated bodies, never generate partial input
+            form = parse_qs(
+                body.decode("utf-8"),
+                keep_blank_values=True,
+                errors="strict",
+                max_num_fields=64,
+            )
+        except (ValueError, TimeoutError):
+            self.send_error(400, "Invalid form body")
+            return
         try:
             self._send_html(generate_page(form))
         except OnboardingError as exc:
-            message = html.escape(exc.reason)
-            self._send_html(f"<h1>입력 내용을 확인해 주세요</h1><p>{message}</p>", 400)
+            self._send_html(render_form_page(form, error=exc.reason), 400)
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
