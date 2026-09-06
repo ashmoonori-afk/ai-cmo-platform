@@ -333,13 +333,20 @@ class WorkflowStepStore(WorkflowRunStore):
         )
         self._mark_run(connection, run_id, RunStatus.RUNNING, step_id)
 
+        # A regenerated dependency is a new version; retain the approval event history,
+        # but never authorize that version with the previous gate's decision.
+        connection.execute(
+            "delete from approvals where run_id = ? and step_id = ? and decision = 'approved'",
+            (run_id, step_id),
+        )
+
     def retry_step(self: Self, run_id: str, step_id: str) -> None:
         with self.connect() as connection:
             self._require_retryable_step(connection, run_id, step_id)
             self._reset_to_pending(connection, run_id, step_id)
 
     def reopen_step(self: Self, run_id: str, step_id: str) -> None:
-        """Reset a previously SUCCESS step to PENDING so resume can regenerate lost outputs."""
+        """Reopen a successful or waiting dependent after its artifacts became stale."""
         with self.connect() as connection:
             row = connection.execute(
                 "select status from steps where run_id = ? and step_id = ?",
@@ -347,8 +354,10 @@ class WorkflowStepStore(WorkflowRunStore):
             ).fetchone()
             if row is None:
                 raise StepTransitionError(run_id, step_id, "step does not exist")
-            if row["status"] != StepStatus.SUCCESS.value:
-                raise StepTransitionError(run_id, step_id, "only successful steps can be reopened")
+            if row["status"] not in {StepStatus.SUCCESS.value, StepStatus.WAITING_APPROVAL.value}:
+                raise StepTransitionError(
+                    run_id, step_id, "only successful/waiting steps can reopen",
+                )
             self._reset_to_pending(connection, run_id, step_id)
 
     def _record_artifacts(

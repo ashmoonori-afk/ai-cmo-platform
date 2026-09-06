@@ -6,6 +6,7 @@ import typer
 
 from aicmo.capabilities import find_mapping, load_capabilities
 from aicmo.evaluate import evaluate_asset, render_report
+from aicmo.export import export_local_pack
 from aicmo.mockup import brief_from_answers, render_landing_mockup, render_pdf, render_png
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
 from aicmo.primer import render_primer_html
@@ -13,7 +14,7 @@ from aicmo.reporter import flush_kb_updates
 from aicmo.store import WorkflowStore
 from aicmo.web import run_server
 
-from ._shared import console, default_db
+from ._shared import console, default_db, make_runner
 
 
 def emit_onboarding(result: OnboardingResult) -> None:
@@ -140,6 +141,16 @@ def capabilities_cmd(
     console.print('usage: aicmo capabilities "블로그" | --agents | --json')
 
 
+def export_local_pack_cmd(
+    run_id: Annotated[str, typer.Argument()],
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+) -> None:
+    """Save an owner-approved, reviewer-passed local pack as a ZIP (no publishing)."""
+    target = export_local_pack(make_runner(repo, db), run_id)
+    console.print(str(target), markup=False)
+
+
 def register(app: typer.Typer) -> None:
     app.command("onboard")(onboard_client)
     app.command("serve")(serve_cmd)
@@ -148,3 +159,4 @@ def register(app: typer.Typer) -> None:
     app.command("evaluate")(evaluate_cmd)
     app.command("kb-flush")(kb_flush)
     app.command("capabilities")(capabilities_cmd)
+    app.command("export-local-pack")(export_local_pack_cmd)

@@ -13,6 +13,8 @@ from aicmo.errors import (
     WorkflowExecutionError,
     WorkflowSpecError,
 )
+from aicmo.local_pack import WORKFLOW_ID as LOCAL_PACK_WORKFLOW
+from aicmo.local_pack import parse_brief
 from aicmo.models import (
     ApprovalDecision,
     RunResult,
@@ -21,7 +23,7 @@ from aicmo.models import (
     WorkflowSpec,
     WorkflowStep,
 )
-from aicmo.paths import parse_safe_id
+from aicmo.paths import parse_safe_id, resolve_inside_repo
 from aicmo.redaction import contains_raw_secret, minimize_customer_pii
 from aicmo.source_input import PreparedInputs, operating_inputs, prepare_workflow_inputs
 from aicmo.spec import load_workflow_spec
@@ -37,8 +39,12 @@ class WorkflowRunner(WorkflowStepExecutor):
         parse_safe_id("workflow_id", workflow_id)
         parse_safe_id("run_id", run_id)
         spec = load_workflow_spec(self.repo_root, workflow_id)
+        if spec.id == LOCAL_PACK_WORKFLOW:
+            parse_brief(inputs)
         prepared = prepare_workflow_inputs(spec.inputs, inputs)
         inputs = prepared.values
+        if spec.id == LOCAL_PACK_WORKFLOW:
+            parse_brief(inputs)
         self._validate_inputs(spec, inputs)
         self.store.initialize()
         self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
@@ -55,6 +61,8 @@ class WorkflowRunner(WorkflowStepExecutor):
             spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
             self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
             prepared = prepare_workflow_inputs(spec.inputs, inputs)
+            if spec.id == LOCAL_PACK_WORKFLOW:
+                parse_brief(prepared.values)
             if prepared.values != inputs:
                 raise RunConflictError(
                     run_id,
@@ -78,6 +86,45 @@ class WorkflowRunner(WorkflowStepExecutor):
             )
         self.store.record_event(run_id, None, "run.resumed", f"Resumed {run_id}")
         return self._execute(spec, run_id, inputs)
+
+    def verified_export_outputs(
+        self: Self,
+        spec: WorkflowSpec,
+        run_id: str,
+        inputs: dict[str, str],
+    ) -> dict[str, bytes]:
+        """Capture only current successful outputs whose dependency/version hashes match."""
+        context = {**inputs, "run_id": run_id, "workflow_id": spec.id}
+        step_id = "export"
+        contents: dict[str, bytes] = {}
+        for step in spec.execution_order():
+            outputs = self.store.get_step_outputs(run_id, step.id)
+            hashes = self.store.get_output_hashes(run_id, step.id)
+            if (
+                self.store.get_step_status(run_id, step.id) != StepStatus.SUCCESS
+                or set(outputs) != set(self._declared_outputs(step, context))
+                or set(outputs) != set(hashes)
+                or (
+                    step.depends_on
+                    and self.store.get_consumed_ref_digest(run_id, step.id)
+                    != self._consumed_ref_digest(self._artifact_refs(run_id, step))
+                )
+            ):
+                raise WorkflowExecutionError(
+                    step_id, "stale or incomplete approval/review; resume first"
+                )
+            for relative in outputs:
+                path = resolve_inside_repo(self.repo_root, relative, {})
+                try:
+                    data = path.read_bytes()
+                except OSError:
+                    raise WorkflowExecutionError(step_id, "required artifact is missing") from None
+                if hashlib.sha256(data).hexdigest() != hashes[relative]:
+                    raise WorkflowExecutionError(
+                        step_id, "artifact changed after review; resume first"
+                    )
+                contents[relative] = data
+        return contents
 
     def cancel(self: Self, run_id: str) -> None:
         self.store.initialize()

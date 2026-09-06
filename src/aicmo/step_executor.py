@@ -27,6 +27,8 @@ from aicmo.gate import (
     evaluate_artifacts,
     stricter,
 )
+from aicmo.local_pack import WORKFLOW_ID as LOCAL_PACK_WORKFLOW
+from aicmo.local_pack import validate_pack
 from aicmo.models import (
     ApprovalDecision,
     GateDecision,
@@ -193,11 +195,22 @@ class WorkflowStepExecutor:
             request,
             artifact_refs=self._minimize_artifact_refs(request.artifact_refs, context),
         )
+        if context["workflow_id"] == LOCAL_PACK_WORKFLOW and any(
+            ref.truncated for ref in artifact_refs
+        ):
+            raise WorkflowExecutionError(step.id, "local pack context was truncated")
         result = self.adapter.generate(request)
         if not result.ok:
             detail = self._minimize_pii(result.detail, context)
             raise WorkflowExecutionError(step.id, f"agent executor failed: {detail}")
-        return self._write_outputs(step, context, result.text, lease_signal)
+        content = self._minimize_pii(result.text, context)
+        if (
+            context["workflow_id"] == LOCAL_PACK_WORKFLOW
+            and step.id == "drafts"
+            and OFFLINE_STUB_MARKER not in content
+        ):
+            validate_pack(content, context)
+        return self._write_outputs(step, context, content, lease_signal)
 
     @staticmethod
     def _minimize_pii(text: str, context: dict[str, str]) -> str:
@@ -413,10 +426,10 @@ class WorkflowStepExecutor:
             if any(dependency in invalidated for dependency in step.depends_on):
                 invalidated.add(step.id)
         for step in spec.execution_order():
-            if (
-                step.id in invalidated
-                and self.store.get_step_status(run_id, step.id) == StepStatus.SUCCESS
-            ):
+            if step.id in invalidated and self.store.get_step_status(run_id, step.id) in {
+                StepStatus.SUCCESS,
+                StepStatus.WAITING_APPROVAL,
+            }:
                 self.store.reopen_step(run_id, step.id)
 
     def _evaluate_gate(
@@ -442,7 +455,15 @@ class WorkflowStepExecutor:
             for relative in self.store.get_step_outputs(run_id, dependency):
                 source = self._stored_artifact_path(relative)
                 if source is not None and source.exists():
-                    texts.append(source.read_text(encoding="utf-8"))
+                    content = source.read_text(encoding="utf-8")
+                    if (
+                        step.terminal_delivery
+                        and dependency == "drafts"
+                        and self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW
+                        and OFFLINE_STUB_MARKER not in content
+                    ):
+                        validate_pack(content, self.store.get_inputs(run_id))
+                    texts.append(content)
         return texts
 
     def _semantic_review(
@@ -500,6 +521,11 @@ class WorkflowStepExecutor:
                     "policy_sources": policy_sources,
                     "client": client,
                     "client_criteria": client_criteria,
+                    **(
+                        {"brief_json": context["brief_json"]}
+                        if context["workflow_id"] == LOCAL_PACK_WORKFLOW
+                        else {}
+                    ),
                 },
                 ensure_ascii=False,
                 separators=(",", ":"),
@@ -618,9 +644,7 @@ class WorkflowStepExecutor:
                 "reasons": list(dict.fromkeys(reasons)),
                 "generator": type(self.adapter).__name__,
                 "reviewer": (
-                    type(self.review_adapter).__name__
-                    if self.review_adapter is not None
-                    else None
+                    type(self.review_adapter).__name__ if self.review_adapter is not None else None
                 ),
                 "semantic_review": (
                     {

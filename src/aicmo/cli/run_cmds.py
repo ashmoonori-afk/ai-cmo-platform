@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -9,6 +8,7 @@ import typer
 
 from aicmo.feedback import record_artifact_feedback
 from aicmo.ingest import InboxItem, archive_item, retain_failed_urls, scan_inbox
+from aicmo.local_pack import read_brief_file
 from aicmo.phase_git import PhaseGitMode, run_phase_git
 from aicmo.redaction import minimize_customer_pii, redact
 from aicmo.runner import WorkflowRunner
@@ -74,6 +74,10 @@ def run_workflow(
             "--input source_url=https://example.com/article",
         ),
     ] = None,
+    brief_file: Annotated[
+        Path | None,
+        typer.Option("--brief-file", help="UTF-8 JSON brief for local-store-pack"),
+    ] = None,
     feedback: Annotated[
         str | None,
         typer.Option("--feedback", help="Artifact feedback to persist for engine improvement."),
@@ -103,6 +107,11 @@ def run_workflow(
             },
         ),
     }
+    if brief_file is not None:
+        if "brief_json" in inputs:
+            reason = "use either --brief-file or --input brief_json, not both"
+            raise typer.BadParameter(reason)
+        inputs["brief_json"] = read_brief_file(brief_file)
     run_id_value = run_id or generated_run_id()
     repo_root = repo.resolve()
     runner = make_runner(
@@ -129,6 +138,7 @@ def run_workflow(
     elif phase_git != PhaseGitMode.OFF:
         emit_phase_git_result(run_phase_git(repo_root, phase_git, run_id_value, "workflow"))
     emit_result(result)
+
 
 def _ingest_item(runner: WorkflowRunner, item: InboxItem, client: str, repo_root: Path) -> bool:
     failed_urls: list[str] = []
@@ -206,9 +216,7 @@ def ingest_inbox(
     items = scan_inbox(repo_root, client)
     if not items:
         message = f"inbox empty: inbox/{client}/ (drop .txt/.md files with one URL per line)"
-        console.print(
-            _safe_display(message)
-        )
+        console.print(_safe_display(message))
         return
     if dry_run:
         for item in items:
@@ -236,6 +244,7 @@ def ingest_inbox(
         any_failed |= _ingest_item(runner, item, client, repo_root)
     if any_failed:
         raise typer.Exit(EXIT_FAILED)
+
 
 def resume_run(
     run_id: Annotated[str, typer.Argument()],
@@ -288,6 +297,7 @@ def cancel_run(
 ) -> None:
     make_runner(repo, db).cancel(run_id)
     console.print(f"{run_id}: cancelled")
+
 
 def retry_step(
     run_id: Annotated[str, typer.Argument()],

@@ -843,6 +843,15 @@ mappings:
   chain_note: '체인: 성과 다이제스트 → 기회 스캔(병렬) → 채널 초안 → 검증 → 오너 승인 → KB. CLI: `aicmo run daily-cmo-loop --client {slug}`'
   agents: data-analyst + seo-specialist + community-manager (병렬) → copywriter → reviewer → reporter
   model: sonnet
+- id: 75
+  triggers:
+  - 가게 실행팩
+  - 국내 가게 주간팩
+  - 소식과 리뷰 답글
+  playbook: playbooks/09-local/local-store-pack.md
+  chain_note: 'CLI: aicmo run local-store-pack --client {slug} --brief-file brief.json; 사장님 승인 후 최종 검토 및 로컬 내보내기'
+  agents: copywriter → reviewer
+  model: sonnet
 gates:
   reviewer_required: true
   exempt:

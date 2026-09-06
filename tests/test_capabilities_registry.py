@@ -32,7 +32,7 @@ def _mapped_paths(registry: CapabilityRegistry) -> set[str]:
 
 def test_registry_has_agents_and_mappings(registry: CapabilityRegistry) -> None:
     assert len(registry["agents"]) == 13
-    assert len(registry["mappings"]) == 74
+    assert len(registry["mappings"]) == 75
 
 
 def test_every_registry_agent_file_exists_with_matching_frontmatter(

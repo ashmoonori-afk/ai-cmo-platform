@@ -147,9 +147,12 @@ def test_edit_without_accept_edits_is_regenerated(approval_repo: Path) -> None:
     draft.write_text(_EDIT_MARKER, encoding="utf-8")
     changed = runner.approve("run_plain", "owner_gate", "owner", "ok")
     assert changed == []
-    assert runner.resume("run_plain").status == "success"
+    assert runner.resume("run_plain").status == "waiting_approval"
+    assert runner.store.approval_for("run_plain", "owner_gate") is None
     # Tamper detection keeps its default behavior: the edited file was regenerated.
     assert _EDIT_MARKER not in draft.read_text(encoding="utf-8")
+    runner.approve("run_plain", "owner_gate", "owner", "regenerated version checked")
+    assert runner.resume("run_plain").status == "success"
 
 
 def test_accept_edits_preserves_owner_changes(approval_repo: Path) -> None:

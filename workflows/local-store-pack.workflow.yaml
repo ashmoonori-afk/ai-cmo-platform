@@ -1,0 +1,33 @@
+id: local-store-pack
+name: 국내 가게 주간 실행팩
+inputs:
+  client: required
+  brief_json: required
+steps:
+  - id: load_context
+    type: file.load
+    paths:
+      - clients/${client}/config.md
+      - clients/${client}/brand-guidelines.md
+      - clients/${client}/pricing-rules.md
+      - clients/${client}/copy-patterns.md
+    outputs: ["artifacts/${run_id}/context.md"]
+  - id: drafts
+    type: agent
+    role: copywriter
+    depends_on: [load_context]
+    prompt: playbooks/09-local/local-store-pack.md
+    outputs: ["artifacts/${run_id}/local-pack.json"]
+  - id: owner_gate
+    type: gate
+    requires_approval: true
+    depends_on: [drafts]
+    outputs: ["artifacts/${run_id}/owner-approval.json"]
+  - id: delivery_gate
+    type: gate
+    role: reviewer
+    terminal_delivery: true
+    depends_on: [drafts, owner_gate]
+    prompt: playbooks/09-local/local-store-pack.md
+    pass_if: "status in ['PASS','WARN']"
+    outputs: ["artifacts/${run_id}/delivery-review.json"]
