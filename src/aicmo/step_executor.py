@@ -40,6 +40,7 @@ from aicmo.models import (
     WorkflowSpec,
     WorkflowStep,
 )
+from aicmo.outcomes import parse_channel, weekly_outcomes_report
 from aicmo.paths import resolve_inside_repo
 from aicmo.redaction import minimize_customer_pii
 from aicmo.reviewer_contract import (
@@ -109,6 +110,15 @@ class WorkflowStepExecutor:
                     return self._run_gate(run_id, step, context, status, lease_signal)
                 case StepType.KB_UPDATE:
                     return self._run_kb_update(run_id, step, context, lease_signal)
+                case StepType.METRICS_REPORT:
+                    content = weekly_outcomes_report(
+                        self.repo_root,
+                        self.store,
+                        context.get("client", ""),
+                        context.get("week_start", ""),
+                        parse_channel(context.get("channel", "naver")),
+                    )
+                    return self._write_outputs(step, context, content, lease_signal)
                 case unreachable:
                     assert_never(unreachable)
 
@@ -701,7 +711,10 @@ class WorkflowStepExecutor:
         refs = self._artifact_refs(run_id, step)
         deterministic = evaluate_artifacts(texts)
         reasons = list(deterministic.reasons)
-        demo = isinstance(self.adapter, LocalAdapter) or any(
+        uses_agent = any(
+            row["step_type"] == StepType.AGENT.value for row in self.store.list_steps(run_id)
+        )
+        demo = (uses_agent and isinstance(self.adapter, LocalAdapter)) or any(
             OFFLINE_STUB_MARKER in text for text in texts
         )
         review_truncated = len(combined) > REVIEW_INPUT_LIMIT
@@ -733,7 +746,7 @@ class WorkflowStepExecutor:
                 ),
                 "deliverable": deliverable,
                 "reasons": list(dict.fromkeys(reasons)),
-                "generator": type(self.adapter).__name__,
+                "generator": type(self.adapter).__name__ if uses_agent else "native",
                 "reviewer": (
                     type(self.review_adapter).__name__ if self.review_adapter is not None else None
                 ),

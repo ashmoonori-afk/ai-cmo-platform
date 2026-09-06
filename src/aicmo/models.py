@@ -15,6 +15,7 @@ class StepType(StrEnum):
     AGENT = "agent"
     GATE = "gate"
     KB_UPDATE = "kb.update"
+    METRICS_REPORT = "metrics.report"
 
 
 class StepStatus(StrEnum):
@@ -98,7 +99,7 @@ class WorkflowStep(BaseModel):
                 if self.requires_approval:
                     msg = "terminal delivery step must be an automatic gate"
                     raise ValueError(msg)
-            case StepType.FILE_LOAD | StepType.AGENT | StepType.KB_UPDATE:
+            case StepType.FILE_LOAD | StepType.AGENT | StepType.KB_UPDATE | StepType.METRICS_REPORT:
                 msg = "terminal delivery step must be an automatic gate"
                 raise ValueError(msg)
             case unreachable:

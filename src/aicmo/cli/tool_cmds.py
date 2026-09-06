@@ -3,12 +3,14 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.table import Table
 
 from aicmo.capabilities import find_mapping, load_capabilities
 from aicmo.evaluate import evaluate_asset, render_report
 from aicmo.export import export_local_pack
 from aicmo.mockup import brief_from_answers, render_landing_mockup, render_pdf, render_png
 from aicmo.onboarding import OnboardingResult, load_answers, scaffold_client
+from aicmo.outcomes import METRICS, import_outcomes, parse_channel, preview_outcomes
 from aicmo.primer import render_primer_html
 from aicmo.reporter import flush_kb_updates
 from aicmo.store import WorkflowStore
@@ -151,7 +153,70 @@ def export_local_pack_cmd(
     console.print(str(target), markup=False)
 
 
+def outcomes_cmd(
+    client: Annotated[str, typer.Option("--client")],
+    week_start: Annotated[str, typer.Option("--week-start")],
+    source: Annotated[Path, typer.Option("--from", help="Daily counts CSV (UTF-8)")],
+    channel: Annotated[str, typer.Option("--channel")] = "naver",
+    confirm_sha: Annotated[str | None, typer.Option("--confirm-sha")] = None,
+    replace_existing: Annotated[bool, typer.Option("--replace")] = False,
+    as_json: Annotated[bool, typer.Option("--json")] = False,
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+) -> None:
+    """Preview daily outcomes, then import the confirmed file and database version."""
+    root = repo.resolve()
+    store = WorkflowStore(db or default_db(root))
+    selected = parse_channel(channel)
+    if confirm_sha is not None:
+        changed = import_outcomes(
+            root,
+            store,
+            client,
+            week_start,
+            selected,
+            source,
+            confirm_sha,
+            replace=replace_existing,
+        )
+        console.print(f"outcomes: {changed} daily row(s) saved; unchanged rows preserved")
+        return
+    preview = preview_outcomes(root, store, client, week_start, selected, source)
+    if as_json:
+        console.print_json(
+            data={
+                **preview.model_dump(),
+                "confirmation_sha256": preview.confirmation_sha256,
+            }
+        )
+        return
+    console.print(f"{client} / {week_start} Monday + 7 days / {channel} / {preview.encoding}")
+    table = Table("날짜", "구분", "게시", "문의", "예약", "쿠폰")
+    previous = {row.date: row for row in preview.existing}
+    for row in preview.rows:
+        old = previous.get(row.date)
+        for record, label in ((old, "기존"), (row, "입력")):
+            if record is not None:
+                table.add_row(
+                    record.date,
+                    label,
+                    *[
+                        "미입력"
+                        if getattr(record, metric) is None
+                        else str(getattr(record, metric))
+                        for metric in METRICS
+                    ],
+                )
+    console.print(table)
+    console.print(
+        "Preview only. Empty = unknown; 0 = observed zero. Changed values need --replace."
+    )
+    console.print(f"source_sha256: {preview.source_sha256}", soft_wrap=True)
+    console.print(f"confirmation_sha256: {preview.confirmation_sha256}", soft_wrap=True)
+
+
 def register(app: typer.Typer) -> None:
+    app.command("outcomes")(outcomes_cmd)
     app.command("onboard")(onboard_client)
     app.command("serve")(serve_cmd)
     app.command("primer")(primer_cmd)

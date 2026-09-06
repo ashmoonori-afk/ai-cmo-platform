@@ -369,7 +369,7 @@ mappings:
   - 주간 보고
   playbook: playbooks/06-analytics/weekly-report.md
   chain_note: null
-  agents: reporter
+  agents: reporter → reviewer
   model: sonnet
 - id: 30
   triggers:
@@ -523,8 +523,8 @@ mappings:
   - 주간 보고 + KB 정리
   - 이번주 마무리
   playbook: playbooks/06-analytics/weekly-report.md
-  chain_note: weekly-report + KB 업데이트
-  agents: reporter
+  chain_note: weekly-report + 검토된 KB 후보 (엔진 자동 갱신 없음)
+  agents: reporter → reviewer
   model: sonnet
 - id: 44
   triggers:

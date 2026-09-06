@@ -127,6 +127,10 @@ aicmo capabilities                            # 레지스트리 조회 (agents/m
 사장님 시간·사진 유무에 따라 축소한다. 사장님 승인과 최종 reviewer PASS 뒤
 `aicmo export-local-pack {run_id}`로 로컬 파일을 준비하며 게시·발송은 자동 실행하지 않는다.
 
+주간 성과는 `aicmo outcomes`에서 일별 수기 CSV를 미리 보고 확인한 버전을 저장한다.
+매핑 29·43의 `weekly-report` 엔진은 `metrics.report`로 관측값을 집계한 후 reviewer를 거친다.
+문서 생성 건수와 실제 게시·문의·예약을 구분하며 이 엔진 경로는 KB를 자동 갱신하지 않는다.
+
 ## 11. 워크플로우 최종 판정
 
 | 판정 | 조건 |

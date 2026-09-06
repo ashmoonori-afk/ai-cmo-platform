@@ -2,6 +2,26 @@ from __future__ import annotations
 
 SCHEMA = (
     """
+    create table if not exists manual_outcome_imports (
+        confirmation_sha256 text primary key,
+        client text not null,
+        week_start text not null,
+        channel text not null,
+        source_sha256 text not null
+    )
+    """,
+    """
+    create table if not exists manual_outcomes (
+        client text not null,
+        observed_on text not null,
+        channel text not null,
+        payload_json text not null,
+        source_sha256 text not null check (length(source_sha256) = 64),
+        revision integer not null check (revision > 0),
+        primary key (client, observed_on, channel)
+    )
+    """,
+    """
     create table if not exists workflows (
         workflow_id text primary key,
         name text not null,
