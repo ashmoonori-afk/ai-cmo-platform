@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from urllib.parse import unquote, urlsplit
 
 from aicmo.errors import WorkflowExecutionError
+from aicmo.photos import parse_photos
 from aicmo.redaction import (
     CUSTOMER_FIELD_MARKERS,
     is_customer_phone,
@@ -70,17 +72,39 @@ def _minimize_inputs(inputs: dict[str, str]) -> dict[str, str]:
     if public_phone and not is_customer_phone(public_phone):
         raise WorkflowExecutionError(step_id, "public_store_phone must be a valid phone number")
 
-    return {
-        key: (
-            value
-            if key == "public_store_phone" and approved == "true"
-            else (
-                CUSTOMER_FIELD_MARKERS.get(normalize_customer_key(key)) if value.strip() else None
+    safe: dict[str, str] = {}
+    for key, value in inputs.items():
+        if key == "photos_json":
+            # The photo schema validates identity fields and sanitizes captions.
+            # A generic prose pass can turn a valid digest into a phone marker.
+            selection = parse_photos({key: value})
+            safe[key] = (
+                value
+                if selection.model_dump() == json.loads(value)
+                else selection.model_dump_json()
             )
-            or minimize_customer_pii(value)
-        )
-        for key, value in inputs.items()
-    }
+        elif key == "feedback_json":
+            # Learning references this module's date helper; import after initialization.
+            from aicmo.learning import parse_feedback  # noqa: PLC0415
+
+            feedback = parse_feedback(value)
+            safe[key] = (
+                value if feedback.model_dump() == json.loads(value) else feedback.model_dump_json()
+            )
+        elif key == "client" and re.fullmatch(r"web-client-[a-f0-9]{32}", value):
+            safe[key] = value
+        else:
+            safe[key] = (
+                value
+                if key == "public_store_phone" and approved == "true"
+                else (
+                    CUSTOMER_FIELD_MARKERS.get(normalize_customer_key(key))
+                    if value.strip()
+                    else None
+                )
+                or minimize_customer_pii(value)
+            )
+    return safe
 
 
 def _has_source_content(text: str) -> bool:

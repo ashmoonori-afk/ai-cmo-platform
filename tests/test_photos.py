@@ -22,6 +22,7 @@ from aicmo.photos import (
     parse_photos,
     photo_preview,
 )
+from aicmo.source_input import prepare_workflow_inputs
 from tests.test_local_pack import (
     PackAdapter,
     _brief,  # pyright: ignore[reportPrivateUsage]
@@ -53,6 +54,31 @@ def _upload(root: Path, *, count: int = 2) -> dict[str, str]:
         encoding="utf-8",
     )
     return {**_brief(), "photos_json": import_photos(root, "shop", manifest)}
+
+
+def test_photo_input_preserves_hash_identity_and_minimizes_caption() -> None:
+    digest = "a" * 53 + "01012345678"
+    asset = {
+        "news_index": 0,
+        "caption": "가게 사진 01012345678",
+        "rights_basis": "own_photo",
+        "privacy_reviewed": True,
+        "sha256": digest,
+        "format": "PNG",
+        "width": 1,
+        "height": 1,
+        "byte_length": 1,
+    }
+    value = {"schema_version": "aicmo.photos.v1", "photos": [asset]}
+    inputs = {"client": "shop", "photos_json": json.dumps(value)}
+    safe = prepare_workflow_inputs({"client": "required", "photos_json": "optional"}, inputs).values
+    photo = parse_photos(safe).photos[0]
+    assert photo.sha256 == digest
+    assert photo.caption == "가게 사진 [customer-phone]"
+    assert prepare_workflow_inputs({}, safe).values == safe
+    asset["sha256"] = "customer name: synthetic-owner"
+    with pytest.raises(WorkflowExecutionError, match="invalid photo selection"):
+        prepare_workflow_inputs({}, {"photos_json": json.dumps(value)})
 
 
 @pytest.mark.parametrize("orientation", range(1, 9))

@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from aicmo.store_app import onboarding_views, views
+from aicmo.store_app import editor_views, onboarding_views, views
 
 urlpatterns = [
     path("", views.home, name="home"),
@@ -16,6 +16,9 @@ urlpatterns = [
     path("operator/", admin.site.urls),
     path("stores/<int:store_id>/new/", views.create, name="create"),
     path("jobs/<uuid:job_id>/", views.detail, name="job"),
+    path("jobs/<uuid:job_id>/edit/", editor_views.edit, name="edit"),
+    path("jobs/<uuid:job_id>/edit/confirm/", editor_views.confirmation, name="edit-confirm"),
+    path("jobs/<uuid:job_id>/edit/restore/", editor_views.restore, name="edit-restore"),
     path("jobs/<uuid:job_id>/approve/", views.approve, name="approve"),
     path("jobs/<uuid:job_id>/cancel/", views.cancel, name="cancel"),
     path("jobs/<uuid:job_id>/download/", views.download, name="download"),

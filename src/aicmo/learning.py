@@ -132,7 +132,7 @@ def feedback_report(  # noqa: C901 — sequential validation of source, original
         outcome = {
             "run_id": feedback.weekly_report_run_id,
             "sha256": hashlib.sha256(report).hexdigest(),
-            "report": report.decode("utf-8"),
+            "report": minimize_customer_pii(redact(report.decode("utf-8"))),
         }
     payload = {
         "schema_version": "aicmo.feedback-candidate.v1",
@@ -141,8 +141,8 @@ def feedback_report(  # noqa: C901 — sequential validation of source, original
         "feedback": feedback.model_dump(),
         "source_sha256": hashlib.sha256(pack_bytes).hexdigest(),
         "original_sha256": str(snapshot["sha256"]),
-        "original": original[feedback.item],
-        "approved": current[feedback.item],
+        "original": minimize_customer_pii(redact(original[feedback.item])),
+        "approved": minimize_customer_pii(redact(current[feedback.item])),
         "edited": original[feedback.item] != current[feedback.item],
         "outcomes": outcome,
         "evidence_status": "user_reported; posting and causal impact not verified",
@@ -151,7 +151,7 @@ def feedback_report(  # noqa: C901 — sequential validation of source, original
             "reviewer 통과 후 learn-feedback으로 반영합니다.",
         ],
     }
-    rendered = minimize_customer_pii(redact(json.dumps(payload, ensure_ascii=False, indent=2)))
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
     if len(rendered) > _MAX_REPORT_CHARS:
         raise WorkflowExecutionError(
             STEP, "evidence exceeds complete review capacity; shorten the source copy"

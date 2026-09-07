@@ -2,6 +2,14 @@ from __future__ import annotations
 
 SCHEMA = (
     """
+    create table if not exists pack_edit_receipts (
+        run_id text primary key references runs(run_id),
+        receipt_json text not null,
+        body text not null,
+        state text not null check (state in ('applying','applied'))
+    )
+    """,
+    """
     create table if not exists product_quotas (
         client text not null,
         period text not null,

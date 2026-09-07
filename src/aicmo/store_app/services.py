@@ -22,12 +22,14 @@ from aicmo.errors import AicmoError, RunNotFoundError, StepTransitionError
 from aicmo.export import export_local_pack, verified_delivery
 from aicmo.local_pack import WORKFLOW_ID, LocalPack, parse_brief, validate_pack
 from aicmo.models import ApprovalDecision, WorkflowStep
+from aicmo.pack_edits import EditApproval, EditBase
 from aicmo.paths import resolve_inside_repo
 from aicmo.runner import WorkflowRunner
 from aicmo.source_input import prepare_workflow_inputs
 from aicmo.spec import load_workflow_spec
 from aicmo.store import WorkflowStore
-from aicmo.store_app.models import Job, Store
+from aicmo.store_app.models import EditDraft, Job, Store
+from aicmo.web_run_lock import web_run_lock
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
@@ -134,40 +136,44 @@ def preview(job: Job) -> tuple[LocalPack, str, str]:
 
 
 def request_approval(job: Job, pack_sha: str, photo_sha: str, user_id: str) -> None:
-    _, current_pack, current_photo = preview(job)
-    if (pack_sha, photo_sha) != (current_pack, current_photo):
-        reason = "확인한 버전이 달라졌습니다. 화면을 새로 열고 확인해 주세요."
-        raise StoreActionError(reason)
-    approval = ApprovalRequest.model_validate_json(
-        json.dumps(
-            {
-                "schema_version": "aicmo.web-approval.v1",
-                "pack_sha": pack_sha,
-                "photo_sha": photo_sha,
-                "reviewer": f"web-user:{user_id}",
-                "requested_at": timezone.now().isoformat(),
-            }
-        )
-    ).model_dump(mode="json")
-    with transaction.atomic():
-        current = Job.objects.get(pk=job.pk)
-        prior = (
-            ApprovalRequest.model_validate_json(json.dumps(current.approval)).model_dump(
-                mode="json"
-            )
-            if current.approval != {}
-            else {}
-        )
-        if all(
-            prior.get(key) == approval[key] for key in ("pack_sha", "photo_sha", "reviewer")
-        ) and current.state in ("queued", "running", "success"):
-            return
-        if current.state != "waiting_approval" or current.cancel_requested:
-            reason = "현재 승인할 수 없는 작업입니다. 화면을 새로 열어 주세요."
+    with web_run_lock(Path(settings.REPO_ROOT), job.run_id, blocking=False):
+        _, current_pack, current_photo = preview(job)
+        if (pack_sha, photo_sha) != (current_pack, current_photo):
+            reason = "확인한 버전이 달라졌습니다. 화면을 새로 열고 확인해 주세요."
             raise StoreActionError(reason)
-        current.approval = approval
-        current.state = "queued"
-        current.save(update_fields=["approval", "state", "updated_at"])
+        approval = ApprovalRequest.model_validate_json(
+            json.dumps(
+                {
+                    "schema_version": "aicmo.web-approval.v1",
+                    "pack_sha": pack_sha,
+                    "photo_sha": photo_sha,
+                    "reviewer": f"web-user:{user_id}",
+                    "requested_at": timezone.now().isoformat(),
+                }
+            )
+        ).model_dump(mode="json")
+        with transaction.atomic():
+            current = Job.objects.select_for_update().get(pk=job.pk)
+            if EditDraft.objects.filter(job=current).exists():
+                reason = "저장된 수정본의 미리보기에서 확인해 주세요."
+                raise StoreActionError(reason)
+            prior = (
+                ApprovalRequest.model_validate_json(json.dumps(current.approval)).model_dump(
+                    mode="json"
+                )
+                if current.approval != {}
+                else {}
+            )
+            if all(
+                prior.get(key) == approval[key] for key in ("pack_sha", "photo_sha", "reviewer")
+            ) and current.state in ("queued", "running", "success"):
+                return
+            if current.state != "waiting_approval" or current.cancel_requested:
+                reason = "현재 승인할 수 없는 작업입니다. 화면을 새로 열어 주세요."
+                raise StoreActionError(reason)
+            current.approval = approval
+            current.state = "queued"
+            current.save(update_fields=["approval", "state", "updated_at"])
 
 
 def request_cancel(job: Job) -> None:
@@ -191,6 +197,15 @@ def cancel(job: Job, runner: WorkflowRunner) -> None:
         else:
             existing = True
         if existing:
+            with runner.store.connect() as connection:
+                pending_edit = connection.execute(
+                    "select 1 from pack_edit_receipts where run_id=? and state='applying'",
+                    (job.run_id,),
+                ).fetchone()
+            if pending_edit:
+                _apply_approval(
+                    job, runner, EditApproval.model_validate_json(json.dumps(job.approval))
+                )
             try:
                 runner.cancel(job.run_id)
             except StepTransitionError:
@@ -230,7 +245,20 @@ def _job_inputs(job: Job, runner: WorkflowRunner) -> dict[str, str]:
     return inputs
 
 
-def _apply_approval(job: Job, runner: WorkflowRunner, approval: ApprovalRequest) -> None:
+def _apply_approval(
+    job: Job, runner: WorkflowRunner, approval: ApprovalRequest | EditApproval
+) -> None:
+    if isinstance(approval, EditApproval):
+        draft = EditDraft.objects.filter(job=job).first()
+        if (
+            draft is None
+            or draft.revision != approval.revision
+            or EditBase.model_validate_json(json.dumps(draft.base)) != approval.base
+        ):
+            reason = "confirmed edit draft changed"
+            raise StoreActionError(reason)
+        runner.apply_pack_edit(job.run_id, approval, draft.body)
+        return
     _, pack_sha, photo_sha = preview(job)
     if (pack_sha, photo_sha) != (approval.pack_sha, approval.photo_sha):
         reason = "승인 버전이 바뀌었습니다. 운영자 확인이 필요합니다."
@@ -269,7 +297,9 @@ def execute(job: Job, runner: WorkflowRunner) -> None:
     try:
         inputs = _job_inputs(job, runner)
         approval = (
-            ApprovalRequest.model_validate_json(json.dumps(job.approval))
+            TypeAdapter[ApprovalRequest | EditApproval](
+                ApprovalRequest | EditApproval
+            ).validate_json(json.dumps(job.approval))
             if job.approval != {}
             else None
         )

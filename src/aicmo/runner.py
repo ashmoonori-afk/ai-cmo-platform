@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Self
 
 from aicmo.adapters import CommandAdapter, StepAdapter
@@ -25,7 +28,8 @@ from aicmo.models import (
     WorkflowSpec,
     WorkflowStep,
 )
-from aicmo.paths import parse_safe_id
+from aicmo.pack_edits import EditApproval, prepare_edit_application, verify_edit_approval
+from aicmo.paths import native_io_path, parse_safe_id
 from aicmo.photos import PHOTO_STEP, parse_photos, verify_photo_assets
 from aicmo.quota import QuotaError
 from aicmo.redaction import contains_raw_secret, minimize_customer_pii
@@ -33,12 +37,14 @@ from aicmo.source_input import PreparedInputs, operating_inputs, prepare_workflo
 from aicmo.spec import load_workflow_spec
 from aicmo.step_executor import WorkflowStepExecutor
 from aicmo.step_state import MAX_STEP_ATTEMPTS
+from aicmo.web_run_lock import serialized_web_run
 
 _OPERATING_INPUTS = {"artifact_format", "feedback", *operating_inputs()}
 
 
 @dataclass(frozen=True, slots=True)
 class WorkflowRunner(WorkflowStepExecutor):
+    @serialized_web_run
     def run(self: Self, workflow_id: str, run_id: str, inputs: dict[str, str]) -> RunResult:
         parse_safe_id("workflow_id", workflow_id)
         parse_safe_id("run_id", run_id)
@@ -65,6 +71,7 @@ class WorkflowRunner(WorkflowStepExecutor):
         self.store.record_event(run_id, None, "run.started", f"Started {workflow_id}", inputs)
         return self._execute(spec, run_id, inputs)
 
+    @serialized_web_run
     def resume(self: Self, run_id: str, *, allow_policy_change: bool = False) -> RunResult:
         self.store.initialize()
         run = self.store.get_run(run_id)
@@ -101,6 +108,7 @@ class WorkflowRunner(WorkflowStepExecutor):
         self.store.record_event(run_id, None, "run.resumed", f"Resumed {run_id}")
         return self._execute(spec, run_id, inputs)
 
+    @serialized_web_run
     def cancel(self: Self, run_id: str) -> None:
         self.store.initialize()
         self.store.cancel_run(run_id)
@@ -152,7 +160,19 @@ class WorkflowRunner(WorkflowStepExecutor):
         )
         temporary.replace(target)
 
+    @serialized_web_run
     def approve(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        reviewer: str,
+        notes: str,
+        accept_edits: bool = False,
+        photos_reviewed: bool = False,
+    ) -> list[str]:
+        return self._approve(run_id, step_id, reviewer, notes, accept_edits, photos_reviewed)
+
+    def _approve(
         self: Self,
         run_id: str,
         step_id: str,
@@ -169,6 +189,15 @@ class WorkflowRunner(WorkflowStepExecutor):
         open a window where that resume regenerates over the owner's edits.
         Returns the list of artifact paths whose content changed since generation."""
         self.store.initialize()
+        if (
+            accept_edits
+            and self.store.get_step_status(run_id, step_id) != StepStatus.WAITING_APPROVAL
+        ):
+            raise StepTransitionError(
+                run_id, step_id, "--accept-edits requires a gate in waiting_approval"
+            )
+        if self.store.approval_for(run_id, step_id) is not None:
+            raise StepTransitionError(run_id, step_id, "an approval decision is already recorded")
         photo_digest = None
         local_pack = self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW
         if local_pack:
@@ -185,12 +214,6 @@ class WorkflowRunner(WorkflowStepExecutor):
                 validate_pack(source.read_text("utf-8"), inputs)
         changed: list[str] = []
         if accept_edits:
-            if self.store.get_step_status(run_id, step_id) != StepStatus.WAITING_APPROVAL:
-                raise StepTransitionError(
-                    run_id,
-                    step_id,
-                    "--accept-edits requires a gate in waiting_approval",
-                )
             changed = self._accept_artifact_edits(run_id, step_id)
         safe_notes = minimize_customer_pii(notes)
         self.store.approve(
@@ -212,6 +235,51 @@ class WorkflowRunner(WorkflowStepExecutor):
                 {"files": changed},
             )
         return changed
+
+    @serialized_web_run
+    def apply_pack_edit(self: Self, run_id: str, receipt: EditApproval, body: str) -> None:
+        """Apply one frozen web edit; an unfinished durable receipt blocks other run mutations."""
+        receipt = EditApproval.model_validate_json(receipt.model_dump_json())
+        self.store.initialize()
+        # Applying already-confirmed text is provider-free, including cancellation recovery.
+        # Generation still checks the stored execution policy in run/resume.
+        path = prepare_edit_application(self, run_id, receipt, body)
+        with self.store.connect() as connection:
+            row = connection.execute(
+                "select state from pack_edit_receipts where run_id=?", (run_id,)
+            ).fetchone()
+        if row["state"] == "applied":
+            verify_edit_approval(self, run_id, receipt)
+            return
+        self._write_pack_edit(path, body)
+        if self.store.approval_for(run_id, "owner_gate") is None:
+            self._approve(
+                run_id,
+                "owner_gate",
+                receipt.reviewer,
+                "웹에서 수정 문안 확인",
+                accept_edits=True,
+                photos_reviewed=True,
+            )
+        verify_edit_approval(self, run_id, receipt)
+        with self.store.connect() as connection:
+            connection.execute(
+                "update pack_edit_receipts set state='applied' where run_id=?", (run_id,)
+            )
+
+    @staticmethod
+    def _write_pack_edit(path: Path, body: str) -> None:
+        with NamedTemporaryFile(
+            dir=native_io_path(path.parent), prefix=".owner-edit-", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(body.encode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            temporary.replace(native_io_path(path))
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _accept_artifact_edits(self: Self, run_id: str, gate_step_id: str) -> list[str]:
         changed: list[str] = []
@@ -242,6 +310,7 @@ class WorkflowRunner(WorkflowStepExecutor):
             self.store.record_output_hashes(run_id, step_id, current)
         return changed
 
+    @serialized_web_run
     def reject(self: Self, run_id: str, step_id: str, reviewer: str, notes: str) -> None:
         self.store.initialize()
         safe_notes = minimize_customer_pii(notes)
@@ -255,6 +324,7 @@ class WorkflowRunner(WorkflowStepExecutor):
             {"reviewer": reviewer},
         )
 
+    @serialized_web_run
     def retry(self: Self, run_id: str, step_id: str) -> None:
         self.store.initialize()
         self.store.retry_step(run_id, step_id)
@@ -359,6 +429,7 @@ class WorkflowRunner(WorkflowStepExecutor):
             return self._fail(run_id, step.id, "dependency did not complete", owner=None)
         return None
 
+    @serialized_web_run
     def complete_verified_local_pack(self: Self, run_id: str) -> RunResult:
         """Recover a completed pack's final write without invoking or changing its providers."""
         verified_delivery(

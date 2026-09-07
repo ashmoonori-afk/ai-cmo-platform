@@ -80,6 +80,34 @@ class LoginWindow(models.Model):
         return "Login attempt window"
 
 
+class EditDraft(models.Model):
+    job: models.OneToOneField[Job, Job] = models.OneToOneField(Job, on_delete=models.PROTECT)
+    base = models.JSONField()
+    body: models.TextField[str, str] = models.TextField()
+    revision: models.PositiveBigIntegerField[int, int] = models.PositiveBigIntegerField(default=0)
+    updated_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"문안 수정 {self.revision}"
+
+
+class EditVersion(models.Model):
+    draft: models.ForeignKey[EditDraft, EditDraft] = models.ForeignKey(
+        EditDraft, on_delete=models.PROTECT
+    )
+    revision: models.PositiveBigIntegerField[int, int] = models.PositiveBigIntegerField()
+    body: models.TextField[str, str] = models.TextField()
+    created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints: ClassVar = [
+            models.UniqueConstraint(fields=["draft", "revision"], name="edit_version_revision")
+        ]
+
+    def __str__(self) -> str:
+        return f"저장된 문안 {self.revision}"
+
+
 class OnboardingDraft(models.Model):
     MAX_ATTEMPTS = 3
     id: models.UUIDField[uuid.UUID, uuid.UUID] = models.UUIDField(

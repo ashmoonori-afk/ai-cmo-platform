@@ -872,7 +872,9 @@ class WorkflowStepExecutor:
                     "deliverable" if deliverable else "demo" if demo else "blocked"
                 ),
                 "deliverable": deliverable,
-                "reasons": list(dict.fromkeys(reasons)),
+                "reasons": [
+                    self._minimize_pii(reason, context) for reason in dict.fromkeys(reasons)
+                ],
                 "generator": type(self.adapter).__name__ if uses_agent else "native",
                 "reviewer": (
                     type(self.review_adapter).__name__ if self.review_adapter is not None else None
@@ -880,7 +882,7 @@ class WorkflowStepExecutor:
                 "semantic_review": (
                     {
                         "status": semantic_review.decision.value,
-                        "reason": semantic_review.reason,
+                        "reason": self._minimize_pii(semantic_review.reason, context),
                         "outcome": semantic_review.outcome,
                     }
                     if semantic_review is not None
@@ -912,7 +914,10 @@ class WorkflowStepExecutor:
         content: str,
         lease_signal: _LeaseSignal,
     ) -> list[str]:
-        content = self._minimize_pii(content, context)
+        # Native builders validate metadata and sanitize their free-text fields before assembly.
+        # Reprocessing whole manifests/reports corrupts phone-shaped hashes and run/client IDs.
+        if step.type in (StepType.FILE_LOAD, StepType.AGENT):
+            content = self._minimize_pii(content, context)
         written: list[str] = []
         for output_template in self._output_templates(step):
             target = self._resolve(output_template, context)

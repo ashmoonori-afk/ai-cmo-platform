@@ -95,6 +95,25 @@ def approve_feedback(runner: WorkflowRunner, run_id: str = "feedback", **changes
     assert runner.resume(run_id).status == "success"
 
 
+def test_feedback_preserves_phone_shaped_source_and_evidence_ids(runner: WorkflowRunner) -> None:
+    source = "web-" + "a" * 21 + "01012345678"
+    feedback = "web-" + "b" * 24 + "15881234"
+    inputs = make_pack(runner, source)
+    approve_feedback(runner, feedback, source_run_id=source)
+    report = json.loads(
+        (runner.repo_root / f"artifacts/{feedback}/feedback.json").read_text("utf-8")
+    )
+    assert report["feedback"]["source_run_id"] == source
+    assert len(report["source_sha256"]) == 64
+    learn_feedback(runner, feedback)
+    assert runner.run("local-store-pack", "next", inputs).status == "waiting_approval"
+    context = json.loads(
+        (runner.repo_root / "artifacts/next/learning-context.json").read_text("utf-8")
+    )
+    assert context["insights"][0]["source_run_id"] == source
+    assert context["insights"][0]["feedback_run_id"] == feedback
+
+
 def test_approved_edit_feedback_changes_next_generation_context(runner: WorkflowRunner) -> None:
     pack_inputs = make_pack(runner)
     inputs = feedback_inputs()

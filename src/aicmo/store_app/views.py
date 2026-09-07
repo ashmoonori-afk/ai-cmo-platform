@@ -16,7 +16,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from aicmo.errors import AicmoError
 from aicmo.store_app import guidance, onboarding, services
 from aicmo.store_app.forms import ApprovalForm, PackForm
-from aicmo.store_app.models import Job
+from aicmo.store_app.models import EditDraft, Job
 
 
 @login_required
@@ -126,6 +126,7 @@ def detail(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
             "approval_form": approval_form,
             "notice": notice,
             "allowance": guidance.allowance(job.store),
+            "has_edit": EditDraft.objects.filter(job=job).exists(),
         },
     )
 

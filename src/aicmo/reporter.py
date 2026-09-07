@@ -71,6 +71,7 @@ def append_record(
 
 class _MsvcrtModule(Protocol):
     LK_LOCK: int
+    LK_NBLCK: int
     LK_UNLCK: int
 
     def locking(self, fd: int, mode: int, nbytes: int) -> None: ...
@@ -78,6 +79,7 @@ class _MsvcrtModule(Protocol):
 
 class _FcntlModule(Protocol):
     LOCK_EX: int
+    LOCK_NB: int
     LOCK_UN: int
 
     def flock(self, fd: int, operation: int) -> None: ...
@@ -135,7 +137,7 @@ def append_insight(target: Path, row: sqlite3.Row) -> bool:
 
 
 @contextmanager
-def exclusive_file_lock(lock_path: Path) -> Iterator[None]:
+def exclusive_file_lock(lock_path: Path, *, blocking: bool = True) -> Iterator[None]:
     with lock_path.open("a+b") as handle:
         if sys.platform == "win32":
             locker = cast(
@@ -143,7 +145,7 @@ def exclusive_file_lock(lock_path: Path) -> Iterator[None]:
                 cast("object", importlib.import_module("msvcrt")),
             )
             handle.seek(0)
-            locker.locking(handle.fileno(), locker.LK_LOCK, 1)
+            locker.locking(handle.fileno(), locker.LK_LOCK if blocking else locker.LK_NBLCK, 1)
             try:
                 yield
             finally:
@@ -154,7 +156,7 @@ def exclusive_file_lock(lock_path: Path) -> Iterator[None]:
                 "_FcntlModule",
                 cast("object", importlib.import_module("fcntl")),
             )
-            locker.flock(handle.fileno(), locker.LOCK_EX)
+            locker.flock(handle.fileno(), locker.LOCK_EX | (0 if blocking else locker.LOCK_NB))
             try:
                 yield
             finally:
