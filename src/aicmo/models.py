@@ -3,11 +3,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import assert_never
+from typing import Annotated, Literal, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from aicmo.paths import SAFE_ID_PATTERN
+
+Hash = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+
+
+class EditBase(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: Literal["aicmo.pack-edit-base.v1"] = "aicmo.pack-edit-base.v1"
+    workflow_id: Literal["local-store-pack"] = "local-store-pack"
+    spec_digest: Hash
+    spec_revision: int
+    draft_attempt: int = Field(ge=1)
+    draft_sha: Hash
+    snapshot_sha: Hash
+    photo_sha: Hash
+    dependencies_sha: Hash
 
 
 class StepType(StrEnum):

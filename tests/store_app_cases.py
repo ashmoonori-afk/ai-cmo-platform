@@ -73,17 +73,22 @@ class StoreAppTests(TransactionTestCase):
         self.assertEqual(result.status_code, 302)
 
     def test_journey_and_verified_download(self) -> None:
+        fields = {
+            "submission_key": str(uuid.uuid4()),
+            "fact": "이번 주 평소대로 영업합니다.",
+            "reviews": "친절한 안내가 좋았습니다.",
+            "owner_minutes": "20",
+        }
         with patch("aicmo.store_app.services.engine", return_value=self.runner):
+            rejected = self.client.post(
+                f"/stores/{self.store.pk}/new/",
+                {**fields, "client": "another-store", "executor": "not-trusted"},
+            )
+            self.assertEqual(rejected.status_code, 400)
+            self.assertFalse(Job.objects.exists())
             result = self.client.post(
                 f"/stores/{self.store.pk}/new/",
-                {
-                    "submission_key": str(uuid.uuid4()),
-                    "fact": "이번 주 평소대로 영업합니다.",
-                    "reviews": "친절한 안내가 좋았습니다.",
-                    "owner_minutes": "20",
-                    "client": "another-store",
-                    "executor": "not-trusted",
-                },
+                fields,
             )
         self.assertEqual(result.status_code, 302)
         job = Job.objects.get()

@@ -1,14 +1,91 @@
 import json
+import unicodedata
+from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from django import forms
+from django.core.files.uploadedfile import UploadedFile
+from django.http import QueryDict
+from django.utils.datastructures import MultiValueDict
 
 from aicmo.errors import AicmoError
 from aicmo.local_pack import parse_brief
 from aicmo.onboarding import OnboardingAnswers, validate_answers
+from aicmo.photos import MAX_PHOTO_BYTES, normalize_photo
+from aicmo.redaction import contains_raw_secret, minimize_customer_pii
+from aicmo.store_app.services import StoreActionError
+
+
+def clean_value(raw: str, field: forms.Field) -> str:
+    allowed_controls = "\r\n\t" if isinstance(field.widget, forms.Textarea) else ""
+    if (
+        len(raw) > int(getattr(field, "max_length", 1200) or 1200)
+        or contains_raw_secret(raw)
+        or any(
+            (
+                unicodedata.category(char).startswith("C")
+                or unicodedata.category(char) in {"Zl", "Zp"}
+            )
+            and char not in allowed_controls
+            for char in raw
+        )
+    ):
+        reason = "입력 길이와 개인정보를 확인해 주세요. 비밀번호·인증 키는 저장하지 않습니다."
+        raise StoreActionError(reason)
+    if isinstance(field, forms.URLField) and raw:
+        url = urlsplit(raw)
+        if url.username is not None or url.password is not None:
+            reason = "로그인 정보가 포함된 주소는 저장하지 않습니다."
+            raise StoreActionError(reason)
+    value = minimize_customer_pii(raw.strip().replace("\r\n", "\n").replace("\r", "\n"))
+    if value and not any(unicodedata.category(char)[0] in "LNPS" for char in value):
+        reason = "눈에 보이는 글자로 입력해 주세요."
+        raise StoreActionError(reason)
+    return value
 
 
 class PackForm(forms.Form):
+    def __init__(
+        self,
+        data: Mapping[str, Any] | None = None,  # pyright: ignore[reportExplicitAny]
+        files: MultiValueDict[str, UploadedFile] | None = None,
+        *,
+        initial: Mapping[str, object] | None = None,
+    ) -> None:
+        super().__init__(data, files, initial=dict(initial) if initial is not None else None)
+        if not self.is_bound:
+            return
+        safe: dict[str, str] = {}
+        errors: list[tuple[str | None, str]] = []
+        allowed = (set(self.fields) - {"photo"}) | {"csrfmiddlewaretoken"}
+        if set(self.data) - allowed or (
+            isinstance(self.data, QueryDict)
+            and any(len(self.data.getlist(name)) != 1 for name in self.data)
+        ):
+            errors.append((None, "입력 항목이 중복되었거나 바뀌었습니다. 다시 확인해 주세요."))
+        for name, field in self.fields.items():
+            if name == "photo":
+                continue
+            raw = self.data.get(name, "")
+            message = "입력 길이·형식·개인정보를 확인해 다시 입력해 주세요."
+            if not isinstance(raw, str) or (name == "photo_privacy" and raw not in {"", "on"}):
+                safe[name] = ""
+                errors.append((name, message))
+                continue
+            try:
+                if name in {"fact", "reviews", "photo_caption"}:
+                    safe[name] = clean_value(raw, field)
+                else:
+                    validated = field.clean(raw)
+                    safe[name] = raw if name == "photo_privacy" else str(validated)
+            except (forms.ValidationError, StoreActionError):
+                safe[name] = ""
+                errors.append((name, message))
+        self.data = safe
+        for name, message in errors:
+            self.add_error(name, message)
+
     submission_key = forms.UUIDField(widget=forms.HiddenInput)
     fact = forms.CharField(
         label="이번 주 알릴 소식",
@@ -26,11 +103,57 @@ class PackForm(forms.Form):
     owner_minutes = forms.IntegerField(
         label="이번 주에 쓸 수 있는 시간(분)", min_value=5, max_value=240, initial=20
     )
+    photo = forms.FileField(
+        label="소식에 넣을 실제 사진 1장",
+        required=False,
+        widget=forms.FileInput(attrs={"accept": "image/jpeg,image/png"}),
+        help_text="JPEG 또는 PNG, 20 MiB·2,400만 화소 이하. 위치 등 파일 정보는 제거합니다.",
+    )
+    photo_caption = forms.CharField(
+        label="사진 설명",
+        required=False,
+        max_length=200,
+        help_text="사진을 보지 못하는 분께도 전달할 설명입니다. 이름·연락처는 빼 주세요.",
+    )
+    photo_rights = forms.ChoiceField(
+        label="사진 사용 권리",
+        required=False,
+        choices=[
+            ("", "사진을 넣었다면 선택"),
+            ("own_photo", "직접 촬영"),
+            ("permission_received", "사용 허락을 받음"),
+        ],
+    )
+    photo_privacy = forms.BooleanField(
+        label="사진 속 인물·연락처 등 개인정보와 사용 권리를 직접 확인했습니다.",
+        required=False,
+    )
+
+    def clean_photo(self) -> object:
+        upload = self.cleaned_data.get("photo")
+        if upload is None:
+            return None
+        if upload.size > MAX_PHOTO_BYTES:
+            reason = "사진은 20 MiB 이하로 선택해 주세요."
+            raise forms.ValidationError(reason)
+        try:
+            return normalize_photo(upload.read(MAX_PHOTO_BYTES + 1))
+        except AicmoError:
+            reason = "완전한 단일 프레임 JPEG·PNG, 20 MiB·2,400만 화소 이하로 선택해 주세요."
+            raise forms.ValidationError(reason) from None
 
     def clean(self) -> dict[str, Any] | None:  # pyright: ignore[reportExplicitAny]
         data = super().clean()
         if not data or self.errors:
             return data
+        if len(self.files.getlist("photo")) > 1:
+            self.add_error("photo", "사진은 1장만 선택해 주세요.")
+        if set(self.files) - {"photo"}:
+            self.add_error(None, "사진 첨부 항목에서 파일 1장만 선택해 주세요.")
+        if data.get("photo") is not None:
+            for name in ("photo_caption", "photo_rights", "photo_privacy"):
+                if not data.get(name):
+                    self.add_error(name, "사진을 넣으려면 이 항목을 확인해 주세요.")
         brief = json.dumps(
             {
                 "facts": [data["fact"]],
@@ -51,7 +174,9 @@ class PackForm(forms.Form):
 class ApprovalForm(forms.Form):
     pack_sha = forms.RegexField(r"^[a-f0-9]{64}$", widget=forms.HiddenInput)
     photo_sha = forms.RegexField(r"^[a-f0-9]{64}$", widget=forms.HiddenInput)
-    checked = forms.BooleanField(label="가격·기간·문안과 사용 권리를 확인했습니다.")
+    checked = forms.BooleanField(
+        label="가격·기간·문안과 첨부 사진의 개인정보·사용 권리를 확인했습니다."
+    )
 
 
 class StoreBasicsForm(forms.Form):

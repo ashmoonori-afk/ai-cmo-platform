@@ -190,7 +190,7 @@ def task_cards(hints: ProfileHints) -> list[dict[str, str]]:
             "intent": key,
             "title": INTENTS[key][0],
             "detail": INTENTS[key][1],
-            "scope": f"사진 없이 소식 1건 · 입력한 리뷰의 답글 최대 {replies}개",
+            "scope": f"소식 1건 · 사진 선택 1장 · 입력한 리뷰의 답글 최대 {replies}개",
         }
         for key in order
     ]

@@ -15,6 +15,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from aicmo.errors import WorkflowExecutionError
 from aicmo.local_pack import MAX_PACK_BYTES, WORKFLOW_ID, LocalPack, validate_pack
 from aicmo.models import ApprovalDecision, StepStatus
+from aicmo.models import EditBase as EditBase  # noqa: PLC0414 — preserve the public import path
+from aicmo.models import Hash as Hash  # noqa: PLC0414 — preserve the public import path
 from aicmo.paths import native_io_path, resolve_inside_repo
 from aicmo.redaction import contains_raw_secret, minimize_customer_pii
 from aicmo.source_input import prepare_workflow_inputs
@@ -25,22 +27,6 @@ if TYPE_CHECKING:
     from aicmo.step_executor import WorkflowStepExecutor
 
 _EDIT_STEP = "edit"
-
-Hash = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
-
-
-class EditBase(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal["aicmo.pack-edit-base.v1"] = "aicmo.pack-edit-base.v1"
-    workflow_id: Literal["local-store-pack"] = "local-store-pack"
-    spec_digest: Hash
-    spec_revision: int
-    draft_attempt: int = Field(ge=1)
-    draft_sha: Hash
-    snapshot_sha: Hash
-    photo_sha: Hash
-    dependencies_sha: Hash
-
 
 class EditApproval(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)

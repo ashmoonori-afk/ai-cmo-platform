@@ -1,3 +1,5 @@
+# pyright: reportImportCycles=false
+# Rewrite validation refers back to LocalPack through function-local imports only.
 from __future__ import annotations
 
 import json
@@ -102,7 +104,7 @@ class LocalPack(BaseModel):
     next_steps: list[Text] = Field(min_length=2, max_length=3)
 
 
-def _unique_pairs(pairs: list[tuple[str, JsonValue]]) -> dict[str, JsonValue]:
+def unique_json_pairs(pairs: list[tuple[str, JsonValue]]) -> dict[str, JsonValue]:
     result: dict[str, JsonValue] = {}
     for key, value in pairs:
         if key in result:
@@ -128,7 +130,7 @@ def parse_brief(inputs: dict[str, str]) -> PackBrief:
     if len(raw.encode("utf-8")) > MAX_PACK_BYTES:
         raise WorkflowExecutionError(INPUT_STEP, "local pack brief exceeds 12 KiB")
     try:
-        json.loads(raw, object_pairs_hook=_unique_pairs)
+        json.loads(raw, object_pairs_hook=unique_json_pairs)
         brief = PackBrief.model_validate_json(raw)
     except (ValueError, RecursionError):
         # Never echo raw customer input from Pydantic's error payload.
@@ -137,6 +139,16 @@ def parse_brief(inputs: dict[str, str]) -> PackBrief:
             "invalid local pack brief: check channel, capacity, facts and review limits",
         ) from None
     photos = parse_photos(inputs).photos
+    if "rewrite_json" in inputs:
+        # Imported after initialization: rewrite validates this module's LocalPack schema.
+        from aicmo.pack_rewrite import facts_sha, parse_rewrite  # noqa: PLC0415
+
+        rewrite = parse_rewrite(inputs["rewrite_json"])
+        original = LocalPack.model_validate_json(rewrite.source_body)
+        if rewrite.facts_sha != facts_sha(brief.facts) or (
+            rewrite.action != "price" and brief.facts != original.sources
+        ):
+            raise WorkflowExecutionError(INPUT_STEP, "rewrite differs from confirmed facts")
     brief = brief.model_copy(update={"photo_available": bool(photos)})
     if any(photo.news_index >= brief.news_count for photo in photos):
         raise WorkflowExecutionError(
@@ -152,7 +164,7 @@ def validate_pack(text: str, inputs: dict[str, str]) -> LocalPack:
             DRAFT_STEP, "local pack exceeds 12 KiB; shorten and regenerate"
         )
     try:
-        json.loads(text, object_pairs_hook=_unique_pairs)
+        json.loads(text, object_pairs_hook=unique_json_pairs)
         pack = LocalPack.model_validate_json(text)
     except (ValueError, RecursionError):
         raise WorkflowExecutionError(DRAFT_STEP, "invalid local pack JSON contract") from None

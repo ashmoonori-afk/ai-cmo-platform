@@ -1,6 +1,7 @@
 {% extends "store_app/base.html" %}{% block content %}
 <h1>{{ job.store.name }} · 수정본 확인</h1><p>저장된 수정본 {{ draft.revision }}입니다. 실제 외부 게시 화면이나 게시 완료 상태는 아닙니다.</p>
 {% for news in pack.news %}<article class="card"><h2>{{ news.title }}</h2><p class="copy">{{ news.body }}</p><p>{{ news.cta }}</p><p>기간: {{ news.period }}</p><p>{{ news.photo_instruction }}</p></article>{% endfor %}
+{% include "store_app/photo.html" %}
 {% for reply in pack.replies %}<article class="card"><h2>리뷰 {{ reply.review_index|add:1 }} 답글</h2><p class="copy">{{ reply.body }}</p></article>{% endfor %}
 <section class="card"><h2>이 수정본으로 최종 검토를 요청할까요?</h2><p>새 가격·기간·혜택을 추가했다면 기존 사실과 어긋날 수 있습니다. 새로운 사실은 새 요청으로 확인해 주세요.</p><form method="post">{% csrf_token %}{{ form.as_p }}<button>수정본 확인하고 최종 검토 요청</button></form></section>
 <p><a href="{% url 'edit' job.id %}">계속 고치기</a></p>{% endblock %}

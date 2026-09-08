@@ -65,7 +65,7 @@ class EditConfirmation(forms.Form):
     base_token = forms.RegexField(r"^[a-f0-9]{64}$", widget=forms.HiddenInput)
     edited_sha = forms.RegexField(r"^[a-f0-9]{64}$", widget=forms.HiddenInput)
     checked = forms.BooleanField(
-        label="수정한 문안이 확인한 사실·가격·기간과 일치하며 사용 권리를 확인했습니다."
+        label="수정한 문안의 사실·가격·기간과 첨부 사진의 개인정보·사용 권리를 확인했습니다."
     )
 
 

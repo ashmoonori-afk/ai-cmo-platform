@@ -1,0 +1,1 @@
+{% for photo in photos %}<figure class="card"><img src="{% url 'job-photo' job.id %}" alt="{{ photo.caption }}" style="max-width:100%;height:auto"><figcaption>{{ photo.caption }}</figcaption><p>첨부할 실제 사진입니다. 사진 속 인물·연락처와 사용 권리를 직접 확인해 주세요.</p></figure>{% endfor %}

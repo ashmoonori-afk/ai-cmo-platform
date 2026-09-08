@@ -4,6 +4,7 @@ inputs:
   client: required
   brief_json: required
   photos_json: optional
+  rewrite_json: optional
 steps:
   - id: load_context
     type: file.load

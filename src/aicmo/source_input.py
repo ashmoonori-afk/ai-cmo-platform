@@ -83,6 +83,11 @@ def _minimize_inputs(inputs: dict[str, str]) -> dict[str, str]:
                 if selection.model_dump() == json.loads(value)
                 else selection.model_dump_json()
             )
+        elif key == "rewrite_json":
+            from aicmo.pack_rewrite import parse_rewrite  # noqa: PLC0415
+
+            parse_rewrite(value)
+            safe[key] = value
         elif key == "feedback_json":
             # Learning references this module's date helper; import after initialization.
             from aicmo.learning import parse_feedback  # noqa: PLC0415

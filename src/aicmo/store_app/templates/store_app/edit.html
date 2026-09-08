@@ -1,5 +1,6 @@
 {% extends "store_app/base.html" %}{% block content %}
 <h1>{{ job.store.name }} · 문안 고치기</h1>
+<p><a href="{% url 'rewrite' job.id %}">짧게 · 친근하게 · 새 가격으로 다시 작성</a>하려면 먼저 수정본을 저장해 주세요.</p>
 <p>제목과 본문을 직접 고쳐 보세요. 확인한 사실 안에서만 수정해 주세요. 새 가격·행사·사진은 새 요청에서 확인해야 합니다.</p>
 {% if pack %}<details class="card"><summary>이번 문안의 확인된 소식</summary>{% for source in pack.sources %}<p class="copy">{{ source }}</p>{% endfor %}</details>{% endif %}
 <p id="save-status" role="status" aria-live="polite">{% if form.is_bound %}이번 저장은 완료되지 않았습니다. 아래 입력을 확인한 뒤 다시 저장해 주세요.{% elif draft %}수정본 {{ draft.revision }} · {{ draft.updated_at|date:"n월 j일 H:i" }} 저장{% else %}아직 수정본을 저장하지 않았습니다.{% endif %}</p>

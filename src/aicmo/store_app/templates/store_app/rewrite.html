@@ -1,0 +1,18 @@
+{% extends "store_app/base.html" %}{% block content %}
+<h1>{{ job.store.name }} · 다시 작성하기</h1>
+<p>저장된 문안을 바탕으로 새 작업을 만듭니다. 기존 문안과 수정본은 보관됩니다. 사진이 있으면 같은 사진을 이어 쓰며, 사진 교체는 별도 새 요청에서 진행합니다.</p>
+{% if notice %}<p role="alert">{{ notice }}</p>{% endif %}
+{% if cancel_first %}
+<section class="card"><h2>먼저 기존 작업의 취소를 완료해 주세요</h2><p>기존 작업 화면에서 취소를 요청하고 취소 완료를 확인한 뒤 이 화면을 다시 여세요. 자동저장되지 않은 입력은 먼저 저장해 주세요.</p><a href="{% url 'job' job.id %}">기존 작업으로 돌아가기</a></section>
+{% else %}
+<section class="card"><h2>사용 건수 안내</h2><p>{{ allowance.detail }}</p><p>미리보기에는 작성 시도를 쓰지 않습니다. 최종 요청 후 새 작업에서 작성 시도와 사용 건수를 적용합니다. 기존 작업에서 이미 사용한 작성 시도는 되돌리지 않습니다.</p></section>
+{% if confirmation %}
+<section class="card"><h2>새 요청 미리보기</h2><p>작성 방법: {{ action_label }}</p><h3>새 문안이 따라야 할 사실</h3><p class="copy">{{ fact }}</p><p>아래 문안은 재작성의 기준입니다. AI가 다시 쓴 결과는 새 작업에서 별도로 확인하고 승인합니다.</p></section>
+{% if job.inputs.photos_json %}<p>기존 사진을 같은 사용권·설명으로 이어 씁니다. 새 작업 승인 전에 사진을 다시 확인하세요.</p><img src="{% url 'job-photo' job.id %}" alt="재작성에 이어 쓸 기존 소식 사진" style="max-width:100%;height:auto">{% endif %}
+{% for news in pack.news %}<article class="card"><h3>{{ news.title }}</h3><p class="copy">{{ news.body }}</p><p>{{ news.cta }}</p><p>{{ news.period }}</p></article>{% endfor %}
+{% for reply in pack.replies %}<article class="card"><h3>리뷰 {{ reply.review_index|add:1 }} 답글</h3><p class="copy">{{ reply.body }}</p></article>{% endfor %}
+<form method="post">{% csrf_token %}<input type="hidden" name="stage" value="confirm">{{ confirmation.as_p }}<button>사용 건수 확인하고 새로 작성 요청</button></form>
+<p><a href="{% url 'rewrite' job.id %}">요청 내용 다시 입력</a></p>
+{% elif form %}<form method="post">{% csrf_token %}<input type="hidden" name="stage" value="preview">{{ form.as_p }}<button>새 요청 미리보기</button></form>{% endif %}
+{% endif %}<p><a href="{% url 'job' job.id %}">기존 작업 보기</a></p>
+{% endblock %}

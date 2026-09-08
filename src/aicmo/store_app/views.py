@@ -14,7 +14,8 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from aicmo.errors import AicmoError
-from aicmo.store_app import guidance, onboarding, services
+from aicmo.photos import parse_photos
+from aicmo.store_app import guidance, onboarding, photos, services
 from aicmo.store_app.forms import ApprovalForm, PackForm
 from aicmo.store_app.models import EditDraft, Job
 
@@ -69,6 +70,7 @@ def create(request: HttpRequest, store_id: int) -> HttpResponse:
     intent = requested_intent if requested_intent in guidance.INTENTS else "news"
     form = PackForm(
         request.POST if request.method == "POST" else None,
+        request.FILES if request.method == "POST" else None,
         initial={"submission_key": uuid.uuid4(), "owner_minutes": hints.minutes or 20},
     )
     form.fields["fact"].help_text = guidance.INTENTS[intent][1]
@@ -91,10 +93,23 @@ def create(request: HttpRequest, store_id: int) -> HttpResponse:
                 return render(request, "store_app/create.html", context, status=409)
             if not prior:
                 services.engine()  # Require configuration only for a new request, not a replay.
-            job = services.submit(
-                store, form.cleaned_data["submission_key"], form.cleaned_data["brief"]
+            photo_manifest = (
+                photos.store_photo(
+                    store,
+                    form.cleaned_data["photo"],
+                    form.cleaned_data["photo_caption"],
+                    form.cleaned_data["photo_rights"],
+                )
+                if form.cleaned_data["photo"] is not None
+                else None
             )
-        except (AicmoError, services.StoreActionError):
+            job = services.submit(
+                store,
+                form.cleaned_data["submission_key"],
+                form.cleaned_data["brief"],
+                photo_manifest,
+            )
+        except (AicmoError, OSError, ValueError, services.StoreActionError):
             form.add_error(
                 None,
                 "접수하지 못했습니다. 진행 중인 작업을 확인하거나 운영자에게 문의해 주세요.",
@@ -111,9 +126,11 @@ def create(request: HttpRequest, store_id: int) -> HttpResponse:
 def detail(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
     job = services.owned_job(request.user, job_id)
     pack, approval_form, notice = None, None, str(job.notice)
+    selected_photos = []
     if job.state in ("waiting_approval", "success", "needs_work"):
         try:
             pack, pack_sha, photo_sha = services.preview(job)
+            selected_photos = parse_photos(job.inputs).photos
             approval_form = ApprovalForm(initial={"pack_sha": pack_sha, "photo_sha": photo_sha})
         except (AicmoError, OSError, ValueError, sqlite3.Error, services.StoreActionError):
             notice = "내용을 확인할 수 없습니다. 운영자에게 문의해 주세요."
@@ -127,6 +144,7 @@ def detail(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
             "notice": notice,
             "allowance": guidance.allowance(job.store),
             "has_edit": EditDraft.objects.filter(job=job).exists(),
+            "photos": selected_photos,
         },
     )
 

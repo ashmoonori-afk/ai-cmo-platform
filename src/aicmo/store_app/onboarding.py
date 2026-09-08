@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import unicodedata
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
 
-from django import forms
 from django.db import transaction
 from django.utils import timezone
 from pydantic import TypeAdapter
 
 from aicmo.onboarding import validate_answers
-from aicmo.redaction import contains_raw_secret, minimize_customer_pii
 from aicmo.store_app.forms import ONBOARDING_FORMS, onboarding_answers
+from aicmo.store_app.forms import (
+    clean_value as clean_value,  # noqa: PLC0414 — preserve public import
+)
 from aicmo.store_app.models import OnboardingDraft, Store
 from aicmo.store_app.services import StoreActionError
 
@@ -46,34 +45,6 @@ def validate_post(post: QueryDict, fields: set[str]) -> None:
     if set(post) - allowed or any(len(post.getlist(key)) != 1 for key in post):
         reason = "입력 항목을 확인할 수 없습니다. 화면을 다시 열어 주세요."
         raise StoreActionError(reason)
-
-
-def clean_value(raw: str, field: forms.Field) -> str:
-    allowed_controls = "\r\n\t" if isinstance(field.widget, forms.Textarea) else ""
-    if (
-        len(raw) > int(getattr(field, "max_length", 1200) or 1200)
-        or contains_raw_secret(raw)
-        or any(
-            (
-                unicodedata.category(char).startswith("C")
-                or unicodedata.category(char) in {"Zl", "Zp"}
-            )
-            and char not in allowed_controls
-            for char in raw
-        )
-    ):
-        reason = "입력 길이와 개인정보를 확인해 주세요. 비밀번호·인증 키는 저장하지 않습니다."
-        raise StoreActionError(reason)
-    if isinstance(field, forms.URLField) and raw:
-        url = urlsplit(raw)
-        if url.username is not None or url.password is not None:
-            reason = "로그인 정보가 포함된 주소는 저장하지 않습니다."
-            raise StoreActionError(reason)
-    value = minimize_customer_pii(raw.strip().replace("\r\n", "\n").replace("\r", "\n"))
-    if value and not any(unicodedata.category(char)[0] in "LNPS" for char in value):
-        reason = "눈에 보이는 글자로 입력해 주세요."
-        raise StoreActionError(reason)
-    return value
 
 
 def stored_values(draft: OnboardingDraft) -> dict[str, str]:

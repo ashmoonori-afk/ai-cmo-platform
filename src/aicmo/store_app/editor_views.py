@@ -12,6 +12,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from aicmo.errors import AicmoError
 from aicmo.local_pack import LocalPack, parse_brief
 from aicmo.pack_edits import digest, editable_values, pack_text
+from aicmo.photos import parse_photos
 from aicmo.store_app import editor, services
 from aicmo.store_app.models import EditVersion
 from aicmo.store_app.onboarding import validate_post
@@ -162,7 +163,13 @@ def confirmation(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
     return render(
         request,
         "store_app/edit_confirm.html",
-        {"job": job, "pack": pack, "form": form, "draft": draft},
+        {
+            "job": job,
+            "pack": pack,
+            "form": form,
+            "draft": draft,
+            "photos": parse_photos(job.inputs).photos,
+        },
         status=400 if request.method == "POST" else 200,
     )
 

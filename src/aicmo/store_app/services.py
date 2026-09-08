@@ -24,6 +24,7 @@ from aicmo.local_pack import WORKFLOW_ID, LocalPack, parse_brief, validate_pack
 from aicmo.models import ApprovalDecision, WorkflowStep
 from aicmo.pack_edits import EditApproval, EditBase
 from aicmo.paths import resolve_inside_repo
+from aicmo.photos import parse_photos, verify_photo_assets
 from aicmo.runner import WorkflowRunner
 from aicmo.source_input import prepare_workflow_inputs
 from aicmo.spec import load_workflow_spec
@@ -94,11 +95,26 @@ def reader() -> WorkflowRunner:
     return WorkflowRunner(root, WorkflowStore(root / ".aicmo/runs.sqlite3", read_only=True))
 
 
-def submit(store: Store, submission_key: uuid.UUID, brief: str) -> Job:
+def submit(
+    store: Store,
+    submission_key: uuid.UUID,
+    brief: str,
+    photos_json: str | None = None,
+    rewrite_json: str | None = None,
+) -> Job:
     inputs = {"client": str(store.client), "brief_json": brief}
+    if photos_json is not None:
+        inputs["photos_json"] = photos_json
+    if rewrite_json is not None:
+        inputs["rewrite_json"] = rewrite_json
     spec = load_workflow_spec(Path(settings.REPO_ROOT), WORKFLOW_ID)
     inputs = prepare_workflow_inputs(spec.inputs, inputs).values
     parse_brief(inputs)
+    photos = parse_photos(inputs).photos
+    if photos and (len(photos) != 1 or photos[0].news_index != 0):
+        reason = "웹 요청에는 첫 소식의 사진 1장만 넣을 수 있습니다."
+        raise StoreActionError(reason)
+    verify_photo_assets(Path(settings.REPO_ROOT), inputs)
     # No user-supplied client, path, workflow or executor reaches a job.
     try:
         with transaction.atomic():
@@ -120,7 +136,7 @@ def submit(store: Store, submission_key: uuid.UUID, brief: str) -> Job:
 def preview(job: Job) -> tuple[LocalPack, str, str]:
     runner = reader()
     inputs = runner.store.get_inputs(job.run_id)
-    if inputs.get("client") != job.store.client:
+    if inputs != job.inputs or inputs.get("client") != job.store.client:
         reason = "가게 연결을 확인할 수 없습니다. 운영자에게 문의해 주세요."
         raise StoreActionError(reason)
     path = f"artifacts/{job.run_id}/local-pack.json"
@@ -234,7 +250,11 @@ def download(job: Job) -> Path:
 
 def _job_inputs(job: Job, runner: WorkflowRunner) -> dict[str, str]:
     inputs = TypeAdapter(dict[str, str]).validate_python(job.inputs, strict=True)
-    if set(inputs) != {"client", "brief_json"} or inputs["client"] != job.store.client:
+    if (
+        not {"client", "brief_json"} <= inputs.keys()
+        or not inputs.keys() <= {"client", "brief_json", "photos_json", "rewrite_json"}
+        or inputs["client"] != job.store.client
+    ):
         reason = "invalid stored job inputs"
         raise StoreActionError(reason)
     spec = load_workflow_spec(runner.repo_root, WORKFLOW_ID)
@@ -242,6 +262,11 @@ def _job_inputs(job: Job, runner: WorkflowRunner) -> dict[str, str]:
         reason = "stored job privacy policy changed"
         raise StoreActionError(reason)
     parse_brief(inputs)
+    photos = parse_photos(inputs).photos
+    if photos and (len(photos) != 1 or photos[0].news_index != 0):
+        reason = "invalid stored photo selection"
+        raise StoreActionError(reason)
+    verify_photo_assets(runner.repo_root, inputs)
     return inputs
 
 
@@ -264,7 +289,13 @@ def _apply_approval(
         reason = "승인 버전이 바뀌었습니다. 운영자 확인이 필요합니다."
         raise StoreActionError(reason)
     if runner.store.approval_for(job.run_id, "owner_gate") is None:
-        runner.approve(job.run_id, "owner_gate", approval.reviewer, "웹에서 문안 확인")
+        runner.approve(
+            job.run_id,
+            "owner_gate",
+            approval.reviewer,
+            "웹에서 문안·사진 확인",
+            photos_reviewed=True,
+        )
     elif runner.store.approval_for(job.run_id, "owner_gate") != ApprovalDecision.APPROVED:
         reason = "승인 상태를 확인할 수 없습니다."
         raise StoreActionError(reason)
