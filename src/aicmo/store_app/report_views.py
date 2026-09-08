@@ -160,7 +160,27 @@ def detail(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
     return render(
         request,
         "store_app/report.html",
-        {"job": job, "report": report, "notice": notice, "actions": actions},
+        {
+            "job": job,
+            "report": report,
+            "notice": notice,
+            "actions": actions,
+            "totals": [
+                {
+                    "key": key,
+                    "label": outcome_views.METRIC_LABELS[key],
+                    "metric": metric,
+                    "change": (
+                        f"{metric.change_percent:+.1f}%"
+                        if metric.change_percent is not None
+                        else "비교 불가"
+                    ),
+                }
+                for key, metric in report.source.totals.items()
+            ]
+            if report is not None
+            else [],
+        },
         status=status,
     )
 

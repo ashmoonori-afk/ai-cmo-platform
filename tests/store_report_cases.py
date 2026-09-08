@@ -11,6 +11,7 @@ import time
 import uuid
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, cast
@@ -22,6 +23,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import DatabaseError, connection
 from django.http import Http404, QueryDict
 from django.test import Client, TransactionTestCase, override_settings
+from django.utils.html import escape
 
 from aicmo import outcomes
 from aicmo.errors import WorkflowExecutionError
@@ -165,7 +167,7 @@ class ReportTests(TransactionTestCase):
         self.assertFalse((self.root / "artifacts").exists())
 
     def test_request_review_delivery_replay_and_correction_keep_report_snapshot_fixed(self) -> None:
-        self.seed()
+        self.seed(posts=2)
         configure_quota(self.runner.store, "shop", current_period(), 2, 4)
         quota = quota_status(self.runner.store, "shop", current_period())
         token = self.token()
@@ -174,14 +176,14 @@ class ReportTests(TransactionTestCase):
         pending = self.client.get(self.report_url(job))
         self.assertEqual((pending.status_code, pending.context["report"]), (200, None))
         self.assertEqual(self.client.post(self.report_url(job) + "download/").status_code, 409)
-        self.seed(posts=4)  # The worker must use the queued snapshot, not today's ledger.
+        self.seed(posts=3)  # The worker must use the queued snapshot, not today's ledger.
         self.work(job)
         self.assertEqual(job.state, "success")
         inputs, contents = verified_delivery(self.runner, job.run_id, "weekly-report")
         raw = contents[f"artifacts/{job.run_id}/weekly-report.md"]
         snapshot = outcomes.OutcomeSnapshot.model_validate_json(inputs["outcomes_snapshot_json"])
-        self.assertEqual(snapshot.current[0].posts, 1)
-        self.assertIn("| 게시 | 1 | 1/7", raw.decode())
+        self.assertEqual(snapshot.current[0].posts, 2)
+        self.assertIn("| 게시 | 2 | 1/7", raw.decode())
         before = self.dump()
         shown = self.client.get(self.report_url(job))
         self.assertEqual(shown.status_code, 200)
@@ -218,6 +220,123 @@ class ReportTests(TransactionTestCase):
             (quota, 2),
         )
         self.assertFalse((self.root / "knowledge-base").exists())
+
+    def test_summary_and_collapsed_original_keep_verified_source_when_ledger_changes(self) -> None:
+        self.seed(posts=2)
+        job = self.submit()
+        self.assertNotContains(self.client.get(self.report_url(job)), 'id="report-summary"')
+        self.seed(posts=3)
+        source = outcomes.OutcomeSnapshot.model_validate_json(job.inputs["outcomes_snapshot_json"])
+        marker = '<script>alert("synthetic-report-only")</script><a href="/unsafe">원문</a>'
+        generated = (
+            outcomes.weekly_outcomes_report(
+                self.root, self.runner.store, "shop", WEEK, "naver", snapshot=source
+            )
+            + marker
+            + "\n"
+        )
+        # Inject before the real worker writes and reviews bytes, never after approval.
+        with patch("aicmo.step_executor.weekly_outcomes_report", return_value=generated):
+            self.work(job)
+        raw = report_services.verify(job).raw
+        before = self.dump()
+        shown = self.client.get(self.report_url(job))
+        self.assertEqual(shown.status_code, 200)
+        self.assertContains(shown, "성과 기록이 정정되었습니다")
+        with patch(
+            "aicmo.store_app.outcome_services.read", side_effect=OSError(SECRET)
+        ):
+            unreadable = self.client.get(self.report_url(job))
+        self.assertEqual(unreadable.status_code, 200)
+        self.assertIsNone(unreadable.context["report"].current)
+        self.assertContains(unreadable, "현재 기록과 같은지 확인할 수 없습니다")
+        self.assertNotContains(unreadable, SECRET)
+        for response in (shown, unreadable):
+            self.assertEqual(response.context["report"].raw, raw)
+            for key, label, value, days in (
+                ("posts", "게시", "<strong>2건</strong>", 1),
+                ("inquiries", "문의", "미입력", 0),
+                ("reservations", "예약", "<strong>0건</strong>", 1),
+                ("coupon_redemptions", "쿠폰 사용", "미입력", 0),
+            ):
+                self.assertContains(
+                    response,
+                    f'<div id="report-metric-{key}"><dt><strong>{label}</strong></dt>'
+                    f"<dd>이번 주 {value} · 입력 {days}/7일<br>"
+                    "지난주 미입력 · 입력 0/7일<br>증감률: 비교 불가</dd></div>",
+                    html=True,
+                )
+            self.assertContains(response, escape(marker))
+            self.assertNotContains(response, marker)
+            self.assertContains(response, f'<pre class="copy">{escape(raw.decode())}</pre>')
+        html = shown.content.decode()
+        self.assertLess(html.index('id="report-summary"'), html.index('id="next-actions"'))
+        self.assertLess(html.index('id="next-actions"'), html.index('id="report-original"'))
+        self.assertContains(shown, '<details id="report-original" class="card">', count=1)
+        self.assertContains(shown, '<summary id="report-body">검토한 보고서 원문 펼치기</summary>')
+        for target in ("report-summary", "next-actions"):
+            self.assertContains(shown, f'href="#{target}"', count=1)
+            self.assertContains(shown, f'<h2 id="{target}" tabindex="-1">', count=1)
+        self.assertContains(shown, 'href="#report-body"', count=1)
+        self.assertEqual(len(re.findall(r'<form id="action-[^"]+"', html)), 3)
+        ids = re.findall(r'\bid="([^"]+)"', html)
+        self.assertEqual(len(ids), len(set(ids)))
+        downloaded = self.client.post(self.report_url(job) + "download/")
+        self.assertEqual((downloaded.status_code, b"".join(downloaded)), (200, raw))
+        downloaded.close()
+        self.assertEqual(self.dump(), before)
+        self.assertEqual(Job.objects.count(), 1)
+        self.assertFalse((self.root / "knowledge-base").exists())
+
+    def test_complete_week_summary_matches_reviewed_percent_and_zero_denominator(self) -> None:
+        for week, posts, coupons in (("2026-08-24", 1, 1), (WEEK, 2, 0)):
+            first = date.fromisoformat(week)
+            rows = [
+                f"{first + timedelta(days=offset)},naver,{posts},,0,{coupons}"
+                for offset in range(7)
+            ]
+            raw = (
+                "date,channel,posts,inquiries,reservations,coupon_redemptions\n"
+                + "\n".join(rows)
+                + "\n"
+            ).encode()
+            preview = outcomes.preview_outcomes_bytes(
+                self.root, self.runner.store, "shop", week, "naver", raw
+            )
+            outcomes.import_outcomes_bytes(
+                self.root,
+                self.runner.store,
+                "shop",
+                week,
+                "naver",
+                raw,
+                preview.confirmation_sha256,
+                provenance=outcomes.OutcomeImportSource(
+                    kind="web_csv", recorded_by=f"web-user:{self.owner.pk}"
+                ),
+            )
+        job = self.submit()
+        self.work(job)
+        before = self.dump()
+        shown = self.client.get(self.report_url(job))
+        self.assertEqual(shown.status_code, 200)
+        for key, label, current, previous, days, change in (
+            ("posts", "게시", "<strong>14건</strong>", "7건", 7, "+100.0%"),
+            ("inquiries", "문의", "미입력", "미입력", 0, "비교 불가"),
+            ("reservations", "예약", "<strong>0건</strong>", "0건", 7, "비교 불가"),
+            ("coupon_redemptions", "쿠폰 사용", "<strong>0건</strong>", "7건", 7, "-100.0%"),
+        ):
+            self.assertContains(
+                shown,
+                f'<div id="report-metric-{key}"><dt><strong>{label}</strong></dt>'
+                f"<dd>이번 주 {current} · 입력 {days}/7일<br>"
+                f"지난주 {previous} · 입력 {days}/7일<br>증감률: {change}</dd></div>",
+                html=True,
+            )
+        self.assertContains(shown, "| 게시 | 14 | 7/7 | 7 | 7/7 | +100.0% |")
+        self.assertContains(shown, "| 예약 | 0 | 7/7 | 0 | 7/7 | 비교 불가")
+        self.assertContains(shown, "| 쿠폰 사용 | 0 | 7/7 | 7 | 7/7 | -100.0% |")
+        self.assertEqual(self.dump(), before)
 
     def test_invalid_metadata_expiry_and_unsubmitted_stale_digest_create_no_job(self) -> None:
         self.seed()
@@ -424,6 +543,8 @@ class ReportTests(TransactionTestCase):
                 self.assertNotContains(response, SECRET, status_code=409)
                 self.assertNotContains(response, "| 게시 | 1 | 1/7", status_code=409)
                 self.assertNotContains(response, "저장 가능", status_code=409)
+                self.assertNotContains(response, 'id="report-summary"', status_code=409)
+                self.assertNotContains(response, 'id="next-actions"', status_code=409)
                 self.assertEqual(self.client.post(url + "download/").status_code, 409)
             finally:
                 path.write_bytes(raw)
@@ -455,6 +576,7 @@ class ReportTests(TransactionTestCase):
         shown = self.client.get(url)
         self.assertEqual(shown.status_code, 200)
         self.assertIsNone(shown.context["report"])
+        self.assertNotContains(shown, 'id="report-summary"')
         self.assertEqual(self.client.post(url + "download/").status_code, 409)
         Job.objects.filter(pk=job.pk).update(state="success")
         forged = self.client.get(url)
@@ -462,4 +584,6 @@ class ReportTests(TransactionTestCase):
         self.assertIsNone(forged.context["report"])
         self.assertNotContains(forged, "| 게시 | 1 | 1/7", status_code=409)
         self.assertNotContains(forged, "저장 가능", status_code=409)
+        self.assertNotContains(forged, 'id="report-summary"', status_code=409)
+        self.assertNotContains(forged, 'id="next-actions"', status_code=409)
         self.assertEqual(self.client.post(url + "download/").status_code, 409)
