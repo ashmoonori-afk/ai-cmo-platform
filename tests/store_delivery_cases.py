@@ -57,7 +57,9 @@ class DeliveryTests(TransactionTestCase):
             if photo
             else None
         )
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], manifest)
+        job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], manifest, actor=self.owner
+        )
         self.tick()
         job.refresh_from_db()
         _, pack_sha, photo_sha = services.preview(job)
@@ -132,7 +134,7 @@ class DeliveryTests(TransactionTestCase):
         self.assertEqual(self.client.get(f"/jobs/{job.id}/delivery/").status_code, 302)
 
     def test_unapproved_warn_and_forged_web_success_never_expose_cards(self) -> None:
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"])
+        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], actor=self.owner)
         self.assertEqual(self.client.get(f"/jobs/{job.id}/delivery/").status_code, 409)
         self.tick()
         self.assertEqual(self.client.get(f"/jobs/{job.id}/delivery/").status_code, 409)

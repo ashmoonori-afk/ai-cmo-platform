@@ -55,9 +55,7 @@ def home(request: HttpRequest) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 @never_cache
 def create(request: HttpRequest, store_id: int) -> HttpResponse:
-    store = services.allowed_stores(request.user).filter(pk=store_id).first()
-    if store is None:
-        raise Http404
+    store = services.owned_store(request.user, store_id)
     active = guidance.active_job(store)
     if active is not None:
         messages.info(
@@ -93,21 +91,25 @@ def create(request: HttpRequest, store_id: int) -> HttpResponse:
                 return render(request, "store_app/create.html", context, status=409)
             if not prior:
                 services.engine()  # Require configuration only for a new request, not a replay.
-            photo_manifest = (
-                photos.store_photo(
-                    store,
-                    form.cleaned_data["photo"],
-                    form.cleaned_data["photo_caption"],
-                    form.cleaned_data["photo_rights"],
-                )
-                if form.cleaned_data["photo"] is not None
-                else None
-            )
+            photo_manifest = None
+            if form.cleaned_data["photo"] is not None:
+                # The request has already been read and normalized outside the write lock.
+                with transaction.atomic():
+                    current = services.owned_store(services.fresh_actor(request.user), store_id)
+                    if current.client != store.client:
+                        raise Http404
+                    photo_manifest = photos.store_photo(
+                        current,
+                        form.cleaned_data["photo"],
+                        form.cleaned_data["photo_caption"],
+                        form.cleaned_data["photo_rights"],
+                    )
             job = services.submit(
                 store,
                 form.cleaned_data["submission_key"],
                 form.cleaned_data["brief"],
                 photo_manifest,
+                actor=request.user,
             )
         except (AicmoError, OSError, ValueError, services.StoreActionError):
             form.add_error(
@@ -161,7 +163,7 @@ def approve(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
                 job,
                 form.cleaned_data["pack_sha"],
                 form.cleaned_data["photo_sha"],
-                str(request.user.pk),
+                request.user,
             )
         except (AicmoError, OSError, ValueError, sqlite3.Error, services.StoreActionError):
             return render(
@@ -186,9 +188,8 @@ def approve(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
 @require_POST
 @never_cache
 def cancel(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
-    with transaction.atomic():
-        job = services.owned_job(request.user, job_id)
-        services.request_cancel(job)
+    job = services.owned_job(request.user, job_id)
+    services.request_cancel(job, request.user)
     return redirect("job", job_id=job.id)
 
 

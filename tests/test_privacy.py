@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from contextlib import closing
@@ -12,10 +13,10 @@ from unittest.mock import Mock
 import pytest
 from typer.testing import CliRunner
 
-from aicmo.adapters import CommandAdapter
+from aicmo.adapters import AgentRequest, AgentResult, CommandAdapter
 from aicmo.cli import app, ingest_inbox
 from aicmo.errors import WorkflowExecutionError
-from aicmo.redaction import contains_raw_secret, redact
+from aicmo.redaction import contains_raw_secret, redact, safe_diagnostic_message
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 
@@ -61,6 +62,45 @@ def test_failed_executor_stderr_secrets_absent_from_events(repo_root: Path) -> N
     # Diagnostics stay useful and legitimate client context stays intact.
     assert "executor exited 3" in blob
     assert "보안 점검" in blob
+
+
+def test_adapter_exception_minimizes_diagnostics_without_rewriting_identifiers(
+    repo_root: Path,
+) -> None:
+    phone = "010-9876-5432"
+    email = "customer@example.test"
+
+    class RaisingAdapter:
+        def generate(self, _request: AgentRequest, /) -> AgentResult:
+            reason = f"upstream failed: {phone} {email} api_key={_AWS_KEY}"
+            raise RuntimeError(reason)
+
+    run_id = "run-010-1234-5678"
+    db = repo_root / ".aicmo" / "runs.sqlite3"
+    store = WorkflowStore(db)
+    runner = WorkflowRunner(repo_root=repo_root, store=store, adapter=RaisingAdapter())
+    result = runner.run("blog-article", run_id, _INPUTS)
+    assert result.status == "failed"
+    assert result.run_id == run_id
+    blob = _persisted_diagnostics(db)
+    assert all(value not in blob for value in (phone, email, _AWS_KEY))
+    assert "upstream failed" in blob
+    assert "[customer-phone]" in blob
+    assert "[customer-email]" in blob
+    identifiers = {"artifact_id": "item-010-1234-5678", "sha256": "01012345678" + "1" * 53}
+    store.record_event(run_id, None, "synthetic.identifier-check", "identity", identifiers)
+    with closing(sqlite3.connect(db)) as connection:
+        stored_id, payload = connection.execute(
+            "select run_id, payload_json from events where event_type=?",
+            ("synthetic.identifier-check",),
+        ).fetchone()
+    assert stored_id == run_id
+    assert json.loads(payload) == identifiers
+    # Oversized JSON nesting in an upstream error cannot prevent failure recording.
+    nested = "[" * 1500 + json.dumps(email) + "]" * 1500
+    assert safe_diagnostic_message(nested) == "[diagnostic omitted: privacy inspection limit]"
+    store.record_event(run_id, None, "synthetic.nested-error", nested)
+    assert email not in _persisted_diagnostics(db)
 
 
 def test_ingest_dry_run_masks_signed_url_values(

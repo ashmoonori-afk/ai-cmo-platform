@@ -51,6 +51,7 @@ def edit(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
                         if name not in ("base_token", "revision")
                     },
                     checkpoint=action == "checkpoint",
+                    actor=request.user,
                 )
                 if asynchronous:
                     return JsonResponse(
@@ -126,7 +127,7 @@ def confirmation(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
                     form.cleaned_data["revision"],
                     form.cleaned_data["base_token"],
                     form.cleaned_data["edited_sha"],
-                    str(request.user.pk),
+                    request.user,
                 )
                 return redirect("job", job_id=job.id)
             return render(
@@ -189,6 +190,7 @@ def restore(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
                 form.cleaned_data["base_token"],
                 form.cleaned_data["revision"],
                 restore=form.cleaned_data["version"],
+                actor=request.user,
             )
             return redirect("edit", job_id=job.id)
     except _ERRORS:

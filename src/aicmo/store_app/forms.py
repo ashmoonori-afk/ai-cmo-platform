@@ -278,6 +278,12 @@ class StorePurposeForm(forms.Form):
 
 
 class OnboardingConfirmForm(forms.Form):
+    def full_clean(self) -> None:
+        super().full_clean()
+        if self.is_bound:
+            # Failed metadata must not survive into hidden inputs on the error page.
+            self.data = dict(self.cleaned_data)
+
     revision = forms.IntegerField(min_value=0, widget=forms.HiddenInput)
     checked = forms.BooleanField(
         label="입력한 사실과 사용 권리를 확인했습니다. 빈 항목은 미확인으로 남깁니다."

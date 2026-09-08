@@ -85,7 +85,11 @@ class PhotoTests(TransactionTestCase):
         self.assertNotIn("private-owner-filename", json.dumps(job.inputs))
         self.assertEqual(
             services.submit(
-                self.store, job.submission_key, job.inputs["brief_json"], job.inputs["photos_json"]
+                self.store,
+                job.submission_key,
+                job.inputs["brief_json"],
+                job.inputs["photos_json"],
+                actor=self.owner,
             ).pk,
             job.pk,
         )
@@ -93,7 +97,11 @@ class PhotoTests(TransactionTestCase):
         changed["photos"][0]["caption"] = "변경한 사진 설명"
         with self.assertRaises(services.StoreActionError):
             services.submit(
-                self.store, job.submission_key, job.inputs["brief_json"], json.dumps(changed)
+                self.store,
+                job.submission_key,
+                job.inputs["brief_json"],
+                json.dumps(changed),
+                actor=self.owner,
             )
         response = self.client.get(f"/jobs/{job.id}/photo/")
         self.assertEqual(response.status_code, 200)
@@ -154,7 +162,9 @@ class PhotoTests(TransactionTestCase):
         manifest = photos.store_photo(
             self.store, normalize_photo(upload().read()), "가게 사진", "own_photo"
         )
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], manifest)
+        job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], manifest, actor=self.owner
+        )
         photo = parse_photos(job.inputs).photos[0]
         other = User.objects.create_user("photo-other")
         self.client.force_login(other)
@@ -172,7 +182,9 @@ class PhotoTests(TransactionTestCase):
     def test_photo_namespace_junction_never_writes_or_previews_redirected_asset(self) -> None:
         normalized = normalize_photo(upload().read())
         manifest = photos.store_photo(self.store, normalized, "사진", "own_photo")
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], manifest)
+        job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], manifest, actor=self.owner
+        )
         photo = parse_photos(job.inputs).photos[0]
         target = asset_path(self.root, "shop", photo.sha256).parent
         redirected = self.root / "redirected-photos"
@@ -204,7 +216,9 @@ class PhotoTests(TransactionTestCase):
         manifest = photos.store_photo(
             self.store, normalize_photo(upload().read()), "원래 사진", "own_photo"
         )
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], manifest)
+        job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], manifest, actor=self.owner
+        )
         self.assertTrue(self.tick())
         job.refresh_from_db()
         _, pack_sha, photo_sha = services.preview(job)
@@ -234,7 +248,9 @@ class PhotoTests(TransactionTestCase):
         manifest = photos.store_photo(
             self.store, normalize_photo(upload().read()), "사진", "own_photo"
         )
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], manifest)
+        job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], manifest, actor=self.owner
+        )
         missing = self.root / "missing-runs.sqlite3"
         reader = replace(self.runner, store=WorkflowStore(missing, read_only=True))
         with patch("aicmo.store_app.photos.services.reader", return_value=reader):

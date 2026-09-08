@@ -58,6 +58,23 @@ def allowed_stores(user: AbstractBaseUser | AnonymousUser) -> QuerySet[Store]:
     return Store.objects.filter(owner_id=user.pk)
 
 
+def fresh_actor(user: AbstractBaseUser | AnonymousUser) -> User:
+    """Re-read authority inside the caller's write transaction, without permission caches."""
+    actor = (
+        User.objects.filter(pk=user.pk, is_active=True).first() if isinstance(user, User) else None
+    )
+    if actor is None:
+        raise Http404
+    return actor
+
+
+def owned_store(user: AbstractBaseUser | AnonymousUser, store_id: int) -> Store:
+    store = allowed_stores(user).filter(pk=store_id).first()
+    if store is None:
+        raise Http404
+    return store
+
+
 def owned_job(user: AbstractBaseUser | AnonymousUser, job_id: uuid.UUID) -> Job:
     job = Job.objects.filter(pk=job_id, store__in=allowed_stores(user)).first()
     if job is None:
@@ -101,6 +118,8 @@ def submit(
     brief: str,
     photos_json: str | None = None,
     rewrite_json: str | None = None,
+    *,
+    actor: AbstractBaseUser | AnonymousUser,
 ) -> Job:
     inputs = {"client": str(store.client), "brief_json": brief}
     if photos_json is not None:
@@ -118,6 +137,10 @@ def submit(
     # No user-supplied client, path, workflow or executor reaches a job.
     try:
         with transaction.atomic():
+            current = owned_store(fresh_actor(actor), store.pk)
+            if current.client != store.client:
+                raise Http404
+            store = current
             prior = Job.objects.filter(store=store, submission_key=submission_key).first()
             if prior is not None:
                 if prior.inputs != inputs:
@@ -126,9 +149,13 @@ def submit(
                 return prior
             return Job.objects.create(store=store, submission_key=submission_key, inputs=inputs)
     except IntegrityError:
-        prior = Job.objects.filter(store=store, submission_key=submission_key).first()
-        if prior is not None and prior.inputs == inputs:
-            return prior
+        with transaction.atomic():
+            current = owned_store(fresh_actor(actor), store.pk)
+            if current.client != store.client:
+                raise Http404 from None
+            prior = Job.objects.filter(store=current, submission_key=submission_key).first()
+            if prior is not None and prior.inputs == inputs:
+                return prior
         reason = "진행 중인 작업을 먼저 확인하거나 취소해 주세요."
         raise StoreActionError(reason) from None
 
@@ -151,7 +178,9 @@ def preview(job: Job) -> tuple[LocalPack, str, str]:
     return validate_pack(raw.decode("utf-8"), inputs), digest, photo_digest
 
 
-def request_approval(job: Job, pack_sha: str, photo_sha: str, user_id: str) -> None:
+def request_approval(
+    job: Job, pack_sha: str, photo_sha: str, actor: AbstractBaseUser | AnonymousUser
+) -> None:
     with web_run_lock(Path(settings.REPO_ROOT), job.run_id, blocking=False):
         _, current_pack, current_photo = preview(job)
         if (pack_sha, photo_sha) != (current_pack, current_photo):
@@ -163,13 +192,15 @@ def request_approval(job: Job, pack_sha: str, photo_sha: str, user_id: str) -> N
                     "schema_version": "aicmo.web-approval.v1",
                     "pack_sha": pack_sha,
                     "photo_sha": photo_sha,
-                    "reviewer": f"web-user:{user_id}",
+                    "reviewer": f"web-user:{actor.pk}",
                     "requested_at": timezone.now().isoformat(),
                 }
             )
         ).model_dump(mode="json")
         with transaction.atomic():
-            current = Job.objects.select_for_update().get(pk=job.pk)
+            current = owned_job(fresh_actor(actor), job.pk)
+            if current.inputs != job.inputs or current.store.client != job.store.client:
+                raise Http404
             if EditDraft.objects.filter(job=current).exists():
                 reason = "저장된 수정본의 미리보기에서 확인해 주세요."
                 raise StoreActionError(reason)
@@ -192,10 +223,13 @@ def request_approval(job: Job, pack_sha: str, photo_sha: str, user_id: str) -> N
             current.save(update_fields=["approval", "state", "updated_at"])
 
 
-def request_cancel(job: Job) -> None:
-    Job.objects.filter(pk=job.pk, state__in=["queued", "running", "waiting_approval"]).update(
-        cancel_requested=True
-    )
+def request_cancel(job: Job, actor: AbstractBaseUser | AnonymousUser) -> None:
+    # Cancellation intent must remain writable while the worker holds the run lock.
+    with transaction.atomic():
+        current = owned_job(fresh_actor(actor), job.pk)
+        Job.objects.filter(
+            pk=current.pk, state__in=["queued", "running", "waiting_approval"]
+        ).update(cancel_requested=True)
 
 
 def cancel(job: Job, runner: WorkflowRunner) -> None:

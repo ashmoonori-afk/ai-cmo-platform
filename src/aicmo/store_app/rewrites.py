@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from django import forms
 from django.contrib.auth.decorators import login_required
 from django.core import signing
+from django.db import transaction
+from django.http import Http404
 from django.shortcuts import redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
@@ -24,6 +26,7 @@ from aicmo.store_app.onboarding import clean_value, validate_post
 from aicmo.web_run_lock import web_run_lock
 
 if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
     from django.http import HttpRequest, HttpResponse
 
 _SALT = "aicmo.web-rewrite.v1"
@@ -34,6 +37,7 @@ class RewriteForm(forms.Form):
     action = forms.ChoiceField(
         label="어떻게 다시 쓸까요?",
         choices=[("shorten", "짧게"), ("friendly", "친근하게"), ("price", "가격·기간·혜택 수정")],
+        error_messages={"invalid_choice": "다시 쓸 방법을 목록에서 선택해 주세요."},
     )
     fact = forms.CharField(
         label="이번 소식의 확인된 사실 전체",
@@ -107,7 +111,10 @@ def prepare(job: Job, runner: WorkflowRunner, form: RewriteForm, user_id: str) -
     }
 
 
-def submit(job: Job, runner: WorkflowRunner, token: str, user_id: str) -> Job:
+def submit(
+    job: Job, runner: WorkflowRunner, token: str, actor: AbstractBaseUser | AnonymousUser
+) -> Job:
+    user_id = str(actor.pk)
     payload = TypeAdapter(dict[str, str]).validate_python(
         signing.loads(token, salt=_SALT, max_age=3600), strict=True
     )
@@ -148,13 +155,22 @@ def submit(job: Job, runner: WorkflowRunner, token: str, user_id: str) -> Job:
                 reason = "새 요청의 사용 가능 건수가 부족합니다."
                 raise services.StoreActionError(reason)
             services.engine()  # Validate configuration without generating or charging.
-        return services.submit(
-            job.store,
-            key,
-            payload["brief_json"],
-            rewrite_json=payload["rewrite_json"],
-            photos_json=payload["photos_json"] or None,
-        )
+        with transaction.atomic():
+            current = services.owned_job(services.fresh_actor(actor), job.pk)
+            if (
+                current.inputs != job.inputs
+                or current.store.pk != job.store.pk
+                or current.store.client != job.inputs.get("client")
+            ):
+                raise Http404
+            return services.submit(
+                current.store,
+                key,
+                payload["brief_json"],
+                rewrite_json=payload["rewrite_json"],
+                photos_json=payload["photos_json"] or None,
+                actor=actor,
+            )
 
 
 @login_required
@@ -175,7 +191,7 @@ def rewrite(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
             if not confirmation.is_valid():
                 reason = "사용 건수 동의 후 요청을 다시 확인해 주세요."
                 raise services.StoreActionError(reason)
-            next_job = submit(job, runner, confirmation.cleaned_data["token"], str(request.user.pk))
+            next_job = submit(job, runner, confirmation.cleaned_data["token"], request.user)
             return redirect("job", job_id=next_job.id)
         with web_run_lock(runner.repo_root, job.run_id, blocking=False):
             _, pack, _ = source(job, runner)
@@ -192,7 +208,9 @@ def rewrite(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
                         "checked": request.POST.get("checked", ""),
                     }
                 )
-                if form.is_valid():
+                valid = form.is_valid()
+                form.data = dict(form.cleaned_data)  # Render validated values only on errors.
+                if valid:
                     payload = prepare(job, runner, form, str(request.user.pk))
                     context.update(
                         fact=form.cleaned_data["fact"],

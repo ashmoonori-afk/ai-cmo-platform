@@ -54,7 +54,7 @@ class StoreAppTests(TransactionTestCase):
         self.client.force_login(self.owner)
 
     def submit(self) -> Job:
-        return services.submit(self.store, uuid.uuid4(), _brief()["brief_json"])
+        return services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], actor=self.owner)
 
     def tick(self) -> bool:
         with patch("aicmo.store_app.management.commands.work.engine", return_value=self.runner):
@@ -157,10 +157,12 @@ class StoreAppTests(TransactionTestCase):
 
     def test_same_submission_is_idempotent_and_conflicts_rejected(self) -> None:
         key = uuid.uuid4()
-        first = services.submit(self.store, key, _brief()["brief_json"])
-        self.assertEqual(first.pk, services.submit(self.store, key, _brief()["brief_json"]).pk)
+        first = services.submit(self.store, key, _brief()["brief_json"], actor=self.owner)
+        self.assertEqual(
+            first.pk, services.submit(self.store, key, _brief()["brief_json"], actor=self.owner).pk
+        )
         with self.assertRaises(services.StoreActionError):
-            services.submit(self.store, key, _brief(minutes=5)["brief_json"])
+            services.submit(self.store, key, _brief(minutes=5)["brief_json"], actor=self.owner)
         with self.assertRaises(services.StoreActionError):
             self.submit()
 
@@ -170,7 +172,7 @@ class StoreAppTests(TransactionTestCase):
         def send(_index: int) -> uuid.UUID:
             close_old_connections()
             try:
-                return services.submit(self.store, key, _brief()["brief_json"]).pk
+                return services.submit(self.store, key, _brief()["brief_json"], actor=self.owner).pk
             finally:
                 close_old_connections()
 
@@ -181,7 +183,7 @@ class StoreAppTests(TransactionTestCase):
 
     def test_cancel_before_start_and_during_generation(self) -> None:
         job = self.submit()
-        services.request_cancel(job)
+        services.request_cancel(job, self.owner)
         self.tick()
         job.refresh_from_db()
         self.assertEqual(job.state, "cancelled")
@@ -190,7 +192,7 @@ class StoreAppTests(TransactionTestCase):
         original = PackAdapter.generate
 
         def generate(adapter: PackAdapter, request: AgentRequest) -> AgentResult:
-            services.request_cancel(second)
+            services.request_cancel(second, self.owner)
             return original(adapter, request)
 
         with patch.object(PackAdapter, "generate", generate):
@@ -252,7 +254,7 @@ class StoreAppTests(TransactionTestCase):
         with patch("aicmo.store_app.management.commands.work.engine", side_effect=AssertionError):
             self.assertFalse(run_one())
             job = self.submit()
-            services.request_cancel(job)
+            services.request_cancel(job, self.owner)
             self.assertTrue(run_one())
         job.refresh_from_db()
         self.assertEqual(job.state, "cancelled")
@@ -276,7 +278,7 @@ class StoreAppTests(TransactionTestCase):
         self.assertTrue(
             all(row["status"] == "success" for row in self.runner.store.list_steps(job.run_id))
         )
-        services.request_cancel(job)
+        services.request_cancel(job, self.owner)
         with patch("aicmo.store_app.management.commands.work.engine", side_effect=AssertionError):
             self.assertTrue(run_one())
         job.refresh_from_db()

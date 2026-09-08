@@ -20,6 +20,10 @@ import pytest
         "tests.store_rewrite_cases",
         "tests.store_delivery_cases",
         "tests.store_publication_cases",
+        "tests.store_authority_cases",
+        "tests.store_onboarding_metadata_cases",
+        "tests.store_boundary_cases",
+        "tests.store_upload_boundary_cases",
     ],
 )
 def test_django_store_app(tmp_path: Path, label: str) -> None:

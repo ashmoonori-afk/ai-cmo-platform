@@ -44,12 +44,14 @@ class PublicationTests(TransactionTestCase):
         self.store = Store.objects.create(owner=self.owner, name="합성 가게", client="shop")
         self.client.force_login(self.owner)
         configure_quota(self.runner.store, "shop", current_period(), 2, 4)
-        self.job = services.submit(self.store, uuid.uuid4(), _brief(reviews=1)["brief_json"])
+        self.job = services.submit(
+            self.store, uuid.uuid4(), _brief(reviews=1)["brief_json"], actor=self.owner
+        )
         with patch("aicmo.store_app.management.commands.work.engine", return_value=self.runner):
             self.assertTrue(run_one())
             self.job.refresh_from_db()
             _, pack_sha, photo_sha = services.preview(self.job)
-            services.request_approval(self.job, pack_sha, photo_sha, str(self.owner.pk))
+            services.request_approval(self.job, pack_sha, photo_sha, self.owner)
             self.assertTrue(run_one())
         self.job.refresh_from_db()
         self.assertEqual(self.job.state, "success")

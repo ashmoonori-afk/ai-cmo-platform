@@ -13,6 +13,8 @@ from aicmo.store_app import (
     views,
 )
 
+handler400 = "aicmo.store_app.uploads.upload_bad_request"
+
 urlpatterns = [
     path("", views.home, name="home"),
     path("archive/", archive.index, name="archive"),
