@@ -1,0 +1,69 @@
+{% extends "store_app/base.html" %}
+{% block title %}승인 문안 복사·직접 게시 · 우리 가게 홍보{% endblock %}
+{% block content %}
+<style>.copy-button[hidden]{display:none}</style>
+<h1>{{ job.store.name }} · 승인 문안 복사</h1>
+<p><span class="badge">사장님 확인 · 최종 검토 완료</span></p>
+<p>승인된 문안과 사진을 다시 확인했습니다. 복사·파일 저장·채널 열기는 외부 게시 완료를 뜻하지 않습니다.</p>
+<section class="card" aria-labelledby="delivery-steps">
+  <h2 id="delivery-steps">직접 게시하는 순서</h2>
+  <ol>
+    <li>아래 문안을 복사하고 스마트플레이스에서 내 업체를 선택하세요. 소식은 ‘소식’, 답글은 ‘리뷰 → 방문자리뷰’에서 해당 항목을 찾으세요.</li>
+    <li>제목과 본문을 각 입력란에 붙여 넣고 가격·기간·대상을 다시 확인하세요. 첨부 사진이 있으면 ZIP을 저장해 압축을 풀고 안내된 사진 파일을 직접 선택하세요.</li>
+    <li>사장님이 네이버에서 최종 등록을 누른 뒤 해당 문안 아래에 직접 게시한 날짜를 기록하세요. 답글 등록 시 고객에게 알림이 갈 수 있습니다.</li>
+  </ol>
+  <div class="actions">
+    <a class="button" href="https://smartplace.naver.com/" target="_blank" rel="noopener noreferrer">네이버 스마트플레이스 열기 (새 탭)</a>
+    <form method="post" action="{% url 'download' job.id %}">{% csrf_token %}<button class="secondary">실행팩 ZIP 저장</button></form>
+  </div>
+  <p class="muted">복사와 반복 저장은 새 문안을 생성하거나 사용 건수를 추가 차감하지 않습니다.</p>
+</section>
+{% include "store_app/photo.html" %}
+{% for row in rows %}{% with card=row.card %}
+<article class="card" id="{{ card.key }}" aria-labelledby="title-{{ card.key }}">
+  <h2 id="title-{{ card.key }}">{{ card.title }}</h2>
+  <label for="copy-{{ card.key }}">승인된 평문 문안</label>
+  <textarea id="copy-{{ card.key }}" rows="8" readonly spellcheck="false" aria-describedby="help-{{ card.key }}">
+{{ card.text }}</textarea>
+  <p class="helptext" id="help-{{ card.key }}">버튼을 사용할 수 없으면 문안 칸을 선택해 직접 복사하세요. ZIP의 {{ card.key }}.txt와 같은 문안입니다.</p>
+  {% with data_id="copy-data-"|add:card.key %}{{ card.text|json_script:data_id }}{% endwith %}
+  <button type="button" class="copy-button" data-card="{{ card.key }}" hidden>{{ card.title }} 문안 복사</button>
+  <p id="copy-status-{{ card.key }}" role="status" aria-live="polite" aria-atomic="true"></p>
+  {% if card.photo_filename %}<p>사장님이 사용 권리·개인정보를 확인한 사진: ZIP의 <code>{{ card.photo_filename }}</code>를 직접 첨부하세요. 문안 복사에는 사진이 포함되지 않습니다.</p>{% elif 'news-' in card.key %}<p>첨부된 사진이 없습니다. 문안만 복사됩니다.</p>{% endif %}
+  {% include "store_app/publication.html" with publication=row.publication %}
+  <p><a href="{% url 'feedback-create' job.id card.key %}">이 문안의 사용 여부·수정 이유 남기기</a></p>
+</article>
+{% endwith %}{% endfor %}
+<details class="card"><summary>확인한 기간·출처와 전체 게시 안내 보기</summary><pre class="copy" style="font:inherit">{{ delivery.guide }}</pre></details>
+<p><a href="{% url 'job' job.id %}">작업 상태로 돌아가기</a> · <a href="{% url 'archive' %}">보관함</a></p>
+<script>
+document.querySelectorAll('.copy-button').forEach((button) => {
+  button.hidden = false;
+  button.addEventListener('click', async () => {
+    const key = button.dataset.card;
+    const field = document.getElementById('copy-' + key);
+    const status = document.getElementById('copy-status-' + key);
+    const fallback = () => {
+      field.focus();
+      field.select();
+      status.textContent = '자동 복사를 사용할 수 없습니다. 선택된 문안을 직접 복사해 주세요.';
+    };
+    if (!window.isSecureContext || !navigator.clipboard) {
+      fallback();
+      return;
+    }
+    button.disabled = true;
+    status.textContent = '복사 중입니다.';
+    try {
+      const text = JSON.parse(document.getElementById('copy-data-' + key).textContent);
+      await navigator.clipboard.writeText(text);
+      status.textContent = '문안을 복사했습니다. 네이버에서 붙여 넣고 직접 게시해 주세요.';
+    } catch {
+      fallback();
+    } finally {
+      button.disabled = false;
+    }
+  });
+});
+</script>
+{% endblock %}

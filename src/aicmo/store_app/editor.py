@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING
 
 from django import forms
 from django.db import transaction
+from django.http import Http404
 from django.utils import timezone
 
-from aicmo.local_pack import LocalPack, PackBrief, validate_pack
+from aicmo.local_pack import WORKFLOW_ID, LocalPack, PackBrief, validate_pack
 from aicmo.models import StepStatus
 from aicmo.pack_edits import (
     EditApproval,
@@ -20,12 +21,14 @@ from aicmo.pack_edits import (
     pack_text,
 )
 from aicmo.runner import WorkflowRunner
+from aicmo.store_app import services
 from aicmo.store_app.models import EditDraft, EditVersion, Job
 from aicmo.store_app.onboarding import clean_value, validate_post
 from aicmo.store_app.services import StoreActionError
 from aicmo.web_run_lock import web_run_lock
 
 if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
     from django.http import QueryDict
 
 # ponytail: 100 explicit checkpoints per job; add an archival policy if owners reach this limit.
@@ -76,6 +79,8 @@ class RestoreForm(forms.Form):
 
 
 def editable(job: Job, runner: WorkflowRunner) -> None:
+    if job.workflow_id != WORKFLOW_ID:
+        raise Http404
     if (
         job.state != "waiting_approval"
         or job.cancel_requested
@@ -145,26 +150,30 @@ def _checkpoint(draft: EditDraft) -> None:
     EditVersion.objects.create(draft=draft, revision=draft.revision, body=draft.body)
 
 
-def save(  # noqa: C901 — atomic revision/replay/checkpoint/restore contract
+def save(  # noqa: C901, PLR0912 — atomic authority/revision/replay/checkpoint/restore contract
     job: Job,
     runner: WorkflowRunner,
     base_token: str,
     revision: int,
     values: dict[str, str] | None = None,
     *,
+    actor: AbstractBaseUser | AnonymousUser,
     checkpoint: bool = False,
     restore: int | None = None,
 ) -> EditDraft:
+    job = services.owned_pack_job(actor, job.pk)
     # Lock order: per-run OS lock -> short Django transaction. Never invert it.
     with web_run_lock(runner.repo_root, job.run_id, blocking=False):
-        job.refresh_from_db()
+        job = services.owned_pack_job(actor, job.pk)
         base, original = inspect_base(runner, job.run_id)
         if digest(base.model_dump_json()) != base_token:
             reason = "기준 문안이 바뀌었습니다. 최신 화면을 확인해 주세요."
             raise StoreActionError(reason)
         inputs = runner.store.get_inputs(job.run_id)
         with transaction.atomic():
-            job = Job.objects.select_for_update().get(pk=job.pk)
+            job = services.owned_pack_job(services.fresh_actor(actor), job.pk)
+            if job.inputs != inputs or job.store.client != inputs.get("client"):
+                raise Http404
             editable(job, runner)
             draft = EditDraft.objects.select_for_update().filter(job=job).first()
             if draft is None:
@@ -211,23 +220,37 @@ def save(  # noqa: C901 — atomic revision/replay/checkpoint/restore contract
 
 
 def confirm(
-    job: Job, runner: WorkflowRunner, revision: int, base_token: str, edited_sha: str, user_id: str
+    job: Job,
+    runner: WorkflowRunner,
+    revision: int,
+    base_token: str,
+    edited_sha: str,
+    actor: AbstractBaseUser | AnonymousUser,
 ) -> Job:
+    job = services.owned_pack_job(actor, job.pk)
     with web_run_lock(runner.repo_root, job.run_id, blocking=False):
-        job.refresh_from_db()
+        job = services.owned_pack_job(actor, job.pk)
         if job.approval:
-            prior = EditApproval.model_validate_json(json.dumps(job.approval))
-            if (
-                not job.cancel_requested
-                and job.state != "cancelled"
-                and prior.revision == revision
-                and prior.edited_sha == edited_sha
-                and digest(prior.base.model_dump_json()) == base_token
-                and prior.reviewer == f"web-user:{user_id}"
-            ):
-                return job
-            reason = "이미 확인한 버전과 다른 요청입니다."
-            raise StoreActionError(reason)
+            with transaction.atomic():
+                job = services.owned_pack_job(services.fresh_actor(actor), job.pk)
+                if (
+                    runner.store.get_run(job.run_id)["workflow_id"] != WORKFLOW_ID
+                    or job.inputs != runner.store.get_inputs(job.run_id)
+                    or job.store.client != job.inputs.get("client")
+                ):
+                    raise Http404
+                prior = EditApproval.model_validate_json(json.dumps(job.approval))
+                if (
+                    not job.cancel_requested
+                    and job.state != "cancelled"
+                    and prior.revision == revision
+                    and prior.edited_sha == edited_sha
+                    and digest(prior.base.model_dump_json()) == base_token
+                    and prior.reviewer == f"web-user:{actor.pk}"
+                ):
+                    return job
+                reason = "이미 확인한 버전과 다른 요청입니다."
+                raise StoreActionError(reason)
         base, pack, draft = current(job, runner)
         if (
             draft is None
@@ -242,11 +265,15 @@ def confirm(
             base=base,
             revision=revision,
             edited_sha=digest(pack_text(pack)),
-            reviewer=f"web-user:{user_id}",
+            reviewer=f"web-user:{actor.pk}",
             requested_at=timezone.now(),
         )
         with transaction.atomic():
-            job = Job.objects.select_for_update().get(pk=job.pk)
+            job = services.owned_pack_job(services.fresh_actor(actor), job.pk)
+            if job.inputs != runner.store.get_inputs(
+                job.run_id
+            ) or job.store.client != job.inputs.get("client"):
+                raise Http404
             editable(job, runner)
             head = EditDraft.objects.select_for_update().get(pk=draft.pk)
             if head.revision != revision or head.body != draft.body or head.base != draft.base:

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import date, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
@@ -15,9 +19,15 @@ from aicmo.errors import WorkflowExecutionError
 from aicmo.outcomes import (
     CSV_COLUMNS,
     DailyOutcome,
+    OutcomeImportSource,
+    OutcomeSnapshot,
+    daily_outcome_csv,
     import_outcomes,
+    import_outcomes_bytes,
     parse_channel,
     preview_outcomes,
+    preview_outcomes_bytes,
+    read_weekly_outcomes,
     weekly_outcomes_report,
 )
 from aicmo.runner import WorkflowRunner
@@ -290,6 +300,12 @@ def test_cli_preview_import_and_native_report_review(tmp_path: Path, store: Work
     saved = CliRunner().invoke(app, [*args, "--confirm-sha", confirmation])
     assert saved.exit_code == 0
     assert "1 daily row(s) saved" in saved.output
+    shown_again = CliRunner().invoke(app, [*args, "--json"])
+    assert shown_again.exit_code == 0
+    existing = json.loads(shown_again.output)["existing"][0]
+    assert existing["input_kind"] == "cli_csv"
+    assert isinstance(existing["recorded_at"], str)
+    assert existing["recorded_by"] is None
     for directory in ("workflows", "agents", "prompts", "playbooks"):
         shutil.copytree(REPO / directory, tmp_path / directory)
     reviewer = VerdictAdapter(
@@ -335,3 +351,313 @@ def test_cli_preview_import_and_native_report_review(tmp_path: Path, store: Work
         ]
         is False
     )
+
+
+def test_bytes_and_path_preserve_original_bytes_and_v1_confirmation(
+    tmp_path: Path, store: WorkflowStore
+) -> None:
+    raw = (
+        b"\xef\xbb\xbfdate,channel,posts,inquiries,reservations,coupon_redemptions\r\n"
+        b"2026-08-31,naver,0,,2,0\r\n"
+    )
+    source = tmp_path / "original.csv"
+    source.write_bytes(raw)
+    path_preview = preview_outcomes(tmp_path, store, "shop", WEEK, "naver", source)
+    bytes_preview = preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", raw)
+    assert bytes_preview == path_preview
+    assert bytes_preview.source_sha256 == hashlib.sha256(raw).hexdigest()
+    # Captured v1 field order/compact encoding; nullable observation fields stay present.
+    v1_json = (
+        '{"schema_version":"aicmo.outcome-preview.v1","client":"shop",'
+        '"week_start":"2026-08-31","channel":"naver","encoding":"UTF-8 BOM",'
+        f'"source_sha256":"{hashlib.sha256(raw).hexdigest()}",'
+        '"rows":[{"date":"2026-08-31","channel":"naver","posts":0,"inquiries":null,'
+        '"reservations":2,"coupon_redemptions":0}],"existing":[]}'
+    )
+    assert bytes_preview.confirmation_sha256 == hashlib.sha256(v1_json.encode()).hexdigest()
+    canonical = daily_outcome_csv(bytes_preview.rows[0])
+    assert canonical == raw.removeprefix(b"\xef\xbb\xbf").replace(b"\r\n", b"\n")
+    normalized = preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", canonical)
+    assert normalized.rows == bytes_preview.rows
+    assert normalized.source_sha256 != bytes_preview.source_sha256
+    assert normalized.confirmation_sha256 != bytes_preview.confirmation_sha256
+    assert not store.db_path.exists()
+    for invalid in (b"x" * (32 * 1024 + 1), raw + raw.split(b"\r\n")[1] + b"\r\n"):
+        with pytest.raises(WorkflowExecutionError):
+            preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", invalid)
+    assert not store.db_path.exists()
+
+
+def test_readonly_missing_legacy_and_migrated_ledgers_keep_v1_hashes(
+    tmp_path: Path, store: WorkflowStore
+) -> None:
+    raw = daily_outcome_csv(DailyOutcome(date=WEEK, channel="naver", posts=0))
+    with patch.object(
+        WorkflowStore, "initialize", side_effect=AssertionError("read initialized DB")
+    ):
+        empty = read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver")
+        assert empty.current == empty.previous == ()
+        assert empty.totals["posts"].current is None
+        assert not store.db_path.parent.exists()
+    store.db_path.parent.mkdir()
+    with closing(sqlite3.connect(store.db_path)) as connection, connection:
+        connection.execute("create table unrelated (id integer)")
+    before = store.db_path.read_bytes()
+    assert read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver").current == ()
+    assert store.db_path.read_bytes() == before
+    # A genuine old schema has no provenance columns and must remain readable without ALTER.
+    with closing(sqlite3.connect(store.db_path)) as connection, connection:
+        connection.execute(
+            "create table manual_outcomes (client text, observed_on text, channel text, "
+            "payload_json text, source_sha256 text, revision integer, "
+            "primary key(client, observed_on, channel))"
+        )
+        connection.execute(
+            "insert into manual_outcomes values (?, ?, ?, ?, ?, ?)",
+            (
+                "shop",
+                WEEK,
+                "naver",
+                '{"date":"2026-08-31","channel":"naver","posts":0}',
+                "1" * 64,
+                3,
+            ),
+        )
+    before = store.db_path.read_bytes()
+    with patch.object(WorkflowStore, "initialize", side_effect=AssertionError("read migrated DB")):
+        legacy = read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver")
+        preview = preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", raw)
+        report = weekly_outcomes_report(tmp_path, store, "shop", WEEK, "naver")
+    assert store.db_path.read_bytes() == before
+    assert legacy.current[0].input_kind is None
+    assert legacy.current[0].recorded_at is None
+    assert legacy.current[0].recorded_by is None
+    assert "이전 기록 · 입력경로/기록시각 미확인" in report
+    v1_existing = (
+        '{"date":"2026-08-31","channel":"naver","posts":0,"inquiries":null,'
+        '"reservations":null,"coupon_redemptions":null,"source_sha256":"'
+        + "1" * 64
+        + '","revision":3}'
+    )
+    v1_preview = (
+        '{"schema_version":"aicmo.outcome-preview.v1","client":"shop",'
+        '"week_start":"2026-08-31","channel":"naver","encoding":"UTF-8",'
+        f'"source_sha256":"{hashlib.sha256(raw).hexdigest()}",'
+        '"rows":[{"date":"2026-08-31","channel":"naver","posts":0,"inquiries":null,'
+        '"reservations":null,"coupon_redemptions":null}],"existing":[' + v1_existing + "]}"
+    )
+    assert preview.confirmation_sha256 == hashlib.sha256(v1_preview.encode()).hexdigest()
+    v1_snapshot = json.dumps(
+        {
+            "schema_version": "aicmo.manual-outcomes.v1",
+            "client": "shop",
+            "week_start": WEEK,
+            "channel": "naver",
+            "current": [json.loads(v1_existing)],
+            "previous": [],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    assert f"집계 스냅샷 SHA-256: `{hashlib.sha256(v1_snapshot.encode()).hexdigest()}`" in report
+    store.initialize()
+    assert preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", raw) == preview
+    assert read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver") == legacy
+    assert weekly_outcomes_report(tmp_path, store, "shop", WEEK, "naver") == report
+    with store.connect() as connection:
+        row = connection.execute("select * from manual_outcomes").fetchone()
+        assert row["source_sha256"] == "1" * 64
+        assert row["revision"] == 3
+        assert all(row[name] is None for name in ("input_kind", "recorded_at", "recorded_by"))
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "missing-column", "invalid-provenance"])
+def test_readonly_does_not_present_damaged_ledger_as_empty(
+    tmp_path: Path, store: WorkflowStore, damage: str
+) -> None:
+    store.db_path.parent.mkdir()
+    if damage == "corrupt":
+        store.db_path.write_bytes(b"synthetic invalid sqlite data")
+    elif damage == "missing-column":
+        with closing(sqlite3.connect(store.db_path)) as connection, connection:
+            connection.execute("create table manual_outcomes (client text)")
+    else:
+        _save(tmp_path, store, ["2026-08-31,naver,0,0,0,0"])
+        with store.connect() as connection:
+            connection.execute("update manual_outcomes set recorded_by='not-a-web-recorder'")
+    with pytest.raises((sqlite3.DatabaseError, WorkflowExecutionError)):
+        read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver")
+
+
+def test_provenance_noops_and_mixed_empty_csv_replays_preserve_real_zero(
+    tmp_path: Path, store: WorkflowStore
+) -> None:
+    source = OutcomeImportSource(kind="web_csv", recorded_by="web-user:10155550123")
+    first_blank = daily_outcome_csv(DailyOutcome(date=WEEK, channel="naver"))
+    first = preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", first_blank)
+    assert not store.db_path.exists()
+    assert (
+        import_outcomes_bytes(
+            tmp_path,
+            store,
+            "shop",
+            WEEK,
+            "naver",
+            first_blank,
+            first.confirmation_sha256,
+            provenance=source,
+        )
+        == 0
+    )
+    with store.connect() as connection:
+        assert connection.execute("select count(*) from manual_outcomes").fetchone()[0] == 0
+        assert connection.execute("select count(*) from manual_outcome_imports").fetchone()[0] == 0
+    raw = (",".join(CSV_COLUMNS) + "\n2026-08-31,naver,,,,\n2026-09-01,naver,0,0,0,0\n").encode()
+    preview = preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", raw)
+    args = (tmp_path, store, "shop", WEEK, "naver", raw, preview.confirmation_sha256)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs = [pool.submit(import_outcomes_bytes, *args, provenance=source) for _ in range(2)]
+        assert sorted(job.result() for job in jobs) == [0, 1]
+    saved = read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver")
+    assert len(saved.current) == 1
+    row = saved.current[0]
+    assert row.date == "2026-09-01"
+    assert row.posts == 0
+    assert row.recorded_at is not None
+    assert row.input_kind == "web_csv"
+    assert row.recorded_by == "web-user:10155550123"
+    assert import_outcomes_bytes(*args, provenance=source) == 0
+    # A different transport/recorder cannot overwrite provenance when observations are equal.
+    assert import_outcomes_bytes(*args, provenance=OutcomeImportSource(kind="cli_csv")) == 0
+    assert read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver") == saved
+    _save(tmp_path, store, ["2026-08-31,naver,1,0,0,0"])
+    with pytest.raises(WorkflowExecutionError, match="preview again"):
+        import_outcomes_bytes(*args, provenance=source, replace=True)
+    blank = daily_outcome_csv(DailyOutcome(date="2026-09-01", channel="naver"))
+    change = preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", blank)
+    with pytest.raises(WorkflowExecutionError, match="--replace"):
+        import_outcomes_bytes(
+            tmp_path,
+            store,
+            "shop",
+            WEEK,
+            "naver",
+            blank,
+            change.confirmation_sha256,
+            provenance=source,
+        )
+    assert (
+        import_outcomes_bytes(
+            tmp_path,
+            store,
+            "shop",
+            WEEK,
+            "naver",
+            blank,
+            change.confirmation_sha256,
+            provenance=source,
+            replace=True,
+        )
+        == 1
+    )
+    corrected = next(
+        item
+        for item in read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver").current
+        if item.date == "2026-09-01"
+    )
+    assert corrected.posts is None
+    assert corrected.revision == 2
+    assert corrected.recorded_at is not None
+    assert corrected.recorded_at >= row.recorded_at
+    # A new, entirely blank date creates neither an observation nor an import receipt.
+    empty_raw = daily_outcome_csv(DailyOutcome(date="2026-09-02", channel="naver"))
+    empty = preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", empty_raw)
+    with store.connect() as connection:
+        count = connection.execute("select count(*) from manual_outcome_imports").fetchone()[0]
+    assert (
+        import_outcomes_bytes(
+            tmp_path,
+            store,
+            "shop",
+            WEEK,
+            "naver",
+            empty_raw,
+            empty.confirmation_sha256,
+            provenance=source,
+        )
+        == 0
+    )
+    with store.connect() as connection:
+        assert (
+            connection.execute("select count(*) from manual_outcome_imports").fetchone()[0] == count
+        )
+    assert len(read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver").current) == 2
+
+
+def test_v2_snapshot_totals_scope_provenance_and_frozen_report(
+    tmp_path: Path, store: WorkflowStore
+) -> None:
+    for week, value in (("2026-08-24", 1), (WEEK, 2)):
+        _save(
+            tmp_path,
+            store,
+            [
+                f"{date.fromisoformat(week) + timedelta(days=i)},naver,{value},0,,0"
+                for i in range(7)
+            ],
+            week,
+        )
+    snapshot = read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver")
+    assert snapshot.totals["posts"] == (14, 7, 7, 7, 100.0)
+    assert snapshot.totals["inquiries"].change_percent is None
+    assert snapshot.totals["reservations"] == (None, 0, None, 0, None)
+    assert OutcomeSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
+    legacy_preview_source = daily_outcome_csv(DailyOutcome(date=WEEK, channel="naver", posts=2))
+    before = preview_outcomes_bytes(tmp_path, store, "shop", WEEK, "naver", legacy_preview_source)
+    with store.connect() as connection:
+        connection.execute(
+            "update manual_outcomes set input_kind='web_manual', recorded_by='web-user:2'"
+        )
+    changed_source = read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver")
+    assert changed_source.snapshot_sha256 != snapshot.snapshot_sha256
+    assert (
+        preview_outcomes_bytes(
+            tmp_path, store, "shop", WEEK, "naver", legacy_preview_source
+        ).confirmation_sha256
+        == before.confirmation_sha256
+    )
+    report = weekly_outcomes_report(tmp_path, store, "shop", WEEK, "naver", snapshot=snapshot)
+    assert snapshot.snapshot_sha256 in report
+    correction = _csv(tmp_path, ["2026-08-31,naver,9,0,,0"])
+    preview = preview_outcomes(tmp_path, store, "shop", WEEK, "naver", correction)
+    import_outcomes(
+        tmp_path,
+        store,
+        "shop",
+        WEEK,
+        "naver",
+        correction,
+        preview.confirmation_sha256,
+        replace=True,
+    )
+    assert (
+        weekly_outcomes_report(tmp_path, store, "shop", WEEK, "naver", snapshot=snapshot) == report
+    )
+    assert (
+        read_weekly_outcomes(tmp_path, store, "shop", WEEK, "naver").snapshot_sha256
+        != snapshot.snapshot_sha256
+    )
+    for changes in (
+        {"current": [snapshot.current[0], snapshot.current[0]]},
+        {"current": snapshot.previous},
+        {"previous": snapshot.current},
+        {"channel": "offline"},
+        {"current": [*snapshot.current, snapshot.current[-1]]},
+    ):
+        with pytest.raises(ValidationError):
+            OutcomeSnapshot.model_validate({**snapshot.model_dump(), **changes})
+    with pytest.raises(WorkflowExecutionError, match="scope differs"):
+        weekly_outcomes_report(tmp_path, store, "shop", WEEK, "offline", snapshot=snapshot)
+    for source in ({"kind": "web_csv"}, {"kind": "cli_csv", "recorded_by": "web-user:1"}):
+        with pytest.raises(ValidationError):
+            OutcomeImportSource.model_validate(source)

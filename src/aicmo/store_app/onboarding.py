@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from pydantic import TypeAdapter
 
@@ -12,7 +13,7 @@ from aicmo.store_app.forms import (
     clean_value as clean_value,  # noqa: PLC0414 — preserve public import
 )
 from aicmo.store_app.models import OnboardingDraft, Store
-from aicmo.store_app.services import StoreActionError
+from aicmo.store_app.services import StoreActionError, fresh_actor
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import User
@@ -80,6 +81,7 @@ def save_step(
     user: User, step: int, revision: int, values: dict[str, str], *, completed: bool
 ) -> OnboardingDraft:
     with transaction.atomic():
+        user = fresh_actor(user)
         if not new_owner(user):
             reason = "이미 연결된 가게를 이용해 주세요."
             raise StoreActionError(reason)
@@ -100,7 +102,8 @@ def confirm(user: User, revision: int) -> OnboardingDraft:
     draft = OnboardingDraft.objects.get(owner=user)
     validated_values(draft)
     with transaction.atomic():
-        current = OnboardingDraft.objects.get(pk=draft.pk)
+        user = fresh_actor(user)
+        current = get_object_or_404(OnboardingDraft, pk=draft.pk, owner=user)
         if (
             current.revision != revision
             or current.revision != draft.revision

@@ -19,7 +19,10 @@ class ArchiveForm(forms.Form):
         label="가게", queryset=Store.objects.none(), required=False, empty_label="모든 가게"
     )
     state = forms.ChoiceField(
-        label="상태", choices=[("", "모든 상태"), *Job.STATES], required=False
+        label="상태",
+        choices=[("", "모든 상태"), *Job.STATES],
+        required=False,
+        error_messages={"invalid_choice": "목록에서 상태를 다시 선택해 주세요."},
     )
     start = forms.DateField(
         label="시작일", required=False, widget=forms.DateInput(attrs={"type": "date"})
@@ -31,6 +34,8 @@ class ArchiveForm(forms.Form):
 
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
+        # Retain parsed fields for correction, never rejected metadata or raw choice values.
+        self.data = dict(data)
         start, end = data.get("start"), data.get("end")
         if start and end and start > end:
             self.add_error("end", "종료일은 시작일과 같거나 이후여야 합니다.")

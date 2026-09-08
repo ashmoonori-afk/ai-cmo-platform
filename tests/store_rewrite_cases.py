@@ -11,6 +11,7 @@ from unittest.mock import patch
 from urllib.parse import urlencode
 
 from django.contrib.auth.models import User
+from django.core import signing
 from django.test import TransactionTestCase, override_settings
 
 from aicmo.pack_edits import digest, editable_values, inspect_base
@@ -43,7 +44,9 @@ class RewriteTests(TransactionTestCase):
         brief = json.loads(_brief()["brief_json"])
         brief["facts"] = [brief["facts"][0]]
         self.fact = brief["facts"][0]
-        self.job = services.submit(self.store, uuid.uuid4(), json.dumps(brief, ensure_ascii=False))
+        self.job = services.submit(
+            self.store, uuid.uuid4(), json.dumps(brief, ensure_ascii=False), actor=self.owner
+        )
         self.assertTrue(self.tick())
         self.job.refresh_from_db()
         self.base, self.original = inspect_base(self.runner, self.job.run_id)
@@ -53,6 +56,7 @@ class RewriteTests(TransactionTestCase):
             digest(self.base.model_dump_json()),
             0,
             {**editable_values(self.original), "news_0_body": "저장한 재작성 기준 문안입니다."},
+            actor=self.owner,
         )
         self.saved = EditDraft.objects.get(job=self.job).body
         self.url = f"/jobs/{self.job.id}/rewrite/"
@@ -62,7 +66,7 @@ class RewriteTests(TransactionTestCase):
             return run_one()
 
     def cancel(self) -> None:
-        services.request_cancel(self.job)
+        services.request_cancel(self.job, self.owner)
         self.assertTrue(self.tick())
         self.job.refresh_from_db()
         self.assertEqual(self.job.state, "cancelled")
@@ -87,6 +91,23 @@ class RewriteTests(TransactionTestCase):
             "token": response.context["confirmation"].initial["token"],
             "checked": "on",
         }
+
+    def test_invalid_action_never_echoes_secret_and_valid_token_stays_exact(self) -> None:
+        self.cancel()
+        secret = "sk-syntheticRewriteSecret123456789"
+        response = self.preview(action=secret)
+        self.assertEqual(response.status_code, 400)
+        self.assertNotContains(response, secret, status_code=400)
+        self.assertContains(response, self.fact, status_code=400)
+        confirmation = self.confirmation()
+        payload = signing.loads(confirmation["token"], salt="aicmo.web-rewrite.v1", max_age=3600)
+        self.assertEqual(payload["source_id"], str(self.job.pk))
+        self.assertEqual(payload["store_id"], str(self.store.pk))
+        self.assertEqual(payload["user_id"], str(self.owner.pk))
+        request = parse_rewrite(payload["rewrite_json"])
+        self.assertEqual(request.source_body, self.saved)
+        self.assertEqual(request.edited_sha, digest(self.saved))
+        self.assertEqual(request.action, "shorten")
 
     def test_cancel_first_preview_and_idempotent_submission_preserve_saved_text(self) -> None:
         self.assertContains(self.client.get(self.url), "먼저 기존 작업의 취소")
@@ -152,7 +173,11 @@ class RewriteTests(TransactionTestCase):
             self.store, normalize_photo(upload().read()), "합성 가게 내부", "own_photo"
         )
         self.job = services.submit(
-            self.store, uuid.uuid4(), self.job.inputs["brief_json"], photos_json=photo_json
+            self.store,
+            uuid.uuid4(),
+            self.job.inputs["brief_json"],
+            photos_json=photo_json,
+            actor=self.owner,
         )
         self.assertTrue(self.tick())
         self.cancel()
@@ -187,6 +212,7 @@ class RewriteTests(TransactionTestCase):
                 "news_0_body": text[::-1],
                 "reply_0": text,
             },
+            actor=self.owner,
         )
         self.cancel()
         data = self.confirmation()

@@ -329,6 +329,14 @@ def minimize_customer_pii(text: str, *, allowed: tuple[str, ...] = ()) -> str:
     return _minimize_clear_customer_pii(decoded_pii_minimized, allow)
 
 
+def safe_diagnostic_message(text: str) -> str:
+    """Minimize free-text diagnostics without interrupting failure persistence."""
+    try:
+        return minimize_customer_pii(redact(text))
+    except WorkflowExecutionError:
+        return "[diagnostic omitted: privacy inspection limit]"
+
+
 def is_customer_phone(value: str) -> bool:
     normalized = _normalized_pii_candidate(value).strip()
     return any(

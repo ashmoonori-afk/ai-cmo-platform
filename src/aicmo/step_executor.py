@@ -40,7 +40,7 @@ from aicmo.models import (
     WorkflowSpec,
     WorkflowStep,
 )
-from aicmo.outcomes import parse_channel, weekly_outcomes_report
+from aicmo.outcomes import parse_channel, parse_outcomes_snapshot, weekly_outcomes_report
 from aicmo.paths import native_io_path, resolve_inside_repo
 from aicmo.photos import PHOTO_STEP, parse_photos, photo_manifest, verify_photo_manifest
 from aicmo.redaction import minimize_customer_pii
@@ -190,6 +190,11 @@ class WorkflowStepExecutor:
                         context.get("client", ""),
                         context.get("week_start", ""),
                         parse_channel(context.get("channel", "naver")),
+                        snapshot=(
+                            parse_outcomes_snapshot(context["outcomes_snapshot_json"])
+                            if "outcomes_snapshot_json" in context
+                            else None
+                        ),
                     )
                     return self._write_outputs(step, context, content, lease_signal)
                 case StepType.PHOTOS_PREPARE:
@@ -308,7 +313,7 @@ class WorkflowStepExecutor:
             ref.truncated for ref in artifact_refs
         ):
             raise WorkflowExecutionError(step.id, "local pack context was truncated")
-        result = self._invoke_adapter(self.adapter, request)
+        result = self._invoke_adapter(self.adapter, request, lease_signal)
         if not result.ok:
             detail = self._minimize_pii(result.detail, context)
             raise WorkflowExecutionError(step.id, f"agent executor failed: {detail}")
@@ -321,7 +326,12 @@ class WorkflowStepExecutor:
             validate_pack(content, context)
         return self._write_outputs(step, context, content, lease_signal)
 
-    def _invoke_adapter(self, adapter: StepAdapter, request: AgentRequest) -> AgentResult:
+    def _invoke_adapter(
+        self,
+        adapter: StepAdapter,
+        request: AgentRequest,
+        lease_signal: _LeaseSignal,
+    ) -> AgentResult:
         """Record logical adapter calls, including reviewer repair, without content or prices."""
         started = perf_counter()
         call_id = uuid4().hex
@@ -337,6 +347,7 @@ class WorkflowStepExecutor:
             "role": _observation_text(request.role),
             "attempt": attempt,
         }
+        self._check_lease(request.run_id, request.step_id, lease_signal)
         self.store.record_event(
             request.run_id,
             request.step_id,
@@ -477,7 +488,7 @@ class WorkflowStepExecutor:
         if approval == ApprovalDecision.APPROVED:
             decision, semantic_review = GateDecision.PASS, None
         else:
-            decision, semantic_review = self._evaluate_gate(run_id, step, context)
+            decision, semantic_review = self._evaluate_gate(run_id, step, context, lease_signal)
         payload = self._gate_payload(run_id, step, decision, context, semantic_review)
         outputs = self._write_outputs(
             step,
@@ -664,6 +675,7 @@ class WorkflowStepExecutor:
         run_id: str,
         step: WorkflowStep,
         context: dict[str, str],
+        lease_signal: _LeaseSignal,
     ) -> tuple[GateDecision, ReviewerResolution | None]:
         texts = self._gate_texts(run_id, step)
         if not texts:
@@ -673,7 +685,7 @@ class WorkflowStepExecutor:
         deterministic = evaluate_artifacts(texts).status
         if deterministic == GateDecision.FAIL or self.review_adapter is None:
             return deterministic, None
-        review = self._semantic_review(step, context, texts)
+        review = self._semantic_review(step, context, texts, lease_signal)
         return stricter(deterministic, review.decision), review
 
     def _gate_texts(self, run_id: str, step: WorkflowStep) -> list[str]:
@@ -698,6 +710,7 @@ class WorkflowStepExecutor:
         step: WorkflowStep,
         context: dict[str, str],
         texts: list[str],
+        lease_signal: _LeaseSignal,
     ) -> ReviewerResolution:
         review_adapter = self.review_adapter
         if review_adapter is None:
@@ -763,13 +776,13 @@ class WorkflowStepExecutor:
                 context,
             ),
         )
-        result = self._invoke_adapter(review_adapter, request)
+        result = self._invoke_adapter(review_adapter, request, lease_signal)
         result = replace(result, text=self._minimize_pii(result.text, context))
         resolution = resolve_reviewer_output(
             review_adapter,
             request,
             result,
-            generate=lambda repair: self._invoke_adapter(review_adapter, repair),
+            generate=lambda repair: self._invoke_adapter(review_adapter, repair, lease_signal),
         )
         self.store.record_event(
             context["run_id"],

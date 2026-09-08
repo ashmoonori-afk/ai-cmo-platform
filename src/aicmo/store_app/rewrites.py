@@ -8,13 +8,15 @@ from typing import TYPE_CHECKING
 from django import forms
 from django.contrib.auth.decorators import login_required
 from django.core import signing
+from django.db import transaction
+from django.http import Http404
 from django.shortcuts import redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 from pydantic import TypeAdapter
 
 from aicmo.errors import AicmoError
-from aicmo.local_pack import LocalPack, parse_brief
+from aicmo.local_pack import WORKFLOW_ID, LocalPack, parse_brief
 from aicmo.pack_edits import EditBase, digest, inspect_base, pack_text
 from aicmo.pack_rewrite import RewriteRequest, facts_sha, parse_rewrite
 from aicmo.runner import WorkflowRunner
@@ -24,6 +26,7 @@ from aicmo.store_app.onboarding import clean_value, validate_post
 from aicmo.web_run_lock import web_run_lock
 
 if TYPE_CHECKING:
+    from django.contrib.auth.models import AbstractBaseUser, AnonymousUser
     from django.http import HttpRequest, HttpResponse
 
 _SALT = "aicmo.web-rewrite.v1"
@@ -34,6 +37,7 @@ class RewriteForm(forms.Form):
     action = forms.ChoiceField(
         label="어떻게 다시 쓸까요?",
         choices=[("shorten", "짧게"), ("friendly", "친근하게"), ("price", "가격·기간·혜택 수정")],
+        error_messages={"invalid_choice": "다시 쓸 방법을 목록에서 선택해 주세요."},
     )
     fact = forms.CharField(
         label="이번 소식의 확인된 사실 전체",
@@ -51,6 +55,8 @@ class ConfirmForm(forms.Form):
 
 def source(job: Job, runner: WorkflowRunner) -> tuple[EditBase, LocalPack, int]:
     job.refresh_from_db()
+    if job.workflow_id != WORKFLOW_ID:
+        raise Http404
     if (
         job.state != "cancelled"
         or job.cancel_requested
@@ -107,7 +113,11 @@ def prepare(job: Job, runner: WorkflowRunner, form: RewriteForm, user_id: str) -
     }
 
 
-def submit(job: Job, runner: WorkflowRunner, token: str, user_id: str) -> Job:
+def submit(
+    job: Job, runner: WorkflowRunner, token: str, actor: AbstractBaseUser | AnonymousUser
+) -> Job:
+    job = services.owned_pack_job(actor, job.pk)
+    user_id = str(actor.pk)
     payload = TypeAdapter(dict[str, str]).validate_python(
         signing.loads(token, salt=_SALT, max_age=3600), strict=True
     )
@@ -148,20 +158,29 @@ def submit(job: Job, runner: WorkflowRunner, token: str, user_id: str) -> Job:
                 reason = "새 요청의 사용 가능 건수가 부족합니다."
                 raise services.StoreActionError(reason)
             services.engine()  # Validate configuration without generating or charging.
-        return services.submit(
-            job.store,
-            key,
-            payload["brief_json"],
-            rewrite_json=payload["rewrite_json"],
-            photos_json=payload["photos_json"] or None,
-        )
+        with transaction.atomic():
+            current = services.owned_pack_job(services.fresh_actor(actor), job.pk)
+            if (
+                current.inputs != job.inputs
+                or current.store.pk != job.store.pk
+                or current.store.client != job.inputs.get("client")
+            ):
+                raise Http404
+            return services.submit(
+                current.store,
+                key,
+                payload["brief_json"],
+                rewrite_json=payload["rewrite_json"],
+                photos_json=payload["photos_json"] or None,
+                actor=actor,
+            )
 
 
 @login_required
 @require_http_methods(["GET", "POST"])
 @never_cache
 def rewrite(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
-    job = services.owned_job(request.user, job_id)
+    job = services.owned_pack_job(request.user, job_id)
     runner = services.reader()
     form = None
     context: dict[str, object] = {"job": job, "allowance": guidance.allowance(job.store)}
@@ -175,7 +194,7 @@ def rewrite(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
             if not confirmation.is_valid():
                 reason = "사용 건수 동의 후 요청을 다시 확인해 주세요."
                 raise services.StoreActionError(reason)
-            next_job = submit(job, runner, confirmation.cleaned_data["token"], str(request.user.pk))
+            next_job = submit(job, runner, confirmation.cleaned_data["token"], request.user)
             return redirect("job", job_id=next_job.id)
         with web_run_lock(runner.repo_root, job.run_id, blocking=False):
             _, pack, _ = source(job, runner)
@@ -192,7 +211,9 @@ def rewrite(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
                         "checked": request.POST.get("checked", ""),
                     }
                 )
-                if form.is_valid():
+                valid = form.is_valid()
+                form.data = dict(form.cleaned_data)  # Render validated values only on errors.
+                if valid:
                     payload = prepare(job, runner, form, str(request.user.pk))
                     context.update(
                         fact=form.cleaned_data["fact"],

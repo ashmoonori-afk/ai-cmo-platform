@@ -178,7 +178,7 @@ class GuidanceTests(TransactionTestCase):
             self.assertEqual(guidance.allowance(self.store)["code"], "unavailable")
 
     def test_active_job_wins_get_and_post_before_provider_configuration(self) -> None:
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"])
+        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], actor=self.owner)
         with patch("aicmo.store_app.services.engine", side_effect=AssertionError):
             for state in ("queued", "running", "waiting_approval"):
                 Job.objects.filter(pk=job.pk).update(state=state, cancel_requested=True)

@@ -7,7 +7,7 @@ from typing import Self
 
 from aicmo.errors import StepTransitionError
 from aicmo.models import ApprovalDecision, StepStatus
-from aicmo.redaction import redact, safe_kb_text
+from aicmo.redaction import redact, safe_diagnostic_message, safe_kb_text
 from aicmo.step_state import WorkflowStepStore
 
 
@@ -116,7 +116,7 @@ class WorkflowLedgerStore(WorkflowStepStore):
         message: str,
         payload: Mapping[str, str | list[str]] | None = None,
     ) -> None:
-        message = redact(message)
+        message = safe_diagnostic_message(message)
         raw_payload: Mapping[str, str | list[str]] = {} if payload is None else payload
         event_payload: Mapping[str, str | list[str]] = {
             key: [redact(item) for item in value] if isinstance(value, list) else redact(value)

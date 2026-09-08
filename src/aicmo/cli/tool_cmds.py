@@ -213,7 +213,7 @@ def outcomes_cmd(
     if as_json:
         console.print_json(
             data={
-                **preview.model_dump(),
+                **preview.model_dump(mode="json"),
                 "confirmation_sha256": preview.confirmation_sha256,
             }
         )

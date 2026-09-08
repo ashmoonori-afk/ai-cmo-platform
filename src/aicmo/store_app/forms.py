@@ -59,6 +59,8 @@ class PackForm(forms.Form):
         safe: dict[str, str] = {}
         errors: list[tuple[str | None, str]] = []
         allowed = (set(self.fields) - {"photo"}) | {"csrfmiddlewaretoken"}
+        if self.data.get("photo") == "" and "photo" not in self.files:
+            allowed.add("photo")  # An unselected browser FileInput can be an empty POST field.
         if set(self.data) - allowed or (
             isinstance(self.data, QueryDict)
             and any(len(self.data.getlist(name)) != 1 for name in self.data)
@@ -278,6 +280,12 @@ class StorePurposeForm(forms.Form):
 
 
 class OnboardingConfirmForm(forms.Form):
+    def full_clean(self) -> None:
+        super().full_clean()
+        if self.is_bound:
+            # Failed metadata must not survive into hidden inputs on the error page.
+            self.data = dict(self.cleaned_data)
+
     revision = forms.IntegerField(min_value=0, widget=forms.HiddenInput)
     checked = forms.BooleanField(
         label="입력한 사실과 사용 권리를 확인했습니다. 빈 항목은 미확인으로 남깁니다."

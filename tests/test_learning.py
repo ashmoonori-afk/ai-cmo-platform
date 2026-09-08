@@ -13,7 +13,13 @@ import pytest
 
 from aicmo.adapters import AgentRequest, AgentResult
 from aicmo.errors import WorkflowExecutionError
-from aicmo.learning import feedback_report, learn_feedback, learning_context, parse_feedback
+from aicmo.learning import (
+    feedback_is_learned,
+    feedback_report,
+    learn_feedback,
+    learning_context,
+    parse_feedback,
+)
 from aicmo.outcomes import import_outcomes, preview_outcomes
 from aicmo.runner import WorkflowRunner
 from aicmo.source_input import source_checked_date
@@ -127,9 +133,11 @@ def test_approved_edit_feedback_changes_next_generation_context(runner: Workflow
         learn_feedback(runner, "feedback")
     runner.approve("feedback", "owner_gate", "owner", "합성 검증")
     assert runner.resume("feedback").status == "success"
+    assert not feedback_is_learned(runner, "feedback")
     path = learn_feedback(runner, "feedback")
     before = path.read_bytes()
     assert learn_feedback(runner, "feedback").read_bytes() == before
+    assert feedback_is_learned(runner, "feedback")
     assert runner.run("local-store-pack", "next", pack_inputs).status == "waiting_approval"
     adapter = runner.adapter
     assert isinstance(adapter, PackAdapter)
@@ -146,6 +154,9 @@ def test_approved_edit_feedback_changes_next_generation_context(runner: Workflow
         == INSIGHT
     )
     assert json.loads(learning_context(runner, "other"))["insights"] == []
+    path.write_bytes(before.replace(INSIGHT.encode(), "변조한 제안".encode()))
+    with pytest.raises(WorkflowExecutionError, match="KB block differs"):
+        feedback_is_learned(runner, "feedback")
 
 
 def test_source_snapshot_and_approved_files_are_verified(runner: WorkflowRunner) -> None:

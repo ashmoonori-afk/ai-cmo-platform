@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import ExitStack
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -268,9 +269,15 @@ def test_edited_pack_requires_semantic_pass(tmp_path: Path, verdict: str) -> Non
     assert runner.store.get_step_attempt(RUN, "drafts") == 1
 
 
+_PROCESS_STARTUP_SECONDS = 60 if sys.platform == "win32" else 10
+_LOCK_ATTEMPT_SECONDS = 10
+_PROCESS_RELEASE_SECONDS = _PROCESS_STARTUP_SECONDS + _LOCK_ATTEMPT_SECONDS + 30
+
 _PROCESS_SCRIPT = r"""
 import json, sys, time
+from contextlib import contextmanager
 from pathlib import Path
+import aicmo.web_run_lock as locks
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 from aicmo.pack_edits import EditApproval
@@ -287,12 +294,20 @@ if action == 'paused':
     def pause(path, body):
         original(path, body)
         (root/'paused-ready').touch()
-        deadline = time.monotonic() + 20
+        deadline = time.monotonic() + float(sys.argv[3])
         while not (root/'release').exists():
             if time.monotonic() > deadline: raise TimeoutError('test release missing')
             time.sleep(.02)
     WorkflowRunner._write_pack_edit = staticmethod(pause)
 else:
+    original_lock = locks.exclusive_file_lock
+    @contextmanager
+    def announce_lock(path, **kwargs):
+        (root/'competitor-lock').touch()
+        with original_lock(path, **kwargs):
+            (root/'competitor-acquired').touch()
+            yield
+    locks.exclusive_file_lock = announce_lock
     (root/'competitor-ready').touch()
 try:
     if action in ('paused', 'apply'): runner.apply_pack_edit(run_id, receipt, body)
@@ -305,12 +320,49 @@ else:
 """
 
 
-def _wait_marker(path: Path, process: subprocess.Popen[str]) -> None:
-    deadline = time.monotonic() + 10
+def _wait_marker(
+    path: Path, process: subprocess.Popen[str], *, timeout: float = _PROCESS_STARTUP_SECONDS
+) -> None:
+    deadline = time.monotonic() + timeout
     while not path.exists():
         assert process.poll() is None, process.communicate(timeout=5)
         assert time.monotonic() < deadline, "test process did not reach lock boundary"
         time.sleep(0.02)
+
+
+def _stop_process(process: subprocess.Popen[str]) -> None:
+    try:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=10)
+    finally:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+
+
+def test_competing_process_timeout_closes_pipes(tmp_path: Path) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    try:
+        with pytest.raises(AssertionError, match="did not reach lock boundary"):
+            _wait_marker(tmp_path / "missing-ready", process, timeout=0)
+    finally:
+        _stop_process(process)
+    assert process.poll() is not None
+    assert process.stdout is not None
+    assert process.stdout.closed
+    assert process.stderr is not None
+    assert process.stderr.closed
 
 
 @pytest.mark.parametrize("action", ["apply", "resume", "approve"])
@@ -325,7 +377,7 @@ def test_edit_serializes_competing_processes(tmp_path: Path, action: str) -> Non
     try:
         for name in ("paused", action):
             process = subprocess.Popen(  # noqa: S603 — fixed synthetic process script
-                [sys.executable, str(script), str(tmp_path), name],
+                [sys.executable, str(script), str(tmp_path), name, str(_PROCESS_RELEASE_SECONDS)],
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -336,8 +388,10 @@ def test_edit_serializes_competing_processes(tmp_path: Path, action: str) -> Non
             _wait_marker(
                 tmp_path / ("paused-ready" if name == "paused" else "competitor-ready"), process
             )
+        _wait_marker(tmp_path / "competitor-lock", processes[1], timeout=_LOCK_ATTEMPT_SECONDS)
         time.sleep(0.15)
         assert processes[1].poll() is None  # Competing mutation must wait for the edit lock.
+        assert not (tmp_path / "competitor-acquired").exists()
         (tmp_path / "release").touch()
         for index, process in enumerate(processes):
             stdout, stderr = process.communicate(timeout=30)
@@ -346,11 +400,11 @@ def test_edit_serializes_competing_processes(tmp_path: Path, action: str) -> Non
                 "StepTransitionError" if index == 1 and action == "approve" else "ok"
             ), stdout + stderr
     finally:
-        (tmp_path / "release").touch()
-        for process in processes:
-            if process.poll() is None:
-                process.terminate()
-                process.wait(timeout=10)
+        with ExitStack() as cleanup:
+            for process in processes:
+                cleanup.callback(_stop_process, process)
+            (tmp_path / "release").touch()
+    assert (tmp_path / "competitor-acquired").exists()
     assert _receipt_state(runner) == "applied"
     assert runner.store.get_step_attempt(RUN, "drafts") == 1
     assert runner.store.get_output_hashes(RUN, "drafts") == {

@@ -18,6 +18,17 @@ import pytest
         "tests.store_archive_cases",
         "tests.store_photo_cases",
         "tests.store_rewrite_cases",
+        "tests.store_delivery_cases",
+        "tests.store_publication_cases",
+        "tests.store_authority_cases",
+        "tests.store_onboarding_metadata_cases",
+        "tests.store_boundary_cases",
+        "tests.store_upload_boundary_cases",
+        "tests.store_outcomes_cases",
+        "tests.store_native_job_cases",
+        "tests.store_report_cases",
+        "tests.store_action_cases",
+        "tests.store_feedback_cases",
     ],
 )
 def test_django_store_app(tmp_path: Path, label: str) -> None:
@@ -34,7 +45,9 @@ def test_django_store_app(tmp_path: Path, label: str) -> None:
         env=env,
         capture_output=True,
         text=True,
-        timeout=180,
+        # The real eight-case engine/DB matrix took 1513s under Windows memory pressure.
+        # Bound the suite wait separately from the unchanged engine and DB timeouts.
+        timeout=2400,
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr

@@ -14,6 +14,7 @@ from django.views.decorators.http import require_GET
 from pydantic import TypeAdapter
 
 from aicmo.errors import AicmoError, RunNotFoundError
+from aicmo.local_pack import WORKFLOW_ID
 from aicmo.photos import PhotoAsset, PhotoSelection, asset_path, verify_photo_assets
 from aicmo.store_app import services
 from aicmo.store_app.models import Store
@@ -59,7 +60,7 @@ def store_photo(
 @require_GET
 @never_cache
 def preview(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
-    job = services.owned_job(request.user, job_id)
+    job = services.owned_pack_job(request.user, job_id)
     try:
         inputs = TypeAdapter(dict[str, str]).validate_python(job.inputs, strict=True)
         if inputs.get("client") != job.store.client:
@@ -71,6 +72,8 @@ def preview(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
             frozen = None
         else:
             try:
+                if runner.store.get_run(job.run_id)["workflow_id"] != WORKFLOW_ID:
+                    raise Http404
                 frozen = runner.store.get_inputs(job.run_id)
             except RunNotFoundError:
                 frozen = None

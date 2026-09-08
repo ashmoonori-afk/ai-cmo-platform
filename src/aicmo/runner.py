@@ -432,9 +432,12 @@ class WorkflowRunner(WorkflowStepExecutor):
     @serialized_web_run
     def complete_verified_local_pack(self: Self, run_id: str) -> RunResult:
         """Recover a completed pack's final write without invoking or changing its providers."""
-        verified_delivery(
-            self, run_id, LOCAL_PACK_WORKFLOW, completing=True, require_deliverable=False
-        )
+        return self.complete_verified_delivery(run_id, LOCAL_PACK_WORKFLOW)
+
+    @serialized_web_run
+    def complete_verified_delivery(self: Self, run_id: str, workflow_id: str) -> RunResult:
+        """Recover the final write from verified artifacts, without resuming execution."""
+        verified_delivery(self, run_id, workflow_id, completing=True, require_deliverable=False)
         return self._complete_run(run_id)
 
     def _complete_run(self: Self, run_id: str) -> RunResult:

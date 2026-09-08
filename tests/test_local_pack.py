@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from aicmo.adapters import AgentRequest, AgentResult
 from aicmo.cli import app
 from aicmo.errors import WorkflowExecutionError
-from aicmo.export import export_local_pack
+from aicmo.export import export_local_pack, verified_pack
 from aicmo.local_pack import NO_PHOTO, PROVIDED_PHOTO, parse_brief, render_pack, validate_pack
 from aicmo.photos import parse_photos
 from aicmo.runner import WorkflowRunner
@@ -153,9 +153,12 @@ def test_owner_review_export_journey(
     with pytest.raises(WorkflowExecutionError, match="successful"):
         export_local_pack(runner, "case")
     _approve(runner)
+    bundle, approved_files = verified_pack(runner, "case")
+    assert not (tmp_path / "artifacts/case/exports").exists()
     path = export_local_pack(runner, "case")
     assert path == export_local_pack(runner, "case")
     with ZipFile(path) as archive:
+        assert {name: archive.read(name) for name in archive.namelist()} == approved_files
         names = archive.namelist()
         assert len([n for n in names if n.startswith("news-")]) == news_count
         assert len([n for n in names if n.startswith("reply-")]) == reply_count
@@ -166,6 +169,7 @@ def test_owner_review_export_journey(
         assert "직접" in guide
         assert "리뷰 0:" not in guide
         manifest = json.loads(archive.read("manifest.json"))
+        assert manifest["bundle_sha256"] == bundle
         assert manifest["external_publish_status"] == "not_published"
         assert manifest["visual_asset_status"] == "unavailable"
     cli = CliRunner().invoke(app, ["export-local-pack", "case", "--repo", str(tmp_path)])

@@ -12,7 +12,7 @@ from pydantic import TypeAdapter, ValidationError
 from aicmo.errors import RunConflictError, StepTransitionError
 from aicmo.models import ApprovalDecision, RunStatus, StepStatus, WorkflowStep
 from aicmo.quota import QuotaError, claim_quota, settle_quota
-from aicmo.redaction import redact
+from aicmo.redaction import safe_diagnostic_message
 from aicmo.run_state import WorkflowRunStore
 
 _DEFAULT_LEASE_TTL = 300.0
@@ -267,7 +267,7 @@ class WorkflowStepStore(WorkflowRunStore):
         message: str,
         owner: str | None = None,
     ) -> bool:
-        payload = json.dumps({"message": redact(message)}, ensure_ascii=False)
+        payload = json.dumps({"message": safe_diagnostic_message(message)}, ensure_ascii=False)
         with self.connect() as connection:
             done = self._finalize_step(
                 connection,

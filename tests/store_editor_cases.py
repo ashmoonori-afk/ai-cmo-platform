@@ -42,7 +42,9 @@ class EditorTests(TransactionTestCase):
         self.store = Store.objects.create(owner=self.owner, name="합성 가게", client="shop")
         self.client.force_login(self.owner)
         configure_quota(self.runner.store, "shop", current_period(), 2, 4)
-        self.job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"])
+        self.job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], actor=self.owner
+        )
         self.assertTrue(self.tick())
         self.job.refresh_from_db()
         self.url = f"/jobs/{self.job.id}/edit/"
@@ -108,6 +110,18 @@ class EditorTests(TransactionTestCase):
         self.assertTrue(services.download(self.job).is_file())
         self.assertEqual(self.runner.store.get_step_attempt(self.job.run_id, "drafts"), 1)
         self.assertEqual(quota_status(self.runner.store, "shop", current_period())["draft_used"], 1)
+        # A repeated approval must also reject a wrongly linked engine workflow.
+        before = Job.objects.get(pk=self.job.pk).approval
+        with self.runner.store.connect() as connection:
+            connection.execute(
+                "insert into workflows(workflow_id,name,spec_path) "
+                "values('weekly-report','Synthetic report','workflows/weekly-report.workflow.yaml')"
+            )
+            connection.execute(
+                "update runs set workflow_id='weekly-report' where run_id=?", (self.job.run_id,)
+            )
+        self.assertEqual(self.client.post(self.url + "confirm/", confirmation).status_code, 404)
+        self.assertEqual(Job.objects.get(pk=self.job.pk).approval, before)
 
     def test_autosave_replay_conflict_relogin_and_restore(self) -> None:
         data = self.data(news_0_body="사장님이 저장한 안내입니다.", action="autosave")
@@ -307,6 +321,7 @@ class EditorTests(TransactionTestCase):
                     digest(self.base.model_dump_json()),
                     0,
                     {**editable_values(self.original), "news_0_title": "최초 수정"},
+                    actor=self.owner,
                 )
             finally:
                 close_old_connections()
@@ -319,12 +334,12 @@ class EditorTests(TransactionTestCase):
             self.assertTrue(entered.wait(10))
             try:
                 with self.assertRaises(OSError):
-                    services.request_approval(self.job, pack_sha, photo_sha, str(self.owner.pk))
+                    services.request_approval(self.job, pack_sha, photo_sha, self.owner)
             finally:
                 release.set()
             pending.result(timeout=10)
         with self.assertRaises(services.StoreActionError):
-            services.request_approval(self.job, pack_sha, photo_sha, str(self.owner.pk))
+            services.request_approval(self.job, pack_sha, photo_sha, self.owner)
         self.job.refresh_from_db()
         self.assertEqual(self.job.approval, {})
         self.assertEqual(self.job.state, "waiting_approval")

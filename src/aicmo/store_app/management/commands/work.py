@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import time
 from argparse import ArgumentParser
 from datetime import UTC, datetime, timedelta
@@ -9,12 +10,49 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db.models import Q
 
+from aicmo.errors import AicmoError, RunNotFoundError
 from aicmo.reporter import exclusive_file_lock
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 from aicmo.store_app.models import Job
 from aicmo.store_app.onboarding_publish import run_onboarding
-from aicmo.store_app.services import cancel, engine, execute
+from aicmo.store_app.services import StoreActionError, cancel, engine, execute
+
+_SETUP_ERRORS = (AicmoError, OSError, ValueError, sqlite3.Error, StoreActionError)
+
+
+def _setup_unavailable(job: Job) -> bool:
+    job.refresh_from_db()
+    root = Path(settings.REPO_ROOT)
+    store = WorkflowStore(root / ".aicmo/runs.sqlite3", read_only=True)
+    if job.cancel_requested:
+        runner = WorkflowRunner(root, WorkflowStore(store.db_path))
+        try:
+            runner.store.initialize()
+            cancel(job, runner)
+        except _SETUP_ERRORS:
+            Job.objects.filter(pk=job.pk, cancel_requested=True).update(
+                notice="취소 상태를 확인하지 못했습니다. 운영자에게 문의해 주세요."
+            )
+            return False
+        return True
+    exists = store.db_path.exists()
+    if exists:
+        try:
+            store.get_run(job.run_id)
+        except RunNotFoundError:
+            exists = False
+        except _SETUP_ERRORS:
+            pass  # An unreadable or running engine cannot safely be declared failed.
+    if exists:
+        Job.objects.filter(
+            pk=job.pk, state__in=["queued", "running"], cancel_requested=False
+        ).update(notice="작업 설정을 확인하지 못했습니다. 운영자에게 문의하거나 취소해 주세요.")
+        return False
+    Job.objects.filter(
+        pk=job.pk, state__in=["queued", "running"], cancel_requested=False
+    ).update(state="failed", notice="작업을 시작하지 못했습니다. 운영자에게 문의해 주세요.")
+    return True
 
 
 def run_one() -> bool:
@@ -40,8 +78,11 @@ def _run_one() -> bool:
         runner.store.initialize()
         cancel(job, runner)
         return True
-    runner = engine()
-    runner.store.initialize()
+    try:
+        runner = engine(job.workflow_id)
+        runner.store.initialize()
+    except _SETUP_ERRORS:
+        return _setup_unavailable(job)
     threshold = (datetime.now(UTC) - timedelta(seconds=runner.lease_ttl_seconds)).strftime(
         "%Y-%m-%d %H:%M:%S"
     )

@@ -1,0 +1,5 @@
+{% extends "store_app/base.html" %}{% block content %}
+<h1>{{ store.name }} · 주간 보고서 요청 확인</h1><p role="alert">{{ notice }}</p>
+{% if active %}<p><a class="button" href="{% url 'job' active.id %}">진행 중인 {{ active.get_workflow_id_display }} 확인</a></p>{% endif %}
+{% if form %}<p>{{ week_start }} 주 · {{ channel }} · 한국 시간</p><form method="post" action="{% url 'report-request' store.id %}">{% csrf_token %}{{ form.as_p }}<button>같은 요청 다시 보내기</button></form>{% endif %}
+<p><a href="{% url 'outcomes' store.id %}{% if week_start %}?week_start={{ week_start }}&amp;channel={{ channel }}{% endif %}">최신 숫자 다시 확인</a></p>{% endblock %}

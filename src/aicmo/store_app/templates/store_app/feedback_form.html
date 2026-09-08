@@ -1,0 +1,11 @@
+{% extends "store_app/base.html" %}{% block title %}승인 문안 피드백 · 우리 가게 홍보{% endblock %}{% block content %}
+<h1>{{ job.store.name }} · 이 문안의 피드백</h1>
+<p>실제 승인한 문안 한 건에 대한 사용 여부와 다음 문안에 참고할 제안입니다. 게시 완료나 매출 기여를 증명하는 기록은 아닙니다.</p>
+{% if notice %}<p role="alert">{{ notice }}</p>{% endif %}
+<details class="card" open><summary>피드백할 승인 문안</summary><pre class="copy">{{ source.text }}</pre></details>
+<section class="card"><h2>사장님이 직접 확인한 내용</h2><p>고객 이름·연락처·개인 주문·비밀 정보를 넣지 마세요. 입력을 정리한 뒤 원본과 승인본, 연결한 근거를 함께 보여 드립니다.</p>
+<form id="feedback-form" method="post" action="{% url 'feedback-create' job.id item_key %}">{% csrf_token %}{{ form.as_p }}<button>입력한 피드백 확인 준비</button></form>
+<p class="muted">확인은 15분 동안 유효합니다. 이 단계에서는 다음 문안에 반영하지 않습니다. 후보 확인·사장님 승인·최종 검토 후 별도로 반영을 선택합니다.</p></section>
+<p>보고서는 이 가게의 최근 20개 보고서 중 검토가 끝난 네이버 자료만 선택할 수 있습니다. 관측한 날짜가 보고서의 주에 포함되어야 합니다. 자료를 연결해도 문안 때문에 성과가 발생했다고 판단하지 않습니다.</p>
+<p class="muted">원본·승인본·이유·보고서를 합친 전체 근거는 6,000자까지 검토합니다. 초과한 근거를 조용히 자르거나 보고서를 빼지 않습니다. 요청 범위·검토 이용 조건은 운영자에게 확인해 주세요.</p>
+<p><a href="{% url 'delivery' job.id %}#{{ item_key }}">승인 문안으로 돌아가기</a></p>{% endblock %}

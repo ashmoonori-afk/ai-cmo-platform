@@ -15,9 +15,10 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from django.contrib.auth.models import User
-from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.files.uploadedfile import SimpleUploadedFile, UploadedFile
 from django.http import QueryDict
-from django.test import TransactionTestCase, override_settings
+from django.test import RequestFactory, TransactionTestCase, override_settings
+from django.test.client import encode_multipart
 from django.utils.datastructures import MultiValueDict
 from PIL import Image
 
@@ -85,7 +86,11 @@ class PhotoTests(TransactionTestCase):
         self.assertNotIn("private-owner-filename", json.dumps(job.inputs))
         self.assertEqual(
             services.submit(
-                self.store, job.submission_key, job.inputs["brief_json"], job.inputs["photos_json"]
+                self.store,
+                job.submission_key,
+                job.inputs["brief_json"],
+                job.inputs["photos_json"],
+                actor=self.owner,
             ).pk,
             job.pk,
         )
@@ -93,7 +98,11 @@ class PhotoTests(TransactionTestCase):
         changed["photos"][0]["caption"] = "변경한 사진 설명"
         with self.assertRaises(services.StoreActionError):
             services.submit(
-                self.store, job.submission_key, job.inputs["brief_json"], json.dumps(changed)
+                self.store,
+                job.submission_key,
+                job.inputs["brief_json"],
+                json.dumps(changed),
+                actor=self.owner,
             )
         response = self.client.get(f"/jobs/{job.id}/photo/")
         self.assertEqual(response.status_code, 200)
@@ -154,7 +163,9 @@ class PhotoTests(TransactionTestCase):
         manifest = photos.store_photo(
             self.store, normalize_photo(upload().read()), "가게 사진", "own_photo"
         )
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], manifest)
+        job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], manifest, actor=self.owner
+        )
         photo = parse_photos(job.inputs).photos[0]
         other = User.objects.create_user("photo-other")
         self.client.force_login(other)
@@ -172,7 +183,9 @@ class PhotoTests(TransactionTestCase):
     def test_photo_namespace_junction_never_writes_or_previews_redirected_asset(self) -> None:
         normalized = normalize_photo(upload().read())
         manifest = photos.store_photo(self.store, normalized, "사진", "own_photo")
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], manifest)
+        job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], manifest, actor=self.owner
+        )
         photo = parse_photos(job.inputs).photos[0]
         target = asset_path(self.root, "shop", photo.sha256).parent
         redirected = self.root / "redirected-photos"
@@ -204,7 +217,9 @@ class PhotoTests(TransactionTestCase):
         manifest = photos.store_photo(
             self.store, normalize_photo(upload().read()), "원래 사진", "own_photo"
         )
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], manifest)
+        job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], manifest, actor=self.owner
+        )
         self.assertTrue(self.tick())
         job.refresh_from_db()
         _, pack_sha, photo_sha = services.preview(job)
@@ -234,7 +249,9 @@ class PhotoTests(TransactionTestCase):
         manifest = photos.store_photo(
             self.store, normalize_photo(upload().read()), "사진", "own_photo"
         )
-        job = services.submit(self.store, uuid.uuid4(), _brief()["brief_json"], manifest)
+        job = services.submit(
+            self.store, uuid.uuid4(), _brief()["brief_json"], manifest, actor=self.owner
+        )
         missing = self.root / "missing-runs.sqlite3"
         reader = replace(self.runner, store=WorkflowStore(missing, read_only=True))
         with patch("aicmo.store_app.photos.services.reader", return_value=reader):
@@ -294,3 +311,49 @@ class PhotoTests(TransactionTestCase):
             self.assertFalse(form.is_valid())
             self.assertNotIn("sk-secret", form.as_p())
             self.assertIn("가게 내부의 합성 사진", form.as_p())
+        for values, has_file in (
+            (["sk-secretSyntheticPhoto"], False),
+            ([" "], False),
+            (["", ""], False),
+            (["", "sk-secretSyntheticPhoto"], False),
+            ([""], True),
+        ):
+            with self.subTest(values=values, has_file=has_file):
+                post = QueryDict(mutable=True)
+                post.update({name: str(value) for name, value in data.items()})
+                post.setlist("photo", values)
+                files = (
+                    MultiValueDict[str, UploadedFile]({"photo": [upload()]}) if has_file else None
+                )
+                form = PackForm(post, files)
+                self.assertFalse(form.is_valid())
+                self.assertNotIn("sk-secret", form.as_p())
+                self.assertIn("이번 주 평소대로 영업합니다.", form.as_p())
+        self.assertEqual(Job.objects.count(), 0)
+
+        # Match a browser's unselected FileInput, including its empty filename header.
+        boundary = "SyntheticNoPhotoBoundary"
+        close = f"--{boundary}--\r\n".encode()
+        empty_photo = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="photo"; filename=""\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n\r\n"
+        ).encode()
+        body = encode_multipart(boundary, data).removesuffix(close) + empty_photo + close
+        content_type = f"multipart/form-data; boundary={boundary}"
+        path = f"/stores/{self.store.pk}/new/"
+        request = RequestFactory().post(path, body, content_type=content_type)
+        self.assertEqual(request.POST.getlist("photo"), [""])
+        self.assertNotIn("photo", request.FILES)
+        form = PackForm(request.POST, request.FILES)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIsNone(form.cleaned_data["photo"])
+        with (
+            patch("aicmo.store_app.services.engine", return_value=self.runner),
+            patch("aicmo.store_app.photos.store_photo", side_effect=AssertionError),
+        ):
+            response = self.client.post(path, body, content_type=content_type)
+        self.assertEqual(response.status_code, 302)
+        job = Job.objects.get()
+        self.assertNotIn("photos_json", job.inputs)
+        self.assertEqual(parse_photos(job.inputs).photos, [])
