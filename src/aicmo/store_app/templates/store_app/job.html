@@ -1,4 +1,4 @@
-{% extends "store_app/base.html" %}{% block content %}<h1>{{ job.store.name }} · 주간 실행팩</h1><p role="status"><span class="badge">{{ job.get_state_display }}</span></p>
+{% extends "store_app/base.html" %}{% block content %}<h1>{{ job.store.name }} · {{ job.get_workflow_id_display }}</h1><p role="status"><span class="badge">{{ job.get_state_display }}</span></p>
 {% if notice %}<p role="alert">{{ notice }}</p>{% endif %}
 {% if job.state == 'failed' %}<section class="card"><h2>다음 요청 전에 확인해 주세요</h2><p>{{ allowance.detail }}</p><p>현재 사용 가능 건수 안내입니다. 작업이 중단된 이유는 위 안내를 확인하거나 운영자에게 문의해 주세요.</p></section>{% endif %}
 {% if job.cancel_requested %}<p role="status">취소를 요청했습니다. 진행 중인 호출이 끝난 뒤 반영됩니다. 이미 납품이 완료된 경우 완료 상태를 유지합니다.</p>{% endif %}
@@ -10,7 +10,7 @@
 {% for reply in pack.replies %}<article class="card"><h2>리뷰 {{ reply.review_index|add:1 }} 답글</h2><p class="copy">{{ reply.body }}</p></article>{% endfor %}
 <section class="card"><h2>이번 주 실행 계획</h2>{% for action in pack.weekly_actions %}<p>{{ action.when }} · {{ action.action }} ({{ action.minutes }}분 계획)</p>{% endfor %}</section>{% endif %}
 {% if job.state == 'waiting_approval' and pack and not has_edit %}<section class="card"><h2>이 문안으로 최종 검토를 요청할까요?</h2><p>제목·본문·가격·기간을 확인하세요. 수정이 필요하면 직접 고칠 수 있어요.</p><p><a href="{% url 'edit' job.id %}">문안 직접 고치기</a></p><form method="post" action="{% url 'approve' job.id %}">{% csrf_token %}{{ approval_form.as_p }}<button>확인하고 최종 검토 요청</button></form></section>{% endif %}
-{% if job.state == 'success' %}<section class="card"><h2>승인 문안을 사용할 수 있어요</h2><div class="actions"><a class="button" href="{% url 'delivery' job.id %}">문안 복사·직접 게시 기록</a><form method="post" action="{% url 'download' job.id %}">{% csrf_token %}<button class="secondary">실행팩 ZIP 저장</button></form></div><p>문안과 파일을 확인한 뒤 사장님이 직접 게시하세요. 복사·저장은 외부 게시 완료를 뜻하지 않습니다.</p></section>{% endif %}
+{% if job.workflow_id == 'local-store-pack' and job.state == 'success' %}<section class="card"><h2>승인 문안을 사용할 수 있어요</h2><div class="actions"><a class="button" href="{% url 'delivery' job.id %}">문안 복사·직접 게시 기록</a><form method="post" action="{% url 'download' job.id %}">{% csrf_token %}<button class="secondary">실행팩 ZIP 저장</button></form></div><p>문안과 파일을 확인한 뒤 사장님이 직접 게시하세요. 복사·저장은 외부 게시 완료를 뜻하지 않습니다.</p></section>{% endif %}
 {% if job.state == 'queued' or job.state == 'running' or job.state == 'waiting_approval' %}<form method="post" action="{% url 'cancel' job.id %}">{% csrf_token %}<button class="secondary">이 작업 취소</button></form>{% endif %}
-{% if job.state == 'waiting_approval' or job.state == 'cancelled' %}<p><a href="{% url 'rewrite' job.id %}">짧게 · 친근하게 · 가격 수정으로 다시 작성</a></p>{% endif %}
+{% if job.workflow_id == 'local-store-pack' %}{% if job.state == 'waiting_approval' or job.state == 'cancelled' %}<p><a href="{% url 'rewrite' job.id %}">짧게 · 친근하게 · 가격 수정으로 다시 작성</a></p>{% endif %}{% endif %}
 <p><a href="{% url 'home' %}">오늘과 최근 작업으로</a></p>{% endblock %}

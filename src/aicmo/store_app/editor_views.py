@@ -25,7 +25,7 @@ _ERRORS = (AicmoError, OSError, ValueError, sqlite3.Error, services.StoreActionE
 @require_http_methods(["GET", "POST"])
 @never_cache
 def edit(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
-    job = services.owned_job(request.user, job_id)
+    job = services.owned_pack_job(request.user, job_id)
     runner = services.reader()
     asynchronous = request.headers.get("Accept") == "application/json"
     form = None
@@ -114,7 +114,7 @@ def edit(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
 @require_http_methods(["GET", "POST"])
 @never_cache
 def confirmation(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
-    job = services.owned_job(request.user, job_id)
+    job = services.owned_pack_job(request.user, job_id)
     runner = services.reader()
     try:
         if request.method == "POST":
@@ -179,7 +179,7 @@ def confirmation(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
 @require_POST
 @never_cache
 def restore(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
-    job = services.owned_job(request.user, job_id)
+    job = services.owned_pack_job(request.user, job_id)
     try:
         validate_post(request.POST, set(editor.RestoreForm().fields))
         form = editor.RestoreForm(request.POST)

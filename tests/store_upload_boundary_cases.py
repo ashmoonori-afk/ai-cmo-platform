@@ -18,6 +18,7 @@ from django.test import Client, RequestFactory, TransactionTestCase, override_se
 from django.test.client import BOUNDARY, MULTIPART_CONTENT, encode_multipart
 from PIL import Image
 
+from aicmo.outcomes import MAX_CSV_BYTES
 from aicmo.photos import MAX_PHOTO_BYTES, parse_photos
 from aicmo.quota import configure_quota, current_period, quota_status
 from aicmo.store_app import uploads
@@ -228,3 +229,66 @@ class UploadBoundaryTests(TransactionTestCase):
         self.assertTrue(all(handler.file.closed for handler in written))
         engine.assert_not_called()
         self.assert_no_work()
+
+    def test_csv_route_enforces_32_kib_before_temporary_write(self) -> None:
+        self.assertEqual(MAX_CSV_BYTES, 32 * 1024)
+        persisted: list[int] = []
+        receive = TemporaryFileUploadHandler.receive_data_chunk
+
+        def track_write(handler: TemporaryFileUploadHandler, raw_data: bytes, start: int) -> None:
+            receive(handler, raw_data, start)
+            persisted.append(handler.file.tell())
+
+        with (
+            patch.object(uploads.PhotoUploadHandler, "chunk_size", 8 * 1024),
+            patch.object(TemporaryFileUploadHandler, "receive_data_chunk", track_write),
+            patch("aicmo.store_app.services.engine", return_value=self.runner) as engine,
+        ):
+            response = self.client.post(
+                f"/stores/{self.store.pk}/outcomes/preview/",
+                {
+                    "input_kind": "web_csv",
+                    # Neither a photo MIME/filename nor a form field raises this route's cap.
+                    "max_file_bytes": str(MAX_PHOTO_BYTES),
+                    "csv_file": SimpleUploadedFile(
+                        "sk-syntheticCsvSecret123456789.png",
+                        b"x" * (MAX_CSV_BYTES + 1),
+                        "image/png",
+                    ),
+                },
+            )
+        self.assertContains(response, "32 KiB", status_code=400)
+        self.assertNotContains(response, "20 MiB", status_code=400)
+        self.assertNotContains(response, "sk-syntheticCsvSecret123456789", status_code=400)
+        self.assertIn("no-store", response["Cache-Control"])
+        self.assertTrue(persisted)
+        self.assertLessEqual(max(persisted), MAX_CSV_BYTES)
+        engine.assert_not_called()
+        self.assert_no_work()
+
+    def test_csv_multiple_files_and_interruption_keep_csv_recovery_guidance(self) -> None:
+        source = b"date,channel,posts,inquiries,reservations,coupon_redemptions\n"
+        data = {
+            "input_kind": "web_csv",
+            "csv_file": [SimpleUploadedFile("synthetic.csv", source) for _ in range(2)],
+        }
+        multiple = encode_multipart(BOUNDARY, data)
+        data["csv_file"] = [SimpleUploadedFile("synthetic.csv", source)]
+        interrupted = encode_multipart(BOUNDARY, data).rsplit(
+            b"\r\n--" + BOUNDARY.encode() + b"--", 1
+        )[0][:-16]
+        for body in (multiple, interrupted):
+            with (
+                self.subTest(multiple=body is multiple),
+                patch("aicmo.store_app.services.engine", return_value=self.runner) as engine,
+            ):
+                response = self.client.generic(
+                    "POST",
+                    f"/stores/{self.store.pk}/outcomes/preview/",
+                    body,
+                    content_type=MULTIPART_CONTENT,
+                )
+                self.assertContains(response, "CSV 파일 1개", status_code=400)
+                self.assertNotContains(response, "20 MiB", status_code=400)
+                engine.assert_not_called()
+                self.assert_no_work()

@@ -119,7 +119,7 @@ def context(job: Job, bundle_sha: str, card_key: str, file_sha: str) -> dict[str
 @require_POST
 @never_cache
 def record(request: HttpRequest, job_id: uuid.UUID, item_key: str) -> HttpResponse:  # noqa: C901 — atomic report/replay boundary
-    job = services.owned_job(request.user, job_id)
+    job = services.owned_pack_job(request.user, job_id)
     form = submitted(request.POST)
     if request.FILES:
         form.add_error(None, "파일 없이 게시 날짜만 입력해 주세요.")
@@ -134,7 +134,7 @@ def record(request: HttpRequest, job_id: uuid.UUID, item_key: str) -> HttpRespon
                 actor = User.objects.filter(pk=request.user.pk, is_active=True).first()
                 if actor is None:
                     raise Http404
-                job = services.owned_job(actor, job_id)
+                job = services.owned_pack_job(actor, job_id)
                 snapshot = delivery.snapshot(job)
                 card = next((card for card in snapshot.cards if card.key == item_key), None)
                 data = form.cleaned_data

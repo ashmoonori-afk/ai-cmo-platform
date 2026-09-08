@@ -26,6 +26,11 @@ class Store(models.Model):
 
 
 class Job(models.Model):
+    WORKFLOWS: ClassVar = [
+        ("local-store-pack", "주간 실행팩"),
+        ("weekly-report", "주간 성과 보고서"),
+        ("local-pack-feedback", "문안 피드백 검토"),
+    ]
     STATES: ClassVar = [
         (name, label)
         for name, label in (
@@ -43,6 +48,9 @@ class Job(models.Model):
     )
     store: models.ForeignKey[Store, Store] = models.ForeignKey(Store, on_delete=models.PROTECT)
     submission_key: models.UUIDField[uuid.UUID, uuid.UUID] = models.UUIDField()
+    workflow_id: models.CharField[str, str] = models.CharField(
+        max_length=24, choices=WORKFLOWS, default="local-store-pack"
+    )
     inputs = models.JSONField()
     state: models.CharField[str, str] = models.CharField(
         max_length=24, choices=STATES, default="queued"
@@ -55,6 +63,12 @@ class Job(models.Model):
 
     class Meta:
         constraints: ClassVar = [
+            models.CheckConstraint(
+                condition=models.Q(
+                    workflow_id__in=["local-store-pack", "weekly-report", "local-pack-feedback"]
+                ),
+                name="store_job_workflow",
+            ),
             models.UniqueConstraint(fields=["store", "submission_key"], name="store_submission"),
             models.UniqueConstraint(
                 fields=["store"],

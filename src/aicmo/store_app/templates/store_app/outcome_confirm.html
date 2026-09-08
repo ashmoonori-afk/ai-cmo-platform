@@ -1,0 +1,17 @@
+{% extends "store_app/base.html" %}{% block content %}
+<h1>{{ store.name }}의 숫자 확인</h1>
+<p>{{ preview.week_start }}부터 한 주 · {{ preview.channel }} · 한국 시간</p>
+<p>아직 저장하지 않았습니다. 날짜·채널·숫자를 확인해 주세요. 빈칸은 미입력이고 0은 확인한 0건입니다.</p>
+{% for row in rows %}<section class="card"><h2>{{ row.date }}</h2>
+<p>{% if row.prior %}기존: 게시 {{ row.existing.0|default_if_none:"미입력" }} · 문의 {{ row.existing.1|default_if_none:"미입력" }} · 예약 {{ row.existing.2|default_if_none:"미입력" }} · 쿠폰 {{ row.existing.3|default_if_none:"미입력" }}{% else %}기존 기록 없음{% endif %}</p>
+<p><strong>입력:</strong> 게시 {{ row.values.0|default_if_none:"미입력" }} · 문의 {{ row.values.1|default_if_none:"미입력" }} · 예약 {{ row.values.2|default_if_none:"미입력" }} · 쿠폰 {{ row.values.3|default_if_none:"미입력" }}</p>
+</section>{% endfor %}
+{% if confirmation.replace_required %}<p role="alert">기존값이 바뀌는 날짜가 있습니다. 입력한 빈칸도 미입력으로 정정됩니다. 이 목록에 없는 날짜는 바뀌지 않습니다.</p>{% endif %}
+<details><summary>입력 자료의 형식과 확인 정보</summary><p>{{ preview.encoding }} · {% if input_kind == "web_manual" %}직접 입력한 숫자{% else %}확인한 CSV 숫자{% endif %}</p><p>자료 SHA-256: <code>{{ preview.source_sha256 }}</code></p></details>
+<form id="outcome-confirm-form" method="post" action="{% url 'outcomes-confirm' store.id %}">{% csrf_token %}
+<input type="hidden" name="token" value="{{ confirmation.token }}"><input type="hidden" name="raw_csv" value="{{ confirmation.raw_csv }}">
+<label><input type="checkbox" name="checked" required> 날짜·채널·숫자와 빈칸을 확인했습니다.</label>
+{% if confirmation.replace_required %}<label><input type="checkbox" name="replace" required> 기존값을 이 내용으로 정정합니다. 빈칸도 미입력으로 바뀝니다.</label>{% endif %}
+<div class="actions"><button name="action" value="save">확인한 숫자 저장</button><button name="action" value="edit" class="secondary" formnovalidate>다시 입력</button></div>
+</form><p class="muted">15분이 지나거나 자료가 달라지면 다시 미리 봐야 합니다.</p>
+{% endblock %}

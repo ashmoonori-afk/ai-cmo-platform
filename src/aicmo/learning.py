@@ -211,6 +211,34 @@ def learn_feedback(runner: WorkflowStepExecutor, run_id: str) -> Path:
     return target
 
 
+def feedback_is_learned(runner: WorkflowStepExecutor, run_id: str) -> bool:
+    """Read a verified receipt and its exact KB block without creating or repairing either."""
+    digest, inputs, feedback = _approved_candidate(runner, run_id)
+    with runner.store.connect() as connection:
+        row = connection.execute(
+            "select * from learned_feedback where event_sha256=?", (digest,)
+        ).fetchone()
+    if row is None:
+        return False
+    receipt_digest, _, _ = _approved_candidate(runner, str(row["feedback_run_id"]))
+    target = resolve_inside_repo(
+        runner.repo_root, f"knowledge-base/{inputs['client']}/approved-feedback.md", {}
+    )
+    block = record_block(
+        f"<!-- learned:v1:{digest} -->",
+        f"[{feedback.observed_on} / local-pack-feedback / {digest[:16]}]",
+        feedback.insight,
+    )
+    if (
+        receipt_digest != digest
+        or row["client"] != inputs["client"]
+        or row["insight"] != feedback.insight
+        or block not in target.read_bytes()
+    ):
+        raise WorkflowExecutionError(STEP, "stored learning receipt or KB block differs")
+    return True
+
+
 def learning_context(runner: WorkflowStepExecutor, client: str) -> str:
     repo, store = runner.repo_root, runner.store
     slug = parse_safe_id("client", client)

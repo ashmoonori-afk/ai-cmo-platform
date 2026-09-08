@@ -67,7 +67,7 @@ def snapshot(job: Job) -> DeliverySnapshot:
 def detail(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
     from aicmo.store_app import publication  # noqa: PLC0415 — publication records verify snapshots
 
-    job = services.owned_job(request.user, job_id)
+    job = services.owned_pack_job(request.user, job_id)
     try:
         delivery = snapshot(job)
         rows = [

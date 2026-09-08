@@ -1,0 +1,24 @@
+{% extends "store_app/base.html" %}{% block title %}주간 성과 보고서 · 우리 가게 홍보{% endblock %}{% block content %}
+<h1>{{ job.store.name }} · 주간 성과 보고서</h1>
+{% if notice %}<p role="alert">{{ notice }}</p>{% endif %}
+{% if report %}
+<p role="status"><span class="badge">검토 완료</span> · {{ report.source.week_start }} 주 · {{ report.source.channel }} · 한국 시간</p>
+<p>요청할 때 확인한 기록으로 작성하고 검토한 보고서입니다. 미입력은 0이나 실제 성과로 바꾸지 않습니다.</p>
+{% if report.current is False %}<p role="alert">보고서를 요청한 뒤 성과 기록이 정정되었습니다. 아래 보고서는 요청 당시 기록을 유지합니다. 최신 숫자를 확인하고 새 보고서를 요청할 수 있습니다.</p>
+{% elif report.current is None %}<p role="alert">현재 기록과 같은지 확인할 수 없습니다. 아래는 요청 당시 기록으로 검토한 보고서입니다.</p>{% endif %}
+<div class="actions"><form method="post" action="{% url 'report-download' job.id %}">{% csrf_token %}<button>검토한 보고서 파일 저장</button></form><a class="button secondary" href="{% url 'outcomes' job.store.id %}?week_start={{ report.source.week_start }}&amp;channel={{ report.source.channel }}">최신 기록 확인·새 보고서 요청</a></div>
+<section class="card" aria-labelledby="report-body"><h2 id="report-body">검토한 보고서 원문</h2><pre class="copy">{{ report.text }}</pre></section>
+<section aria-labelledby="next-actions"><h2 id="next-actions">다음에 할 일 선택</h2><p>아래는 보고서의 기록 범위를 참고한 제안입니다. 선택해도 실제 실행·성과·문안 사용·학습으로 자동 기록하지 않습니다.</p>
+{% for item in actions %}<article class="card"><h3>{{ item.card.title }}</h3><p>{{ item.card.evidence }}</p>
+<form id="action-{{ item.card.code }}" method="post" action="{% url 'report-action' job.id %}">{% csrf_token %}{{ item.form.token }}{{ item.form.reason.as_field_group }}<div class="actions"><button name="decision" value="selected">이 행동 선택</button><button class="secondary" name="decision" value="declined">이번에는 하지 않음</button></div></form></article>{% endfor %}</section>
+<details class="card"><summary>사용한 기록과 파일 확인</summary><p>기록 버전: <code>{{ report.source.snapshot_sha256 }}</code></p><p>보고서 파일: <code>{{ report.sha256 }}</code></p></details>
+{% else %}
+<p role="status"><span class="badge">{% if job.state == 'success' %}파일 확인 필요{% else %}{{ job.get_state_display }}{% endif %}</span></p>
+<section class="card">{% if job.state == 'success' %}<h2>보고서를 다시 확인해야 합니다</h2><p>검토한 파일과 현재 파일이 같은지 확인하지 못했습니다. 확인 전에는 보고서를 제공하지 않습니다.</p>{% else %}<h2>검토 완료 전입니다</h2><p>저장한 숫자 화면과 검토를 마친 보고서는 다릅니다. 검토가 끝나야 이 화면에서 보고서를 읽고 저장할 수 있습니다.</p>{% endif %}
+{% if job.state == 'queued' or job.state == 'running' %}<p>화면을 닫아도 접수한 요청은 보관됩니다. 잠시 후 상태를 다시 확인해 주세요.</p>{% endif %}
+<a class="button secondary" href="{% url 'report' job.id %}">상태 새로 확인</a></section>
+{% if job.cancel_requested %}<p role="status">취소 요청을 처리하고 있습니다.</p>{% endif %}
+{% if job.state == 'queued' or job.state == 'running' or job.state == 'waiting_approval' %}<form method="post" action="{% url 'cancel' job.id %}">{% csrf_token %}<button class="secondary">이 작업 취소</button></form>{% endif %}
+<p><a href="{% url 'outcomes' job.store.id %}">성과 기록 확인</a></p>
+{% endif %}
+<p><a href="{% url 'home' %}">오늘과 최근 작업으로</a></p>{% endblock %}

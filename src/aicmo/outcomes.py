@@ -1,3 +1,5 @@
+# pyright: reportImportCycles=false
+# source_input loads the typed snapshot parser lazily, after this module is initialized.
 from __future__ import annotations
 
 import csv
@@ -6,19 +8,31 @@ import io
 import json
 import re
 import sqlite3
-from datetime import date, timedelta
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal, Never
+from typing import Annotated, Literal, NamedTuple, Never, Self
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from aicmo.errors import WorkflowExecutionError
-from aicmo.paths import parse_safe_id, resolve_inside_repo
+from aicmo.paths import SAFE_ID_PATTERN, parse_safe_id, resolve_inside_repo
 from aicmo.source_input import source_checked_date
 from aicmo.store import WorkflowStore
 
 type Channel = Literal["naver", "google-business", "instagram", "offline"]
 type Count = Annotated[int, Field(strict=True, ge=0, le=1_000_000)]
+type InputKind = Literal["cli_csv", "web_csv", "web_manual"]
+type WebRecorder = Annotated[str, Field(pattern=r"^web-user:[1-9][0-9]*$")]
 METRICS = ("posts", "inquiries", "reservations", "coupon_redemptions")
 CSV_COLUMNS = ("date", "channel", *METRICS)
 MAX_CSV_BYTES = 32 * 1024
@@ -26,6 +40,7 @@ DAYS_PER_WEEK = 7
 _CHANNEL: TypeAdapter[Channel] = TypeAdapter(Channel)
 _LABELS = ("게시", "문의", "예약", "쿠폰 사용")
 _STEP_ID = "outcomes"
+_PROVENANCE_FIELDS = {"input_kind", "recorded_at", "recorded_by"}
 
 
 def _fail(reason: str) -> Never:
@@ -77,9 +92,39 @@ class DailyOutcome(BaseModel):
         return value
 
 
+class OutcomeImportSource(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: InputKind
+    recorded_by: WebRecorder | None = None
+
+    @model_validator(mode="after")
+    def valid_recorder(self) -> Self:
+        if (self.kind == "cli_csv") != (self.recorded_by is None):
+            reason = "web input requires a web recorder; CLI input cannot identify a web recorder"
+            raise ValueError(reason)
+        return self
+
+
 class StoredOutcome(DailyOutcome):
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     revision: int = Field(strict=True, ge=1)
+    input_kind: InputKind | None = None
+    recorded_at: AwareDatetime | None = None
+    recorded_by: WebRecorder | None = None
+
+    @model_validator(mode="after")
+    def valid_provenance(self) -> Self:
+        if self.input_kind is None:
+            if self.recorded_at is not None or self.recorded_by is not None:
+                reason = "legacy outcome provenance must remain unknown"
+                raise ValueError(reason)
+        else:
+            OutcomeImportSource(kind=self.input_kind, recorded_by=self.recorded_by)
+            if self.recorded_at is None:
+                reason = "new outcome provenance requires a recording time"
+                raise ValueError(reason)
+        return self
 
 
 class OutcomePreview(BaseModel):
@@ -97,7 +142,78 @@ class OutcomePreview(BaseModel):
 
     @property
     def confirmation_sha256(self) -> str:
-        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+        # Existing confirmation receipts hash v1 observations, never new provenance fields.
+        raw = self.model_dump_json(exclude={"existing": {"__all__": _PROVENANCE_FIELDS}})
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+
+class OutcomeMetric(NamedTuple):
+    current: int | None
+    current_days: int
+    previous: int | None
+    previous_days: int
+    change_percent: float | None
+
+
+class OutcomeSnapshot(BaseModel):
+    """Immutable report evidence; callers must obtain it from the authorized server ledger."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    schema_version: Literal["aicmo.manual-outcomes.v2"] = "aicmo.manual-outcomes.v2"
+    client: str = Field(pattern=SAFE_ID_PATTERN.pattern)
+    week_start: str
+    channel: Channel
+    current: tuple[StoredOutcome, ...] = Field(max_length=DAYS_PER_WEEK)
+    previous: tuple[StoredOutcome, ...] = Field(max_length=DAYS_PER_WEEK)
+
+    @model_validator(mode="after")
+    def valid_scope(self) -> Self:
+        start = _day(self.week_start)
+        if start.weekday() != 0:
+            reason = "snapshot week must start on Monday"
+            raise ValueError(reason)
+        for first, rows in ((start, self.current), (start - timedelta(days=7), self.previous)):
+            dates = [row.date for row in rows]
+            if dates != sorted(set(dates)) or any(
+                row.channel != self.channel
+                or not first <= date.fromisoformat(row.date) < first + timedelta(days=7)
+                for row in rows
+            ):
+                reason = "snapshot rows must be unique, ordered, and inside their week and channel"
+                raise ValueError(reason)
+        return self
+
+    @property
+    def snapshot_sha256(self) -> str:
+        raw = json.dumps(self.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    @property
+    def totals(self) -> dict[str, OutcomeMetric]:
+        result: dict[str, OutcomeMetric] = {}
+        for metric in METRICS:
+            current, days = _total(self.current, metric)
+            previous, prior_days = _total(self.previous, metric)
+            percent = (
+                (current - previous) / previous * 100
+                if days == prior_days == DAYS_PER_WEEK and previous and current is not None
+                else None
+            )
+            result[metric] = OutcomeMetric(current, days, previous, prior_days, percent)
+        return result
+
+
+def parse_outcomes_snapshot(raw: str) -> OutcomeSnapshot:
+    # Shared JSON hook after the source modules have initialized.
+    from aicmo.local_pack import unique_json_pairs  # noqa: PLC0415
+
+    try:
+        if len(raw.encode("utf-8")) > 64 * 1024:
+            _fail("outcome snapshot exceeds 64 KiB")
+        json.loads(raw, object_pairs_hook=unique_json_pairs)
+        return OutcomeSnapshot.model_validate_json(raw)
+    except (ValueError, RecursionError):
+        _fail("invalid outcome snapshot; confirm the current store records again")
 
 
 def _client(root: Path, client: str) -> None:
@@ -127,17 +243,21 @@ def _csv_record(row: list[str], index: int) -> DailyOutcome:
         _fail(f"invalid CSV row {index}; check date/channel/counts")
 
 
-def _read_csv(
-    source: Path, week_start: str, channel: Channel
-) -> tuple[bytes, tuple[DailyOutcome, ...]]:
-    start = week_start_date(week_start)
+def _read_csv(source: Path) -> bytes:
     try:
         with source.open("rb") as stream:
-            raw = stream.read(MAX_CSV_BYTES + 1)
+            return stream.read(MAX_CSV_BYTES + 1)
+    except OSError:
+        _fail("cannot read CSV; use comma-separated UTF-8 or UTF-8 BOM")
+
+
+def _parse_csv(raw: bytes, week_start: str, channel: Channel) -> tuple[DailyOutcome, ...]:
+    start = week_start_date(week_start)
+    try:
         if len(raw) > MAX_CSV_BYTES:
             _fail("CSV exceeds 32 KiB")
         rows = list(csv.reader(io.StringIO(raw.decode("utf-8-sig"), newline=""), strict=True))
-    except (OSError, UnicodeError, csv.Error):
+    except (UnicodeError, csv.Error):
         _fail("cannot read CSV; use comma-separated UTF-8 or UTF-8 BOM")
     if not rows or tuple(rows[0]) != CSV_COLUMNS:
         _fail("CSV columns must be exactly: " + ",".join(CSV_COLUMNS))
@@ -151,17 +271,47 @@ def _read_csv(
         if any(item.date == record.date for item in parsed):
             _fail(f"duplicate date at CSV row {index}")
         parsed.append(record)
-    return raw, tuple(sorted(parsed, key=lambda item: item.date))
+    return tuple(sorted(parsed, key=lambda item: item.date))
+
+
+def daily_outcome_csv(record: DailyOutcome) -> bytes:
+    # Uploaded CSV bytes never pass through this serializer: BOM/newlines remain their source.
+    record = DailyOutcome.model_validate(record.model_dump())
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(CSV_COLUMNS)
+    writer.writerow([getattr(record, name) for name in CSV_COLUMNS])
+    return stream.getvalue().encode("utf-8")
+
+
+@contextmanager
+def _read_connection(store: WorkflowStore) -> Iterator[sqlite3.Connection | None]:
+    try:
+        store.db_path.stat()
+    except FileNotFoundError:
+        yield None
+        return
+    with WorkflowStore(store.db_path, read_only=True).connect() as connection:
+        connection.execute("begin")
+        yield connection
 
 
 def _stored(
-    connection: sqlite3.Connection,
+    connection: sqlite3.Connection | None,
     client: str,
     start: date,
     channel: Channel,
 ) -> tuple[StoredOutcome, ...]:
+    if connection is None:
+        return ()
+    columns = {str(row["name"]) for row in connection.execute("pragma table_info(manual_outcomes)")}
+    if not columns:
+        return ()
+    required = {"client", "observed_on", "channel", "payload_json", "source_sha256", "revision"}
+    if not required <= columns:
+        _fail("stored outcome schema is incomplete; restore verified data before reporting")
     rows = connection.execute(
-        "select observed_on, payload_json, source_sha256, revision from manual_outcomes "
+        "select * from manual_outcomes "
         "where client = ? and channel = ? and observed_on >= ? and observed_on < ? "
         "order by observed_on",
         (client, channel, start.isoformat(), (start + timedelta(days=7)).isoformat()),
@@ -178,6 +328,10 @@ def _stored(
                         **item.model_dump(),
                         "source_sha256": row["source_sha256"],
                         "revision": row["revision"],
+                        **{
+                            name: row[name] if name in columns else None
+                            for name in _PROVENANCE_FIELDS
+                        },
                     }
                 )
             )
@@ -187,7 +341,7 @@ def _stored(
 
 
 def _preview(
-    connection: sqlite3.Connection,
+    connection: sqlite3.Connection | None,
     client: str,
     week_start: str,
     channel: Channel,
@@ -213,11 +367,21 @@ def preview_outcomes(
     channel: Channel,
     source: Path,
 ) -> OutcomePreview:
+    return preview_outcomes_bytes(root, store, client, week_start, channel, _read_csv(source))
+
+
+def preview_outcomes_bytes(
+    root: Path,
+    store: WorkflowStore,
+    client: str,
+    week_start: str,
+    channel: Channel,
+    raw: bytes,
+) -> OutcomePreview:
     _client(root, client)
     channel = parse_channel(channel)
-    raw, records = _read_csv(source, week_start, channel)
-    store.initialize()
-    with store.connect() as connection:
+    records = _parse_csv(raw, week_start, channel)
+    with _read_connection(store) as connection:
         return _preview(connection, client, week_start, channel, raw, records)
 
 
@@ -232,9 +396,43 @@ def import_outcomes(
     *,
     replace: bool = False,
 ) -> int:
+    return import_outcomes_bytes(
+        root,
+        store,
+        client,
+        week_start,
+        channel,
+        _read_csv(source),
+        confirmation_sha256,
+        replace=replace,
+        provenance=OutcomeImportSource(kind="cli_csv"),
+    )
+
+
+def _unchanged(item: DailyOutcome, old: StoredOutcome | None) -> bool:
+    return (
+        all(getattr(item, metric) is None for metric in METRICS)
+        if old is None
+        else item.model_dump() == old.model_dump(include=set(DailyOutcome.model_fields))
+    )
+
+
+def import_outcomes_bytes(
+    root: Path,
+    store: WorkflowStore,
+    client: str,
+    week_start: str,
+    channel: Channel,
+    raw: bytes,
+    confirmation_sha256: str,
+    *,
+    replace: bool = False,
+    provenance: OutcomeImportSource,
+) -> int:
     _client(root, client)
     channel = parse_channel(channel)
-    raw, records = _read_csv(source, week_start, channel)
+    records = _parse_csv(raw, week_start, channel)
+    provenance = OutcomeImportSource.model_validate(provenance.model_dump())
     store.initialize()
     with store.connect() as connection:
         connection.execute("begin immediate")
@@ -245,29 +443,27 @@ def import_outcomes(
             "and client = ? and week_start = ? and channel = ? and source_sha256 = ?",
             (confirmation_sha256, client, week_start, channel, preview.source_sha256),
         ).fetchone()
-        if receipt and all(
-            item.date in existing
-            and item.model_dump()
-            == existing[item.date].model_dump(exclude={"revision", "source_sha256"})
-            for item in records
-        ):
+        if receipt and all(_unchanged(item, existing.get(item.date)) for item in records):
             return 0
         if confirmation_sha256 != preview.confirmation_sha256:
             _fail("CSV or stored data changed; preview again before importing")
         changed = 0
+        recorded_at = datetime.now(UTC).isoformat()
         for item in records:
             old = existing.get(item.date)
-            if old is not None:
-                if item.model_dump() == old.model_dump(exclude={"revision", "source_sha256"}):
-                    continue
-                if not replace:
-                    _fail("existing daily values differ; preview and use --replace to correct")
+            if _unchanged(item, old):
+                continue
+            if old is not None and not replace:
+                _fail("existing daily values differ; preview and use --replace to correct")
             connection.execute(
                 "insert into manual_outcomes "
-                "(client, observed_on, channel, payload_json, source_sha256, revision) "
-                "values (?, ?, ?, ?, ?, ?) on conflict(client, observed_on, channel) "
+                "(client, observed_on, channel, payload_json, source_sha256, revision, "
+                "input_kind, recorded_at, recorded_by) values (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "on conflict(client, observed_on, channel) "
                 "do update set payload_json=excluded.payload_json, "
-                "source_sha256=excluded.source_sha256, revision=excluded.revision",
+                "source_sha256=excluded.source_sha256, revision=excluded.revision, "
+                "input_kind=excluded.input_kind, recorded_at=excluded.recorded_at, "
+                "recorded_by=excluded.recorded_by",
                 (
                     client,
                     item.date,
@@ -275,6 +471,9 @@ def import_outcomes(
                     item.model_dump_json(),
                     preview.source_sha256,
                     old.revision + 1 if old else 1,
+                    provenance.kind,
+                    recorded_at,
+                    provenance.recorded_by,
                 ),
             )
             changed += 1
@@ -291,41 +490,72 @@ def _total(rows: tuple[StoredOutcome, ...], metric: str) -> tuple[int | None, in
     return (sum(values) if values else None), len(values)
 
 
+def read_weekly_outcomes(
+    root: Path,
+    store: WorkflowStore,
+    client: str,
+    week_start: str,
+    channel: Channel,
+) -> OutcomeSnapshot:
+    _client(root, client)
+    channel = parse_channel(channel)
+    start = week_start_date(week_start)
+    with _read_connection(store) as connection:
+        current = _stored(connection, client, start, channel)
+        previous = _stored(connection, client, start - timedelta(days=7), channel)
+    return OutcomeSnapshot(
+        client=client, week_start=week_start, channel=channel, current=current, previous=previous
+    )
+
+
+def _legacy_snapshot_sha256(snapshot: OutcomeSnapshot) -> str:
+    fields = set(DailyOutcome.model_fields) | {"source_sha256", "revision"}
+    raw = json.dumps(
+        {
+            "schema_version": "aicmo.manual-outcomes.v1",
+            "client": snapshot.client,
+            "week_start": snapshot.week_start,
+            "channel": snapshot.channel,
+            "current": [row.model_dump(include=fields) for row in snapshot.current],
+            "previous": [row.model_dump(include=fields) for row in snapshot.previous],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 def weekly_outcomes_report(
     root: Path,
     store: WorkflowStore,
     client: str,
     week_start: str,
     channel: Channel,
+    *,
+    snapshot: OutcomeSnapshot | None = None,
 ) -> str:
-    _client(root, client)
-    channel = parse_channel(channel)
+    if snapshot is None:
+        snapshot = read_weekly_outcomes(root, store, client, week_start, channel)
+        digest = _legacy_snapshot_sha256(snapshot)
+    else:
+        _client(root, client)
+        snapshot = OutcomeSnapshot.model_validate_json(snapshot.model_dump_json())
+        if (snapshot.client, snapshot.week_start, snapshot.channel) != (
+            client,
+            week_start,
+            channel,
+        ):
+            _fail("report snapshot scope differs from the requested store/week/channel")
+        digest = snapshot.snapshot_sha256
+    current, previous = snapshot.current, snapshot.previous
     start = week_start_date(week_start)
-    store.initialize()
-    with store.connect() as connection:
-        connection.execute("begin")
-        current = _stored(connection, client, start, channel)
-        previous = _stored(connection, client, start - timedelta(days=7), channel)
-    snapshot = json.dumps(
-        {
-            "schema_version": "aicmo.manual-outcomes.v1",
-            "client": client,
-            "week_start": week_start,
-            "channel": channel,
-            "current": [row.model_dump() for row in current],
-            "previous": [row.model_dump() for row in previous],
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-    digest = hashlib.sha256(snapshot.encode()).hexdigest()
     lines = [
         f"# 수기 성과 주간 보고서 — {client}",
         "",
         "## 한 장 요약",
         "",
         f"기간: {week_start} ~ {(start + timedelta(days=6)).isoformat()} / {channel} / Asia/Seoul",
-        "출처: 로컬 CLI에 저장된 사용자 제공 일별 수기 기록. 독립 검증된 실적이 아닙니다.",
+        "출처: 사용자가 입력해 저장한 일별 수기·CSV 기록. 독립 검증된 실적이 아닙니다.",
         "기록자의 가게 권한과 현장 실적은 별도 확인 대상입니다.",
         "빈칸은 미입력이고 0은 확인한 0건입니다. 자료가 없는 날은 0으로 합산하지 않습니다.",
         "이 기록만으로 AI의 매출 기여나 원인과 결과를 판단할 수 없습니다.",
@@ -335,12 +565,12 @@ def weekly_outcomes_report(
         "| 지표 | 이번 주 관측 부분합 | 입력 일수 | 지난주 관측 부분합 | 입력 일수 | 증감률 |",
         "|---|---:|---:|---:|---:|---:|",
     ]
+    totals = snapshot.totals
     for metric, label in zip(METRICS, _LABELS, strict=True):
-        total, days = _total(current, metric)
-        prior, prior_days = _total(previous, metric)
+        total, days, prior, prior_days, percent = totals[metric]
         change = "비교 불가 (미입력 또는 지난주 0)"
-        if days == prior_days == DAYS_PER_WEEK and prior and total is not None:
-            change = f"{(total - prior) / prior * 100:+.1f}%"
+        if percent is not None:
+            change = f"{percent:+.1f}%"
         lines.append(
             f"| {label} | {total if total is not None else '미입력'} | {days}/7 | "
             f"{prior if prior is not None else '미입력'} | {prior_days}/7 | {change} |"
@@ -371,6 +601,15 @@ def weekly_outcomes_report(
     ]
     for row in (*previous, *current):
         lines.append(f"- {row.date} / 수정 {row.revision} / CSV SHA-256 `{row.source_sha256}`")
+        if row.input_kind is None or row.recorded_at is None:
+            lines.append("  이전 기록 · 입력경로/기록시각 미확인")
+        else:
+            source = {"cli_csv": "CLI CSV", "web_csv": "웹 CSV", "web_manual": "웹 수기"}[
+                row.input_kind
+            ]
+            lines.append(f"  입력: {source} / 기록시각: {row.recorded_at.isoformat()}")
+            if row.recorded_by is not None:
+                lines.append(f"  웹 기록자 참조: `{row.recorded_by}`")
     lines += [
         "",
         "## 다음 단계",

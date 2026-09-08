@@ -4,6 +4,7 @@ inputs:
   client: required
   week_start: required
   channel: optional
+  outcomes_snapshot_json: optional
 steps:
   - id: load_context
     type: file.load

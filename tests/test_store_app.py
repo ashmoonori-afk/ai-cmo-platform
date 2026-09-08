@@ -24,6 +24,11 @@ import pytest
         "tests.store_onboarding_metadata_cases",
         "tests.store_boundary_cases",
         "tests.store_upload_boundary_cases",
+        "tests.store_outcomes_cases",
+        "tests.store_native_job_cases",
+        "tests.store_report_cases",
+        "tests.store_action_cases",
+        "tests.store_feedback_cases",
     ],
 )
 def test_django_store_app(tmp_path: Path, label: str) -> None:

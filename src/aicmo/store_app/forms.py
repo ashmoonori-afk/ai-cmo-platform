@@ -59,6 +59,8 @@ class PackForm(forms.Form):
         safe: dict[str, str] = {}
         errors: list[tuple[str | None, str]] = []
         allowed = (set(self.fields) - {"photo"}) | {"csrfmiddlewaretoken"}
+        if self.data.get("photo") == "" and "photo" not in self.files:
+            allowed.add("photo")  # An unselected browser FileInput can be an empty POST field.
         if set(self.data) - allowed or (
             isinstance(self.data, QueryDict)
             and any(len(self.data.getlist(name)) != 1 for name in self.data)

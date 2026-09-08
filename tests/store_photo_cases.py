@@ -15,9 +15,10 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from django.contrib.auth.models import User
-from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.files.uploadedfile import SimpleUploadedFile, UploadedFile
 from django.http import QueryDict
-from django.test import TransactionTestCase, override_settings
+from django.test import RequestFactory, TransactionTestCase, override_settings
+from django.test.client import encode_multipart
 from django.utils.datastructures import MultiValueDict
 from PIL import Image
 
@@ -310,3 +311,49 @@ class PhotoTests(TransactionTestCase):
             self.assertFalse(form.is_valid())
             self.assertNotIn("sk-secret", form.as_p())
             self.assertIn("가게 내부의 합성 사진", form.as_p())
+        for values, has_file in (
+            (["sk-secretSyntheticPhoto"], False),
+            ([" "], False),
+            (["", ""], False),
+            (["", "sk-secretSyntheticPhoto"], False),
+            ([""], True),
+        ):
+            with self.subTest(values=values, has_file=has_file):
+                post = QueryDict(mutable=True)
+                post.update({name: str(value) for name, value in data.items()})
+                post.setlist("photo", values)
+                files = (
+                    MultiValueDict[str, UploadedFile]({"photo": [upload()]}) if has_file else None
+                )
+                form = PackForm(post, files)
+                self.assertFalse(form.is_valid())
+                self.assertNotIn("sk-secret", form.as_p())
+                self.assertIn("이번 주 평소대로 영업합니다.", form.as_p())
+        self.assertEqual(Job.objects.count(), 0)
+
+        # Match a browser's unselected FileInput, including its empty filename header.
+        boundary = "SyntheticNoPhotoBoundary"
+        close = f"--{boundary}--\r\n".encode()
+        empty_photo = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="photo"; filename=""\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n\r\n"
+        ).encode()
+        body = encode_multipart(boundary, data).removesuffix(close) + empty_photo + close
+        content_type = f"multipart/form-data; boundary={boundary}"
+        path = f"/stores/{self.store.pk}/new/"
+        request = RequestFactory().post(path, body, content_type=content_type)
+        self.assertEqual(request.POST.getlist("photo"), [""])
+        self.assertNotIn("photo", request.FILES)
+        form = PackForm(request.POST, request.FILES)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIsNone(form.cleaned_data["photo"])
+        with (
+            patch("aicmo.store_app.services.engine", return_value=self.runner),
+            patch("aicmo.store_app.photos.store_photo", side_effect=AssertionError),
+        ):
+            response = self.client.post(path, body, content_type=content_type)
+        self.assertEqual(response.status_code, 302)
+        job = Job.objects.get()
+        self.assertNotIn("photos_json", job.inputs)
+        self.assertEqual(parse_photos(job.inputs).photos, [])

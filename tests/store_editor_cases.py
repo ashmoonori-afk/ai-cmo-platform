@@ -110,6 +110,18 @@ class EditorTests(TransactionTestCase):
         self.assertTrue(services.download(self.job).is_file())
         self.assertEqual(self.runner.store.get_step_attempt(self.job.run_id, "drafts"), 1)
         self.assertEqual(quota_status(self.runner.store, "shop", current_period())["draft_used"], 1)
+        # A repeated approval must also reject a wrongly linked engine workflow.
+        before = Job.objects.get(pk=self.job.pk).approval
+        with self.runner.store.connect() as connection:
+            connection.execute(
+                "insert into workflows(workflow_id,name,spec_path) "
+                "values('weekly-report','Synthetic report','workflows/weekly-report.workflow.yaml')"
+            )
+            connection.execute(
+                "update runs set workflow_id='weekly-report' where run_id=?", (self.job.run_id,)
+            )
+        self.assertEqual(self.client.post(self.url + "confirm/", confirmation).status_code, 404)
+        self.assertEqual(Job.objects.get(pk=self.job.pk).approval, before)
 
     def test_autosave_replay_conflict_relogin_and_restore(self) -> None:
         data = self.data(news_0_body="사장님이 저장한 안내입니다.", action="autosave")

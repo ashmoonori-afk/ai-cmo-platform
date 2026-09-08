@@ -1,0 +1,39 @@
+{% extends "store_app/base.html" %}{% load tz %}{% block content %}
+<h1>{{ store.name }}의 성과 기록</h1>
+<p>직접 확인한 일별 숫자를 기록합니다. 빈칸은 <strong>미입력</strong>, 0은 <strong>확인한 0건</strong>입니다.</p>
+<nav class="actions" aria-label="숫자 입력 바로가기"><a class="button" href="#daily-heading">하루 숫자 입력</a><a class="button secondary" href="#csv-heading">CSV 가져오기</a></nav>
+<form id="scope-form" method="get" class="card">{{ scope.as_p }}<button>기간과 채널 보기</button></form>
+{% if notice %}<p role="alert">{{ notice }}</p>{% endif %}
+{% if snapshot %}
+<section aria-labelledby="outcome-summary"><h2 id="outcome-summary">저장한 숫자 보기</h2>
+<p>{{ week_start|date:"Y년 n월 j일" }} ~ {{ week_end|date:"n월 j일" }} · 한국 시간</p>
+<p class="muted">입력한 날의 부분합입니다. 자료가 없는 날을 0으로 채우지 않습니다. 검토된 주간 보고서나 매출 기여의 증거는 아닙니다.</p>
+{% if not snapshot.current %}<p role="status">아직 기록 없음 — 확인한 숫자부터 입력해 주세요.</p>{% endif %}
+<div class="task-grid">{% for item in totals %}<article><h3>{{ item.label }}</h3>
+<p>이번 주 {% if item.metric.current is None %}미입력{% else %}<strong>{{ item.metric.current }}건</strong>{% endif %} · 입력 {{ item.metric.current_days }}/7일</p>
+<p>지난주 {% if item.metric.previous is None %}미입력{% else %}{{ item.metric.previous }}건{% endif %} · 입력 {{ item.metric.previous_days }}/7일</p>
+<p>{% if item.metric.change_percent is not None %}지난주 대비 증감률 {{ item.metric.change_percent|floatformat:1 }}%{% else %}증감률 없음: 두 주 모두 7일 입력하고 지난주 합계가 0보다 커야 비교할 수 있습니다.{% endif %}</p>
+</article>{% endfor %}</div>
+<details class="card"><summary>일별 기록과 입력 출처</summary>
+{% for item in records %}<section><h3>{{ item.day|date:"n월 j일" }}</h3>
+{% if item.future %}<p>아직 오지 않은 날짜입니다.</p>{% else %}
+<p>게시 {{ item.values.0|default_if_none:"미입력" }} · 문의 {{ item.values.1|default_if_none:"미입력" }} · 예약 {{ item.values.2|default_if_none:"미입력" }} · 쿠폰 {{ item.values.3|default_if_none:"미입력" }}</p>
+{% if item.row %}<p class="muted">{% if item.row.input_kind == "web_manual" %}웹에서 직접 입력{% elif item.row.input_kind == "web_csv" %}웹에서 CSV 가져오기{% elif item.row.input_kind == "cli_csv" %}운영 도구의 CSV 기록{% else %}이전 기록 · 입력경로 미확인{% endif %} · 수정 {{ item.row.revision }}
+{% if item.row.recorded_at %} · {{ item.row.recorded_at|timezone:"Asia/Seoul"|date:"Y년 n월 j일 H:i" }} (한국 시간){% else %} · 기록시각 미확인{% endif %}</p>{% endif %}
+<a href="{{ item.edit_url }}#daily-heading">{% if item.row %}이날 숫자 정정{% else %}이날 숫자 입력{% endif %}</a>
+{% endif %}</section>{% endfor %}
+</details></section>{% endif %}
+{% if report_form %}<section class="card" aria-labelledby="report-heading"><h2 id="report-heading">이 기록으로 주간 보고서 요청</h2>
+<p>위에 표시한 이번 주와 지난주 기록으로 보고서를 작성하고 검토합니다. 입력하지 않은 값은 미입력으로 남깁니다. 보고서가 완성되면 최근 작업에서 읽고 저장할 수 있습니다.</p>
+<p class="muted">확인은 15분 동안 유효합니다. 요청 가능 여부는 운영 설정과 이용 한도에 따라 결정됩니다. 가게에서 진행 중인 작업이 있다면 먼저 확인해 주세요.</p>
+<form id="report-form" method="post" action="{% url 'report-request' store.id %}">{% csrf_token %}{{ report_form.as_p }}<button>확인한 기록으로 보고서 요청</button></form></section>{% endif %}
+<section class="card" aria-labelledby="daily-heading"><h2 id="daily-heading">하루 숫자 입력</h2>
+<p>한 번에 하루를 입력합니다. 기존 날짜를 다시 입력하면 저장 전에 기존값과 비교할 수 있습니다. 고객 이름·연락처·주문 내용은 넣지 마세요.</p>
+<form id="daily-form" method="post" action="{% url 'outcomes-preview' store.id %}">{% csrf_token %}{{ daily_form.as_p }}<button>입력한 숫자 미리보기</button></form></section>
+<section class="card" aria-labelledby="csv-heading"><h2 id="csv-heading">CSV 가져오기</h2>
+<p>열 이름과 순서: <code>date,channel,posts,inquiries,reservations,coupon_redemptions</code></p>
+<p>수식·소수·음수·고객 메모는 받지 않습니다. CSV에 없는 날짜는 그대로 두고, 포함한 날짜의 네 숫자는 빈칸까지 함께 정정합니다.</p>
+<form id="csv-form" method="post" enctype="multipart/form-data" action="{% url 'outcomes-preview' store.id %}">{% csrf_token %}{{ csv_form.as_p }}<button>CSV 숫자 미리보기</button></form></section>
+<p class="muted">문안의 게시 보고를 이 숫자에 자동 합산하지 않습니다. 실제 게시·문의·예약을 직접 확인해 주세요.</p>
+<a href="{% url 'home' %}">오늘로 돌아가기</a>
+{% endblock %}

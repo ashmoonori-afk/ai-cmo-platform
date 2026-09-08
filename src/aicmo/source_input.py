@@ -52,7 +52,7 @@ def source_checked_date(now: datetime | None = None) -> date:
     return (now or datetime.now(UTC)).astimezone(_KST).date()
 
 
-def _minimize_inputs(inputs: dict[str, str]) -> dict[str, str]:
+def _minimize_inputs(inputs: dict[str, str]) -> dict[str, str]:  # noqa: C901 — explicit typed input boundaries
     step_id = "inputs"
     approved = inputs.get("public_contact_approved", "false").casefold()
     if approved not in {"true", "false"}:
@@ -96,6 +96,13 @@ def _minimize_inputs(inputs: dict[str, str]) -> dict[str, str]:
             safe[key] = (
                 value if feedback.model_dump() == json.loads(value) else feedback.model_dump_json()
             )
+        elif key == "outcomes_snapshot_json":
+            # Outcomes uses this module's date helper.
+            from aicmo.outcomes import parse_outcomes_snapshot  # noqa: PLC0415
+
+            parse_outcomes_snapshot(value)
+            # This schema contains typed observations and provenance, never free prose.
+            safe[key] = value
         elif key == "client" and re.fullmatch(r"web-client-[a-f0-9]{32}", value):
             safe[key] = value
         else:

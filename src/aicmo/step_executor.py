@@ -40,7 +40,7 @@ from aicmo.models import (
     WorkflowSpec,
     WorkflowStep,
 )
-from aicmo.outcomes import parse_channel, weekly_outcomes_report
+from aicmo.outcomes import parse_channel, parse_outcomes_snapshot, weekly_outcomes_report
 from aicmo.paths import native_io_path, resolve_inside_repo
 from aicmo.photos import PHOTO_STEP, parse_photos, photo_manifest, verify_photo_manifest
 from aicmo.redaction import minimize_customer_pii
@@ -190,6 +190,11 @@ class WorkflowStepExecutor:
                         context.get("client", ""),
                         context.get("week_start", ""),
                         parse_channel(context.get("channel", "naver")),
+                        snapshot=(
+                            parse_outcomes_snapshot(context["outcomes_snapshot_json"])
+                            if "outcomes_snapshot_json" in context
+                            else None
+                        ),
                     )
                     return self._write_outputs(step, context, content, lease_signal)
                 case StepType.PHOTOS_PREPARE:

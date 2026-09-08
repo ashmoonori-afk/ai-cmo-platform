@@ -57,6 +57,21 @@ def run_spec_digest(spec: WorkflowSpec, inputs: dict[str, str]) -> str:
         for step in spec.steps
     )
     normalized_spec = spec.model_copy(update={"steps": normalized_steps, "source_path": None})
+    if (
+        spec.id == "weekly-report"
+        and "outcomes_snapshot_json" not in inputs
+        and spec.inputs.get("outcomes_snapshot_json") == "optional"
+    ):
+        # The absent snapshot keeps the original CLI execution contract and its digest.
+        normalized_spec = normalized_spec.model_copy(
+            update={
+                "inputs": {
+                    key: value
+                    for key, value in spec.inputs.items()
+                    if key != "outcomes_snapshot_json"
+                }
+            }
+        )
     workflow_bytes = json.dumps(
         normalized_spec.model_dump(mode="json", exclude={"source_path"}),
         ensure_ascii=False,

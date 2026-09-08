@@ -66,6 +66,9 @@ SCHEMA = (
         payload_json text not null,
         source_sha256 text not null check (length(source_sha256) = 64),
         revision integer not null check (revision > 0),
+        input_kind text,
+        recorded_at text,
+        recorded_by text,
         primary key (client, observed_on, channel)
     )
     """,

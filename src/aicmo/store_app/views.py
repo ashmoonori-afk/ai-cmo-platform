@@ -127,6 +127,12 @@ def create(request: HttpRequest, store_id: int) -> HttpResponse:
 @never_cache
 def detail(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
     job = services.owned_job(request.user, job_id)
+    if job.workflow_id == "weekly-report":
+        return redirect("report", job_id=job.id)
+    if job.workflow_id == "local-pack-feedback":
+        return redirect("feedback", job_id=job.id)
+    if job.workflow_id != "local-store-pack":
+        raise Http404
     pack, approval_form, notice = None, None, str(job.notice)
     selected_photos = []
     if job.state in ("waiting_approval", "success", "needs_work"):
@@ -155,8 +161,8 @@ def detail(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
 @require_POST
 @never_cache
 def approve(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
+    job = services.owned_pack_job(request.user, job_id)
     form = ApprovalForm(request.POST)
-    job = services.owned_job(request.user, job_id)
     if form.is_valid():
         try:
             services.request_approval(
@@ -197,7 +203,7 @@ def cancel(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
 @require_POST
 @never_cache
 def download(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse | FileResponse:
-    job = services.owned_job(request.user, job_id)
+    job = services.owned_pack_job(request.user, job_id)
     try:
         path: Path = services.download(job)
     except (AicmoError, OSError, ValueError, sqlite3.Error, services.StoreActionError):

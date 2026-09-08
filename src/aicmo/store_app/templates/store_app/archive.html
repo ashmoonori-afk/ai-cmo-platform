@@ -2,7 +2,7 @@
 {% block title %}작업 보관함 · 우리 가게 홍보{% endblock %}
 {% block content %}
 <h1>작업 보관함</h1>
-<p class="muted">가게와 기간을 골라 이전 문안을 다시 확인하세요. 날짜는 한국 시간 기준입니다.</p>
+<p class="muted">가게와 기간을 골라 이전 문안과 보고서를 다시 확인하세요. 날짜는 한국 시간 기준입니다.</p>
 <form method="get" class="card" aria-label="보관함 검색">
 {% if form.errors %}<div role="alert"><p>검색 조건을 확인해 주세요.</p>{{ form.non_field_errors }}{{ form.page.errors }}</div>{% endif %}
 <div class="task-grid">
@@ -16,7 +16,7 @@
 {% if page_obj %}
 <p role="status">총 {{ page_obj.paginator.count }}건 · {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}페이지</p>
 {% for job in page_obj %}
-<article class="card"><span class="badge">{{ job.get_state_display }}</span><h2><a href="{% url 'job' job.id %}">{{ job.store.name }} · 주간 실행팩</a></h2><p class="muted">{{ job.created_at|date:"Y년 n월 j일 H:i" }}</p></article>
+<article class="card"><span class="badge">{{ job.get_state_display }}</span><h2><a href="{% url 'job' job.id %}">{{ job.store.name }} · {{ job.get_workflow_id_display }}</a></h2><p class="muted">{{ job.created_at|date:"Y년 n월 j일 H:i" }}</p></article>
 {% endfor %}
 {% if page_obj.has_other_pages %}<nav class="actions" aria-label="보관함 페이지">
 {% if page_obj.has_previous %}<a class="button secondary" rel="prev" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">이전 페이지</a>{% endif %}

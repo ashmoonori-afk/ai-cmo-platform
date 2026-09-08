@@ -9,7 +9,7 @@ from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
 
-from aicmo.local_pack import LocalPack, PackBrief, validate_pack
+from aicmo.local_pack import WORKFLOW_ID, LocalPack, PackBrief, validate_pack
 from aicmo.models import StepStatus
 from aicmo.pack_edits import (
     EditApproval,
@@ -79,6 +79,8 @@ class RestoreForm(forms.Form):
 
 
 def editable(job: Job, runner: WorkflowRunner) -> None:
+    if job.workflow_id != WORKFLOW_ID:
+        raise Http404
     if (
         job.state != "waiting_approval"
         or job.cancel_requested
@@ -159,16 +161,17 @@ def save(  # noqa: C901, PLR0912 — atomic authority/revision/replay/checkpoint
     checkpoint: bool = False,
     restore: int | None = None,
 ) -> EditDraft:
+    job = services.owned_pack_job(actor, job.pk)
     # Lock order: per-run OS lock -> short Django transaction. Never invert it.
     with web_run_lock(runner.repo_root, job.run_id, blocking=False):
-        job.refresh_from_db()
+        job = services.owned_pack_job(actor, job.pk)
         base, original = inspect_base(runner, job.run_id)
         if digest(base.model_dump_json()) != base_token:
             reason = "기준 문안이 바뀌었습니다. 최신 화면을 확인해 주세요."
             raise StoreActionError(reason)
         inputs = runner.store.get_inputs(job.run_id)
         with transaction.atomic():
-            job = services.owned_job(services.fresh_actor(actor), job.pk)
+            job = services.owned_pack_job(services.fresh_actor(actor), job.pk)
             if job.inputs != inputs or job.store.client != inputs.get("client"):
                 raise Http404
             editable(job, runner)
@@ -224,14 +227,17 @@ def confirm(
     edited_sha: str,
     actor: AbstractBaseUser | AnonymousUser,
 ) -> Job:
+    job = services.owned_pack_job(actor, job.pk)
     with web_run_lock(runner.repo_root, job.run_id, blocking=False):
-        job.refresh_from_db()
+        job = services.owned_pack_job(actor, job.pk)
         if job.approval:
             with transaction.atomic():
-                job = services.owned_job(services.fresh_actor(actor), job.pk)
-                if job.inputs != runner.store.get_inputs(
-                    job.run_id
-                ) or job.store.client != job.inputs.get("client"):
+                job = services.owned_pack_job(services.fresh_actor(actor), job.pk)
+                if (
+                    runner.store.get_run(job.run_id)["workflow_id"] != WORKFLOW_ID
+                    or job.inputs != runner.store.get_inputs(job.run_id)
+                    or job.store.client != job.inputs.get("client")
+                ):
                     raise Http404
                 prior = EditApproval.model_validate_json(json.dumps(job.approval))
                 if (
@@ -263,7 +269,7 @@ def confirm(
             requested_at=timezone.now(),
         )
         with transaction.atomic():
-            job = services.owned_job(services.fresh_actor(actor), job.pk)
+            job = services.owned_pack_job(services.fresh_actor(actor), job.pk)
             if job.inputs != runner.store.get_inputs(
                 job.run_id
             ) or job.store.client != job.inputs.get("client"):

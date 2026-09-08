@@ -16,7 +16,7 @@ from django.views.decorators.http import require_http_methods
 from pydantic import TypeAdapter
 
 from aicmo.errors import AicmoError
-from aicmo.local_pack import LocalPack, parse_brief
+from aicmo.local_pack import WORKFLOW_ID, LocalPack, parse_brief
 from aicmo.pack_edits import EditBase, digest, inspect_base, pack_text
 from aicmo.pack_rewrite import RewriteRequest, facts_sha, parse_rewrite
 from aicmo.runner import WorkflowRunner
@@ -55,6 +55,8 @@ class ConfirmForm(forms.Form):
 
 def source(job: Job, runner: WorkflowRunner) -> tuple[EditBase, LocalPack, int]:
     job.refresh_from_db()
+    if job.workflow_id != WORKFLOW_ID:
+        raise Http404
     if (
         job.state != "cancelled"
         or job.cancel_requested
@@ -114,6 +116,7 @@ def prepare(job: Job, runner: WorkflowRunner, form: RewriteForm, user_id: str) -
 def submit(
     job: Job, runner: WorkflowRunner, token: str, actor: AbstractBaseUser | AnonymousUser
 ) -> Job:
+    job = services.owned_pack_job(actor, job.pk)
     user_id = str(actor.pk)
     payload = TypeAdapter(dict[str, str]).validate_python(
         signing.loads(token, salt=_SALT, max_age=3600), strict=True
@@ -156,7 +159,7 @@ def submit(
                 raise services.StoreActionError(reason)
             services.engine()  # Validate configuration without generating or charging.
         with transaction.atomic():
-            current = services.owned_job(services.fresh_actor(actor), job.pk)
+            current = services.owned_pack_job(services.fresh_actor(actor), job.pk)
             if (
                 current.inputs != job.inputs
                 or current.store.pk != job.store.pk
@@ -177,7 +180,7 @@ def submit(
 @require_http_methods(["GET", "POST"])
 @never_cache
 def rewrite(request: HttpRequest, job_id: uuid.UUID) -> HttpResponse:
-    job = services.owned_job(request.user, job_id)
+    job = services.owned_pack_job(request.user, job_id)
     runner = services.reader()
     form = None
     context: dict[str, object] = {"job": job, "allowance": guidance.allowance(job.store)}
