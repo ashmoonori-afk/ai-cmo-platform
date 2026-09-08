@@ -1,0 +1,87 @@
+id: daily-cmo-loop
+name: Daily CMO Loop (daily digest, opportunity scan, channel drafts, owner approval)
+inputs:
+  client: required
+  channels: optional
+  data_drop: optional
+steps:
+  - id: load_context
+    type: file.load
+    paths:
+      - clients/${client}/config.md
+      - clients/${client}/brand-guidelines.md
+      - knowledge-base/${client}/insights.md
+    outputs:
+      - artifacts/${run_id}/context.md
+
+  - id: digest
+    type: agent
+    role: data-analyst
+    depends_on: [load_context]
+    prompt: playbooks/00-chains/daily-cmo-loop.md
+    outputs:
+      - artifacts/${run_id}/digest.md
+
+  - id: seo_scan
+    type: agent
+    role: seo-specialist
+    depends_on: [load_context]
+    prompt: playbooks/05-seo/keyword-research.md
+    outputs:
+      - artifacts/${run_id}/seo-opportunities.md
+
+  - id: community_scan
+    type: agent
+    role: community-manager
+    depends_on: [load_context]
+    prompt: playbooks/11-community/reddit-engagement.md
+    outputs:
+      - artifacts/${run_id}/community-opportunities.md
+
+  - id: channel_drafts
+    type: agent
+    role: copywriter
+    depends_on: [digest, seo_scan, community_scan]
+    prompt: playbooks/03-content/x-twitter-daily.md
+    outputs:
+      - artifacts/${run_id}/channel-drafts.md
+
+  - id: quality_gate
+    type: gate
+    role: reviewer
+    prompt: prompts/shared/gate-check.md
+    depends_on: [digest, seo_scan, community_scan, channel_drafts]
+    pass_if: "status in ['PASS','WARN']"
+    outputs:
+      - artifacts/${run_id}/quality-review.json
+
+  - id: owner_gate
+    type: gate
+    requires_approval: true
+    depends_on: [quality_gate]
+    outputs:
+      - artifacts/${run_id}/owner-approval.json
+
+  - id: kb_queue
+    type: kb.update
+    depends_on: [owner_gate]
+    outputs:
+      - artifacts/${run_id}/kb-queue.md
+
+  - id: daily_feed
+    type: agent
+    role: reporter
+    depends_on: [digest, seo_scan, community_scan, channel_drafts, quality_gate, owner_gate, kb_queue]
+    prompt: playbooks/00-chains/daily-cmo-loop.md
+    outputs:
+      - artifacts/${run_id}/daily-feed.md
+
+  - id: delivery_gate
+    type: gate
+    role: reviewer
+    prompt: prompts/shared/gate-check.md
+    terminal_delivery: true
+    depends_on: [daily_feed, digest, seo_scan, community_scan, channel_drafts]
+    pass_if: "status in ['PASS','WARN']"
+    outputs:
+      - artifacts/${run_id}/delivery-review.json

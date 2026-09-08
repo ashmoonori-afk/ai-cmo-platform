@@ -8,7 +8,7 @@ from typing import Literal
 
 import pytest
 
-from aicmo.adapters import AgentRequest, AgentResult
+from aicmo.adapters import AgentRequest, AgentResult, GenerationUsage
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
 from tests.conftest import lines, write_text
@@ -42,6 +42,34 @@ class SequencedReviewAdapter:
     def generate(self, request: AgentRequest) -> AgentResult:
         self.seen.append(request)
         return next(self._results)
+
+
+def test_review_and_repair_have_separate_usage_and_minimized_input(tmp_path: Path) -> None:
+    usage = GenerationUsage("anthropic", "claude-sonnet-4-6", input_tokens=120, output_tokens=35)
+    adapter = SequencedReviewAdapter(
+        [
+            AgentResult("PASS Customer name: Jane Doe", usage=usage),
+            AgentResult(_decision("PASS"), usage=usage),
+        ]
+    )
+    runner, store = _runner(tmp_path, adapter)
+    assert runner.run("review-fixture", "usage-case", {"client": "acme"}).status == "success"
+    assert "Jane Doe" not in adapter.seen[1].prompt_source
+    with store.connect() as connection:
+        rows = connection.execute(
+            "select payload_json from events where event_type='agent.call_finished' "
+            "and step_id='review' order by event_id",
+        ).fetchall()
+    payloads = [json.loads(row["payload_json"]) for row in rows]
+    assert len(payloads) == 2
+    assert payloads[0]["call_id"] != payloads[1]["call_id"]
+    assert [p["role"] for p in payloads] == ["reviewer", "reviewer-format-repair"]
+    assert all(p["usage_status"] == "reported" for p in payloads)
+    assert all(p["input_tokens"] == "120" for p in payloads)
+    assert all(p["cost_status"] == "unavailable" for p in payloads)
+    assert all(int(p["elapsed_ms"]) >= 0 for p in payloads)
+    assert all(p["attempt"] == "1" for p in payloads)
+    assert "Jane Doe" not in json.dumps(payloads)
 
 
 def _runner(

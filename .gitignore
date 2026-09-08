@@ -13,6 +13,9 @@ NUL
 .playwright-mcp/
 clients/gyeongjo-b2b/
 knowledge-base/gyeongjo-b2b/
+# Private profiles created by invited store owners.
+clients/web-client-*/
+knowledge-base/web-client-*/
 .venv/
 artifacts/
 .ulw/
@@ -22,6 +25,11 @@ __pycache__/
 *.lock
 .DS_Store
 docs/research/
+# Local product planning and business decisions (keep files, do not publish).
+docs/product/2026-09-05-smb-*.md
+docs/product/2026-09-06-*.md
+docs/product/decisions/
+docs/product/implementation-evidence/*G02*
 knowledge-base/_platform/
 inbox/
 

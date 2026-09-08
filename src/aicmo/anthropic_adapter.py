@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final, Protocol
 
-from aicmo.adapters import AgentRequest, AgentResult, compose_prompt
+from aicmo.adapters import AgentRequest, AgentResult, GenerationUsage, compose_prompt
 from aicmo.errors import AicmoError
 from aicmo.redaction import redact
 
@@ -35,14 +36,18 @@ def resolve_model(alias: str, default: str = _DEFAULT_MODEL) -> str:
         raise AicmoError(msg) from None
 
 
-class _Block(Protocol):
-    @property
-    def text(self) -> str: ...
-
-
 class _Response(Protocol):
     @property
-    def content(self) -> Sequence[_Block]: ...
+    def content(self) -> Sequence[object]: ...
+
+    @property
+    def stop_reason(self) -> str | None: ...
+
+    @property
+    def usage(self) -> object: ...
+
+    @property
+    def model(self) -> str: ...
 
 
 class _Messages(Protocol):
@@ -65,6 +70,35 @@ def _make_client() -> _Client | None:
     return factory()
 
 
+def _token_count(usage: object, name: str) -> int | None:
+    value: object = getattr(usage, name, None)
+    return value if type(value) is int and value >= 0 else None
+
+
+def _response_usage(response: _Response, requested_model: str) -> GenerationUsage:
+    reason = response.stop_reason
+    known_reasons = {
+        "end_turn",
+        "max_tokens",
+        "model_context_window_exceeded",
+        "stop_sequence",
+        "tool_use",
+        "pause_turn",
+        "refusal",
+    }
+    model = response.model
+    return GenerationUsage(
+        provider="anthropic",
+        requested_model=requested_model,
+        response_model=model if re.fullmatch(r"claude-[a-zA-Z0-9.-]{1,100}", model) else None,
+        stop_reason=reason if reason in known_reasons else "unavailable",
+        input_tokens=_token_count(response.usage, "input_tokens"),
+        output_tokens=_token_count(response.usage, "output_tokens"),
+        cache_creation_input_tokens=_token_count(response.usage, "cache_creation_input_tokens"),
+        cache_read_input_tokens=_token_count(response.usage, "cache_read_input_tokens"),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AnthropicAdapter:
     """Live adapter calling the Anthropic Messages API. Degrades gracefully.
@@ -80,16 +114,18 @@ class AnthropicAdapter:
 
     def generate(self, request: AgentRequest) -> AgentResult:
         model = resolve_model(request.model, self.default_model)
+        usage = GenerationUsage(provider="anthropic", requested_model=model)
         try:
             client = self.client or _make_client()
         except Exception as exc:  # noqa: BLE001 — SDK construction errors become a status, never a crash
             detail = redact(f"unavailable: anthropic client error: {str(exc)[:_DETAIL_LIMIT]}")
-            return AgentResult(text="", ok=False, detail=detail)
+            return AgentResult(text="", ok=False, detail=detail, usage=usage)
         if client is None:
             return AgentResult(
                 text="",
                 ok=False,
                 detail="unavailable: set ANTHROPIC_API_KEY and `uv add anthropic`",
+                usage=usage,
             )
         prompt = compose_prompt(request)
         try:
@@ -98,10 +134,29 @@ class AnthropicAdapter:
                 max_tokens=self.max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = "".join(block.text for block in response.content).strip()
+            usage = _response_usage(response, model)
+            if usage.stop_reason != "end_turn":
+                return AgentResult(
+                    text="",
+                    ok=False,
+                    usage=usage,
+                    detail=f"incomplete model response: stop_reason={usage.stop_reason}",
+                )
+            texts: list[str] = []
+            for block in response.content:
+                if getattr(block, "type", None) == "text":
+                    text_value: object = getattr(block, "text", None)
+                    if isinstance(text_value, str):
+                        texts.append(text_value)
+            text = "".join(texts).strip()
         except Exception as exc:  # noqa: BLE001 — any SDK/network error becomes a status, never a crash
             detail = redact(f"unavailable: anthropic error: {str(exc)[:_DETAIL_LIMIT]}")
-            return AgentResult(text="", ok=False, detail=detail)
+            return AgentResult(text="", ok=False, detail=detail, usage=usage)
         if not text:
-            return AgentResult(text="", ok=False, detail="unavailable: empty model response")
-        return AgentResult(text=text, ok=True)
+            return AgentResult(
+                text="",
+                ok=False,
+                detail="unavailable: empty model response",
+                usage=usage,
+            )
+        return AgentResult(text=text, ok=True, usage=usage)

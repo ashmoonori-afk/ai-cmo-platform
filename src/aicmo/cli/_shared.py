@@ -20,6 +20,7 @@ console = Console()
 err_console = Console(stderr=True)
 
 EXIT_FAILED = 1
+EXIT_CANCELLED = 2
 EXIT_WAITING_APPROVAL = 75  # EX_TEMPFAIL: paused for approval; resume after the gate is approved
 type PhaseAnnouncer = Callable[[WorkflowStep, tuple[str, ...]], None]
 
@@ -29,6 +30,8 @@ def exit_code_for(status: str) -> int:
         return EXIT_FAILED
     if status == RunStatus.WAITING_APPROVAL.value:
         return EXIT_WAITING_APPROVAL
+    if status == RunStatus.CANCELLED.value:
+        return EXIT_CANCELLED
     return 0
 
 def emit_result(result: RunResult) -> None:
@@ -74,7 +77,8 @@ def parse_input_pairs(pairs: list[str]) -> dict[str, str]:
     for pair in pairs:
         key, separator, value = pair.partition("=")
         if not separator or not key.strip():
-            raise typer.BadParameter(f"expected key=value, got: {pair!r}")
+            message = f"expected key=value, got: {pair!r}"
+            raise typer.BadParameter(message)
         parsed[key.strip()] = value
     return parsed
 

@@ -1,0 +1,13 @@
+{% extends "store_app/base.html" %}{% block content %}<h1>오늘, 우리 가게에 필요한 홍보</h1>
+<p class="muted">확인한 소식으로 문안을 만들고, 직접 확인한 뒤 저장하세요.</p>
+{% for guide in guides %}<section class="card"><h2>{{ guide.store.name }}</h2>
+{% if guide.active %}<p role="status">먼저 진행 중인 작업을 확인해 주세요. <span class="badge">{{ guide.active.get_state_display }}</span></p><a class="button" href="{% url 'job' guide.active.id %}">진행 중인 작업 이어 보기</a>
+{% else %}
+{% if guide.profile.minutes %}<p>가게 설정에 입력한 목적 <strong>{{ guide.profile.objective }}</strong>과 주당 <strong>{{ guide.profile.minutes }}분</strong>을 참고했습니다. 이번 요청에 쓸 시간은 직접 바꿀 수 있어요.</p>{% else %}<p class="muted">가게 설정의 목적·시간 형식을 확인하지 못했습니다. 만들기에서 이번에 쓸 시간을 직접 정해 주세요.</p>{% endif %}
+<p role="status">{{ guide.allowance.detail }}</p>
+{% if not service_ready %}<p role="alert">운영자가 작성·검토 서비스를 연결해야 요청할 수 있습니다.</p>{% elif not guide.allowance.blocked %}
+<div class="task-grid">{% for card in guide.cards %}<article><h3>{{ card.title }}</h3><p>{{ card.detail }}</p><p class="muted">{{ card.scope }}</p><a class="button" href="{% url 'create' guide.store.id %}?intent={{ card.intent }}">{{ card.title }} 준비</a></article>{% endfor %}</div>
+{% endif %}{% endif %}</section>
+{% empty %}<section class="card">{% if can_onboard %}<h2>가게 정보를 입력하고 시작하세요</h2><p>세 단계로 입력하고, 모르는 항목은 비워 둘 수 있어요.</p><a class="button" href="{% url 'onboarding' %}">가게 정보 입력·이어 쓰기</a>{% else %}<h2>연결된 가게가 없습니다</h2>{% endif %}<p class="muted">기존 가게 연결이 필요하면 운영자에게 요청해 주세요.</p></section>{% endfor %}
+{% if stores %}<details class="card"><summary>오늘은 알릴 소식이 없어요</summary><p>새 소식이나 확인할 리뷰가 없다면 오늘은 만들지 않아도 됩니다. 실제 알릴 일이 생겼을 때 다시 준비하세요.</p></details>{% endif %}
+<h2>최근 작업</h2><p><a href="{% url 'archive' %}">모든 작업 · 기간과 상태로 찾기</a></p>{% for job in jobs %}<article class="card"><span class="badge">{{ job.get_state_display }}</span><h2><a href="{% url 'job' job.id %}">{{ job.store.name }} · 주간 실행팩</a></h2><p class="muted">{{ job.created_at|date:"Y년 n월 j일 H:i" }}</p></article>{% empty %}<p>아직 만든 문안이 없습니다. 첫 소식을 준비해 보세요.</p>{% endfor %}{% endblock %}

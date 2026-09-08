@@ -1,0 +1,55 @@
+{% extends "store_app/base.html" %}{% block content %}
+<h1>{{ job.store.name }} · 문안 고치기</h1>
+<p><a href="{% url 'rewrite' job.id %}">짧게 · 친근하게 · 새 가격으로 다시 작성</a>하려면 먼저 수정본을 저장해 주세요.</p>
+<p>제목과 본문을 직접 고쳐 보세요. 확인한 사실 안에서만 수정해 주세요. 새 가격·행사·사진은 새 요청에서 확인해야 합니다.</p>
+{% if pack %}<details class="card"><summary>이번 문안의 확인된 소식</summary>{% for source in pack.sources %}<p class="copy">{{ source }}</p>{% endfor %}</details>{% endif %}
+<p id="save-status" role="status" aria-live="polite">{% if form.is_bound %}이번 저장은 완료되지 않았습니다. 아래 입력을 확인한 뒤 다시 저장해 주세요.{% elif draft %}수정본 {{ draft.revision }} · {{ draft.updated_at|date:"n월 j일 H:i" }} 저장{% else %}아직 수정본을 저장하지 않았습니다.{% endif %}</p>
+<section class="card"><form id="edit-form" method="post">{% csrf_token %}{{ form.as_p }}<div class="actions"><button name="action" value="checkpoint">이 버전 저장</button>{% if draft %}<a href="{% url 'edit-confirm' job.id %}">저장한 수정본 미리보기·확인</a>{% endif %}</div></form></section>
+<p class="muted">자동저장은 현재 수정본 하나를 보관합니다. ‘이 버전 저장’을 누른 문안은 아래에서 복원할 수 있습니다. 자동저장과 직접 수정은 새 문안 생성 건수를 사용하지 않습니다.</p>
+{% if not form.is_bound %}<details class="card"><summary>저장한 버전 · 최대 100개</summary><p>복원하면 현재 자동저장 문안도 버전으로 남긴 뒤 선택한 문안으로 바꿉니다.</p>
+{% for version in versions %}<article><h3>{% if version.revision == 0 %}처음 생성된 문안{% else %}수정본 {{ version.revision }}{% endif %}</h3><p>{{ version.created_at|date:"n월 j일 H:i" }}</p><form method="post" action="{% url 'edit-restore' job.id %}" class="restore-form">{% csrf_token %}<input type="hidden" name="revision" value="{{ draft.revision }}"><input type="hidden" name="base_token" value="{{ base_token }}"><input type="hidden" name="version" value="{{ version.revision }}"><button class="secondary">이 버전으로 복원</button></form></article>{% empty %}<p>저장한 버전이 아직 없습니다.</p>{% endfor %}</details>{% endif %}
+<p><a href="{% url 'job' job.id %}">작업으로 돌아가기</a></p>
+<script>
+(() => {
+  const form = document.getElementById('edit-form'), status = document.getElementById('save-status');
+  let timer, dirty = {{ form.is_bound|yesno:"true,false" }}, sending = false, composing = false, failed = false, version = 0;
+  async function save(action = 'autosave') {
+    if (sending || composing) return false;
+    sending = true; const submitted = version, body = new FormData(form); body.set('action', action);
+    status.textContent = '저장 중입니다…';
+    try {
+      const response = await fetch(location.pathname, {method:'POST', body, headers:{'Accept':'application/json'}});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message);
+      form.elements.revision.value = result.revision;
+      document.querySelectorAll('.restore-form input[name=revision]').forEach(input => input.value = result.revision);
+      if (version === submitted) {
+        Object.entries(result.values).forEach(([name, value]) => form.elements[name].value = value);
+        dirty = false;
+      }
+      failed = false; status.textContent = result.message + ' 수정본 ' + result.revision;
+      if (action === 'checkpoint' && !dirty) { sending = false; location.reload(); return true; }
+      return true;
+    } catch (error) {
+      failed = true; status.textContent = '저장하지 못했습니다. 입력은 이 화면에 유지했습니다. ‘이 버전 저장’으로 다시 시도하거나 최신 작업을 별도 탭에서 확인해 주세요.';
+      return false;
+    } finally {
+      sending = false;
+      if (dirty && !failed) timer = setTimeout(() => save(), 800);
+    }
+  }
+  form.addEventListener('input', () => { dirty = true; version++; clearTimeout(timer); if (!failed && !composing) timer = setTimeout(() => save(), 800); });
+  form.addEventListener('compositionstart', () => { composing = true; clearTimeout(timer); });
+  form.addEventListener('compositionend', () => { composing = false; if (!failed) timer = setTimeout(() => save(), 800); });
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); clearTimeout(timer);
+    if (sending) { status.textContent = '저장이 끝난 뒤 ‘이 버전 저장’을 눌러 주세요.'; return; }
+    await save('checkpoint');
+  });
+  document.querySelectorAll('.restore-form').forEach(restore => restore.addEventListener('submit', event => {
+    if (dirty || sending) { event.preventDefault(); status.textContent = '현재 입력을 먼저 저장한 뒤 복원해 주세요.'; }
+  }));
+  addEventListener('beforeunload', event => { if (dirty || sending) { event.preventDefault(); event.returnValue = ''; } });
+})();
+</script>
+{% endblock %}

@@ -16,7 +16,7 @@ from aicmo.store import WorkflowStore
 from tests.conftest import lines, write_text
 
 
-def _seed_kb(tmp_path: Path) -> WorkflowRunner:
+def seed_kb(tmp_path: Path) -> WorkflowRunner:
     write_text(
         tmp_path / "workflows" / "seed-kb.workflow.yaml",
         lines(
@@ -42,7 +42,7 @@ def _seed_kb(tmp_path: Path) -> WorkflowRunner:
 
 
 def test_kb_flush_idempotent_under_replay(tmp_path: Path) -> None:
-    runner = _seed_kb(tmp_path)
+    runner = seed_kb(tmp_path)
     assert flush_kb_updates(tmp_path, runner.store, "acme") == 1
 
     # Simulate the crash window: the row was appended but never marked consumed.
@@ -89,7 +89,7 @@ def test_stale_lease_owner_cannot_mark_success_after_reclaim(repo_root: Path) ->
 
 
 def test_concurrent_kb_appends_preserve_distinct_blocks(tmp_path: Path) -> None:
-    runner = _seed_kb(tmp_path)
+    runner = seed_kb(tmp_path)
     runner.store.record_kb_update(
         "run_kb",
         "kb",

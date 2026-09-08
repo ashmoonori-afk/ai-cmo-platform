@@ -7,7 +7,7 @@ from typing import Self
 
 from aicmo.errors import StepTransitionError
 from aicmo.models import ApprovalDecision, StepStatus
-from aicmo.redaction import redact
+from aicmo.redaction import redact, safe_kb_text
 from aicmo.step_state import WorkflowStepStore
 
 
@@ -73,16 +73,29 @@ class WorkflowLedgerStore(WorkflowStepStore):
         decision: ApprovalDecision,
         reviewer: str,
         notes: str,
+        photo_manifest_sha256: str | None = None,
     ) -> None:
         with self.connect() as connection:
+            connection.execute("begin immediate")
             self._require_waiting_gate(connection, run_id, step_id)
             self._require_no_existing_approval(connection, run_id, step_id)
+            if photo_manifest_sha256 is not None:
+                row = connection.execute(
+                    "select sha256 from step_output_hashes where run_id=? and step_id='photos' "
+                    "and path=?",
+                    (run_id, f"artifacts/{run_id}/photos.json"),
+                ).fetchone()
+                if row is None or row["sha256"] != photo_manifest_sha256:
+                    raise StepTransitionError(
+                        run_id, step_id, "photo version changed during approval"
+                    )
             connection.execute(
                 """
-                insert into approvals (run_id, step_id, decision, reviewer, notes)
-                values (?, ?, ?, ?, ?)
+                insert into approvals
+                (run_id, step_id, decision, reviewer, notes, photo_manifest_sha256)
+                values (?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, step_id, decision.value, reviewer, notes),
+                (run_id, step_id, decision.value, reviewer, notes, photo_manifest_sha256),
             )
 
     def approval_for(self: Self, run_id: str, step_id: str) -> ApprovalDecision | None:
@@ -151,6 +164,7 @@ class WorkflowLedgerStore(WorkflowStepStore):
         path: str,
         content: str,
     ) -> None:
+        content = safe_kb_text(content)
         with self.connect() as connection:
             # Idempotent: re-running a kb.update step (e.g. resume after a deleted artifact)
             # must not enqueue a duplicate. Content is regenerated deterministically per step,

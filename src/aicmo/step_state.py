@@ -11,10 +11,12 @@ from pydantic import TypeAdapter, ValidationError
 
 from aicmo.errors import RunConflictError, StepTransitionError
 from aicmo.models import ApprovalDecision, RunStatus, StepStatus, WorkflowStep
+from aicmo.quota import QuotaError, claim_quota, settle_quota
 from aicmo.redaction import redact
 from aicmo.run_state import WorkflowRunStore
 
 _DEFAULT_LEASE_TTL = 300.0
+MAX_STEP_ATTEMPTS = 3
 _STEP_OUTPUTS_ADAPTER = TypeAdapter(list[str])
 
 
@@ -41,6 +43,14 @@ class WorkflowStepStore(WorkflowRunStore):
         if row is None:
             return StepStatus.PENDING
         return StepStatus(row["status"])
+
+    def get_step_attempt(self: Self, run_id: str, step_id: str) -> int:
+        with self.connect() as connection:
+            row = connection.execute(
+                "select attempt from steps where run_id = ? and step_id = ?",
+                (run_id, step_id),
+            ).fetchone()
+        return 0 if row is None else int(row["attempt"])
 
     def get_step_outputs(self: Self, run_id: str, step_id: str) -> list[str]:
         with self.connect() as connection:
@@ -94,6 +104,7 @@ class WorkflowStepStore(WorkflowRunStore):
         concurrent runner fails predictably instead of double-executing.
         """
         threshold = _stale_threshold(lease_ttl_seconds)
+        quota_error: QuotaError | None = None
         with self.connect() as connection:
             cursor = connection.execute(
                 """
@@ -107,12 +118,43 @@ class WorkflowStepStore(WorkflowRunStore):
                     locked_at = current_timestamp
                 where run_id = ? and step_id = ?
                   and (status != 'running' or locked_by is null or locked_at <= ?)
+                  and attempt < ?
+                  and status != ?
+                  and status not in ('success', 'waiting_approval')
+                  and exists (
+                      select 1 from runs
+                      where runs.run_id = steps.run_id and runs.status != ?
+                  )
                 """,
-                (StepStatus.RUNNING.value, owner, run_id, step.id, threshold),
+                (
+                    StepStatus.RUNNING.value,
+                    owner,
+                    run_id,
+                    step.id,
+                    threshold,
+                    MAX_STEP_ATTEMPTS,
+                    StepStatus.CANCELLED.value,
+                    RunStatus.CANCELLED.value,
+                ),
             )
             claimed = cursor.rowcount == 1
             if claimed:
-                self._mark_run(connection, run_id, RunStatus.RUNNING, step.id)
+                try:
+                    claim_quota(connection, run_id, step.id)
+                except QuotaError as exc:
+                    quota_error = exc
+                    connection.execute(
+                        "update steps set status='failed', attempt=attempt-1, locked_by=null, "
+                        "locked_at=null,error_json=?,completed_at=current_timestamp "
+                        "where run_id=? and step_id=?",
+                        (json.dumps({"message": str(exc)}), run_id, step.id),
+                    )
+                    self._mark_run(connection, run_id, RunStatus.FAILED, step.id, step.id)
+                    settle_quota(connection, run_id)
+                else:
+                    self._mark_run(connection, run_id, RunStatus.RUNNING, step.id)
+        if quota_error is not None:
+            raise quota_error
         return claimed
 
     def renew_lease(self: Self, run_id: str, step_id: str, owner: str) -> bool:
@@ -170,7 +212,7 @@ class WorkflowStepStore(WorkflowRunStore):
             guard += " and locked_by = ? and status = 'running'"
             guard_params = (*guard_params, owner)
         cursor = connection.execute(
-            f"update steps set {set_clause}, locked_by = null, locked_at = null {guard}",
+            f"update steps set {set_clause}, locked_by = null, locked_at = null {guard}",  # noqa: S608 — set_clause is an internal constant; values are bound
             (*params, *guard_params),
         )
         return cursor.rowcount == 1
@@ -238,11 +280,77 @@ class WorkflowStepStore(WorkflowRunStore):
             if not done:
                 return False
             self._mark_run(connection, run_id, RunStatus.FAILED, step_id, step_id)
+            settle_quota(connection, run_id)
         return True
 
-    def mark_run_success(self: Self, run_id: str) -> None:
+    def mark_run_success(
+        self: Self,
+        run_id: str,
+        delivery_sha256: str | None = None,
+        reviewed_sha256: str | None = None,
+    ) -> bool:
         with self.connect() as connection:
-            self._mark_run(connection, run_id, RunStatus.SUCCESS, None, None, completed=True)
+            connection.execute("begin immediate")
+            if reviewed_sha256 is not None:
+                row = connection.execute(
+                    "select sha256 from step_output_hashes where run_id=? "
+                    "and step_id='delivery_gate' and path=?",
+                    (run_id, f"artifacts/{run_id}/delivery-review.json"),
+                ).fetchone()
+                if row is None or row[0] != reviewed_sha256:
+                    return False
+            cursor = connection.execute(
+                """
+                update runs set status = ?, current_step_id = null, failed_step_id = null,
+                    updated_at = current_timestamp, completed_at = current_timestamp
+                where run_id = ? and status != ?
+                  and not exists (
+                      select 1 from steps where steps.run_id=runs.run_id and status != 'success'
+                  )
+                """,
+                (RunStatus.SUCCESS.value, run_id, RunStatus.CANCELLED.value),
+            )
+            if cursor.rowcount == 1:
+                settle_quota(connection, run_id, delivery_sha256)
+        return cursor.rowcount == 1
+
+    def cancel_run(self: Self, run_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute(
+                "select status from runs where run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise StepTransitionError(run_id, "run", "run does not exist")
+            if row["status"] == RunStatus.SUCCESS.value:
+                raise StepTransitionError(run_id, "run", "successful run cannot be cancelled")
+            unfinished = connection.execute(
+                "select 1 from steps where run_id = ? and status != ? limit 1",
+                (run_id, StepStatus.SUCCESS.value),
+            ).fetchone()
+            if unfinished is None:
+                raise StepTransitionError(
+                    run_id,
+                    "run",
+                    "all steps finished; cancellation is no longer available",
+                )
+            connection.execute(
+                """
+                update steps set status = ?, completed_at = current_timestamp,
+                    locked_by = null, locked_at = null
+                where run_id = ? and status != ?
+                """,
+                (StepStatus.CANCELLED.value, run_id, StepStatus.SUCCESS.value),
+            )
+            self._mark_run(
+                connection,
+                run_id,
+                RunStatus.CANCELLED,
+                None,
+                completed=True,
+            )
+            settle_quota(connection, run_id)
 
     def _reset_to_pending(
         self: Self,
@@ -264,13 +372,20 @@ class WorkflowStepStore(WorkflowRunStore):
         )
         self._mark_run(connection, run_id, RunStatus.RUNNING, step_id)
 
+        # A regenerated dependency is a new version; retain the approval event history,
+        # but never authorize that version with the previous gate's decision.
+        connection.execute(
+            "delete from approvals where run_id = ? and step_id = ? and decision = 'approved'",
+            (run_id, step_id),
+        )
+
     def retry_step(self: Self, run_id: str, step_id: str) -> None:
         with self.connect() as connection:
             self._require_retryable_step(connection, run_id, step_id)
             self._reset_to_pending(connection, run_id, step_id)
 
     def reopen_step(self: Self, run_id: str, step_id: str) -> None:
-        """Reset a previously SUCCESS step to PENDING so resume can regenerate lost outputs."""
+        """Reopen a successful or waiting dependent after its artifacts became stale."""
         with self.connect() as connection:
             row = connection.execute(
                 "select status from steps where run_id = ? and step_id = ?",
@@ -278,8 +393,12 @@ class WorkflowStepStore(WorkflowRunStore):
             ).fetchone()
             if row is None:
                 raise StepTransitionError(run_id, step_id, "step does not exist")
-            if row["status"] != StepStatus.SUCCESS.value:
-                raise StepTransitionError(run_id, step_id, "only successful steps can be reopened")
+            if row["status"] not in {StepStatus.SUCCESS.value, StepStatus.WAITING_APPROVAL.value}:
+                raise StepTransitionError(
+                    run_id,
+                    step_id,
+                    "only successful/waiting steps can reopen",
+                )
             self._reset_to_pending(connection, run_id, step_id)
 
     def _record_artifacts(
@@ -307,13 +426,15 @@ class WorkflowStepStore(WorkflowRunStore):
         step_id: str,
     ) -> None:
         row = connection.execute(
-            "select status, step_type from steps where run_id = ? and step_id = ?",
+            "select status, step_type, attempt from steps where run_id = ? and step_id = ?",
             (run_id, step_id),
         ).fetchone()
         if row is None:
             raise StepTransitionError(run_id, step_id, "step does not exist")
         if row["status"] != StepStatus.FAILED.value:
             raise StepTransitionError(run_id, step_id, "step is not failed")
+        if int(row["attempt"]) >= MAX_STEP_ATTEMPTS:
+            raise StepTransitionError(run_id, step_id, "step attempt limit reached")
         if row["step_type"] != "gate":
             return
         approval = connection.execute(

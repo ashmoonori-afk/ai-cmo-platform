@@ -1,0 +1,27 @@
+{% extends "store_app/base.html" %}
+{% block title %}작업 보관함 · 우리 가게 홍보{% endblock %}
+{% block content %}
+<h1>작업 보관함</h1>
+<p class="muted">가게와 기간을 골라 이전 문안을 다시 확인하세요. 날짜는 한국 시간 기준입니다.</p>
+<form method="get" class="card" aria-label="보관함 검색">
+{% if form.errors %}<div role="alert"><p>검색 조건을 확인해 주세요.</p>{{ form.non_field_errors }}{{ form.page.errors }}</div>{% endif %}
+<div class="task-grid">
+<div>{{ form.store.as_field_group }}</div>
+<div>{{ form.state.as_field_group }}</div>
+<div>{{ form.start.as_field_group }}</div>
+<div>{{ form.end.as_field_group }}</div>
+</div>
+<div class="actions"><button type="submit">검색 적용</button><a class="button secondary" href="{% url 'archive' %}">조건 초기화</a></div>
+</form>
+{% if page_obj %}
+<p role="status">총 {{ page_obj.paginator.count }}건 · {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}페이지</p>
+{% for job in page_obj %}
+<article class="card"><span class="badge">{{ job.get_state_display }}</span><h2><a href="{% url 'job' job.id %}">{{ job.store.name }} · 주간 실행팩</a></h2><p class="muted">{{ job.created_at|date:"Y년 n월 j일 H:i" }}</p></article>
+{% endfor %}
+{% if page_obj.has_other_pages %}<nav class="actions" aria-label="보관함 페이지">
+{% if page_obj.has_previous %}<a class="button secondary" rel="prev" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">이전 페이지</a>{% endif %}
+<span aria-current="page">현재 {{ page_obj.number }}페이지</span>
+{% if page_obj.has_next %}<a class="button secondary" rel="next" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">다음 페이지</a>{% endif %}
+</nav>{% endif %}
+{% elif not form.errors %}<section class="card"><h2>조건에 맞는 작업이 없습니다</h2><p>기간이나 상태를 바꾸거나 검색 조건을 초기화해 보세요.</p><a href="{% url 'home' %}">가게 홈으로 이동</a></section>{% endif %}
+{% endblock %}

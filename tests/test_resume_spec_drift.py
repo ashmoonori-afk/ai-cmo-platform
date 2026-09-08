@@ -10,6 +10,7 @@ import pytest
 from aicmo.adapters import AgentRequest, AgentResult
 from aicmo.errors import RunConflictError
 from aicmo.runner import WorkflowRunner
+from aicmo.spec import load_workflow_spec
 from aicmo.store import WorkflowStore
 from tests.conftest import lines, write_text
 
@@ -92,6 +93,51 @@ def _run_to_completion(runner: WorkflowRunner) -> None:
     assert result.status == "success"
 
 
+@pytest.mark.parametrize(
+    "topic",
+    [
+        "Customer name: Jane Doe; +1 (202) 555-0100",
+        '{"customer":{"profile":{"name":"Jane Doe","address":"123 Main Street"}}}',
+        '{"reviewer":{"name":"Jane Doe","address":"123 Main Street"}}',
+        '{"customerName":"Jane Doe","customerAddress":"123 Main Street"}',
+    ],
+)
+def test_resume_blocks_inputs_stored_before_current_privacy_rules(
+    repo_root: Path, topic: str
+) -> None:
+    _write_workflow(repo_root)
+    runner, adapter, db_path = _new_runner(repo_root)
+    runner.store.initialize()
+    # Simulate an old version accepting US contact data without minimizing it.
+    spec = load_workflow_spec(repo_root, "resume-lock")
+    runner.store.ensure_run(
+        spec,
+        "run_resume_lock",
+        {
+            "client": "sample-client-a",
+            "topic": topic,
+        },
+    )
+    _assert_resume_rejected_before_work(runner, adapter, db_path)
+
+
+def test_minimized_us_inputs_can_resume_without_regeneration(repo_root: Path) -> None:
+    _write_workflow(repo_root)
+    runner, adapter, _ = _new_runner(repo_root)
+    result = runner.run(
+        "resume-lock",
+        "run_resume_lock",
+        {
+            "client": "sample-client-a",
+            "topic": "Customer name: Jane Doe; +1 (202) 555-0100",
+        },
+    )
+    assert result.status == "success"
+    calls = len(adapter.requests)
+    assert runner.resume("run_resume_lock").status == "success"
+    assert len(adapter.requests) == calls
+
+
 def _completed_run(
     repo_root: Path,
     *,
@@ -164,11 +210,15 @@ def test_initialize_adds_nullable_specification_identity_to_legacy_runs(tmp_path
 
     with closing(sqlite3.connect(db_path)) as connection:
         columns = {str(row[1]) for row in connection.execute("pragma table_info(runs)")}
+        policy_columns = {
+            str(row[1]) for row in connection.execute("pragma table_info(run_policies)")
+        }
         identity = connection.execute(
             "select spec_digest, spec_revision from runs where run_id = ?",
             ("legacy_run",),
         ).fetchone()
     assert {"spec_digest", "spec_revision"} <= columns
+    assert "execution_policy_json" in policy_columns
     assert identity == (None, None)
 
 

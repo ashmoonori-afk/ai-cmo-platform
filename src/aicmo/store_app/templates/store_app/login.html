@@ -1,0 +1,4 @@
+{% extends "store_app/base.html" %}{% block title %}로그인 · 우리 가게 홍보{% endblock %}
+{% block content %}<h1>우리 가게 홍보를 이어가세요</h1><p class="muted">운영자가 안내한 계정으로 로그인하세요.</p>
+<section class="card"><form method="post">{% csrf_token %}{{ form.as_p }}<input type="hidden" name="next" value="{{ next }}"><button>로그인</button></form>
+<p class="helptext">로그인이 계속 실패하면 잠시 후 다시 시도하세요. 계정 발급·복구는 운영자에게 문의해 주세요.</p></section>{% endblock %}

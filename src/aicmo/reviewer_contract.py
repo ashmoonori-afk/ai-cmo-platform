@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -39,6 +40,7 @@ type ReviewerResolutionOutcome = Literal[
 @dataclass(frozen=True, slots=True)
 class ReviewerResolution:
     decision: GateDecision
+    reason: str
     outcome: ReviewerResolutionOutcome
     attempts: Literal[1, 2]
     initial_response: str
@@ -49,10 +51,13 @@ def resolve_reviewer_output(
     adapter: StepAdapter,
     request: AgentRequest,
     initial: AgentResult,
+    *,
+    generate: Callable[[AgentRequest], AgentResult] | None = None,
 ) -> ReviewerResolution:
     if not initial.ok:
         return ReviewerResolution(
             GateDecision.FAIL,
+            "semantic reviewer was unavailable",
             "unavailable",
             1,
             initial.text,
@@ -61,7 +66,7 @@ def resolve_reviewer_output(
     try:
         parsed = parse_reviewer_decision(initial.text)
     except MalformedReviewerDecisionError:
-        repaired = adapter.generate(
+        repaired = (generate or adapter.generate)(
             AgentRequest(
                 step_id=request.step_id,
                 run_id=request.run_id,
@@ -79,6 +84,7 @@ def resolve_reviewer_output(
         if not repaired.ok:
             return ReviewerResolution(
                 GateDecision.FAIL,
+                "reviewer output was malformed and repair was unavailable",
                 "repair_unavailable",
                 2,
                 initial.text,
@@ -89,6 +95,7 @@ def resolve_reviewer_output(
         except MalformedReviewerDecisionError:
             return ReviewerResolution(
                 GateDecision.FAIL,
+                "reviewer output remained malformed after repair",
                 "malformed",
                 2,
                 initial.text,
@@ -96,6 +103,7 @@ def resolve_reviewer_output(
             )
         return ReviewerResolution(
             GateDecision(parsed.verdict.value),
+            parsed.reason,
             "repaired",
             2,
             initial.text,
@@ -103,6 +111,7 @@ def resolve_reviewer_output(
         )
     return ReviewerResolution(
         GateDecision(parsed.verdict.value),
+        parsed.reason,
         "parsed",
         1,
         initial.text,

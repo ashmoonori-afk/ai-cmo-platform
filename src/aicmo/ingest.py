@@ -20,6 +20,7 @@ _URL_SCHEMES = ("http://", "https://")
 class InboxItem:
     source_file: Path
     urls: tuple[str, ...]
+    source_text: str = ""
 
 
 def parse_urls(text: str) -> list[str]:
@@ -32,6 +33,18 @@ def parse_urls(text: str) -> list[str]:
         if candidate.startswith(_URL_SCHEMES):
             urls.append(candidate)
     return list(dict.fromkeys(urls))
+
+
+def source_text(text: str) -> str:
+    """Return user-provided content while excluding URL and comment lines."""
+    lines = [
+        line
+        for line in text.splitlines()
+        if line.strip()
+        and not line.lstrip().startswith("#")
+        and not line.strip().startswith(_URL_SCHEMES)
+    ]
+    return "\n".join(lines).strip()
 
 
 def inbox_dir(repo_root: Path, client: str) -> Path:
@@ -59,15 +72,20 @@ def scan_inbox(repo_root: Path, client: str) -> list[InboxItem]:
     for path in sorted(inbox.iterdir()):
         if not path.is_file() or path.suffix.lower() not in INBOX_SUFFIXES:
             continue
-        urls = parse_urls(_read_inbox_text(path))
-        items.append(InboxItem(source_file=path, urls=tuple(urls)))
+        text = _read_inbox_text(path)
+        urls = parse_urls(text)
+        items.append(
+            InboxItem(source_file=path, urls=tuple(urls), source_text=source_text(text)),
+        )
     return items
 
 
 def retain_failed_urls(item: InboxItem, failed: list[str]) -> None:
     """Partial failure: rewrite the inbox file to only the still-failing URLs so
     the next pass retries those without duplicating already-started runs."""
-    body = "\n".join(["# retry: 이전 ingest에서 실패한 URL만 남김", *failed])
+    body = "\n".join(
+        ["# retry: 이전 ingest에서 실패한 URL만 남김", *failed, "", item.source_text],
+    ).rstrip()
     item.source_file.write_text(body + "\n", encoding="utf-8")
 
 

@@ -2,19 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import Future, InvalidStateError
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from time import perf_counter
 from typing import assert_never
 from uuid import uuid4
 
 from aicmo.adapters import (
     ARTIFACT_REF_CONTENT_BUDGET,
     ARTIFACT_REF_TRUNCATION_MARKER,
+    OFFLINE_STUB_MARKER,
     AgentRequest,
+    AgentResult,
     ArtifactRef,
     LocalAdapter,
     StepAdapter,
@@ -26,6 +30,8 @@ from aicmo.gate import (
     evaluate_artifacts,
     stricter,
 )
+from aicmo.local_pack import WORKFLOW_ID as LOCAL_PACK_WORKFLOW
+from aicmo.local_pack import validate_pack
 from aicmo.models import (
     ApprovalDecision,
     GateDecision,
@@ -34,12 +40,16 @@ from aicmo.models import (
     WorkflowSpec,
     WorkflowStep,
 )
-from aicmo.paths import resolve_inside_repo
+from aicmo.outcomes import parse_channel, weekly_outcomes_report
+from aicmo.paths import native_io_path, resolve_inside_repo
+from aicmo.photos import PHOTO_STEP, parse_photos, photo_manifest, verify_photo_manifest
+from aicmo.redaction import minimize_customer_pii
 from aicmo.reviewer_contract import (
     REVIEW_CLIENT_CRITERIA,
     REVIEW_CLIENT_CRITERIA_LIMIT,
     REVIEW_CONTRACT,
     REVIEW_INPUT_LIMIT,
+    ReviewerResolution,
     resolve_reviewer_output,
 )
 from aicmo.store import WorkflowStore
@@ -47,10 +57,18 @@ from aicmo.store import WorkflowStore
 PhaseAnnouncer = Callable[[WorkflowStep, tuple[str, ...]], None]
 PhaseCompletionHook = Callable[[WorkflowStep, tuple[str, ...]], None]
 type _LeaseSignal = Future[None]
+DELIVERY_MANIFEST_SCHEMA_VERSION = "aicmo.delivery-manifest.v1"
 
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _observation_text(value: object) -> str:
+    if value is None:
+        return "unavailable"
+    text = minimize_customer_pii(str(value))
+    return text if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:-]{0,159}", text) else "unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +83,79 @@ class WorkflowStepExecutor:
     phase_announcer: PhaseAnnouncer | None = None
     phase_completed: PhaseCompletionHook | None = None
 
-    def _execute_step(
+    def verified_photos(
+        self, run_id: str, *, require_approval: bool = False
+    ) -> tuple[str, dict[str, bytes]]:
+        inputs = self.store.get_inputs(run_id)
+        relative = f"artifacts/{run_id}/photos.json"
+        source = self._stored_artifact_path(relative)
+        if (
+            self.store.get_step_status(run_id, "photos") != StepStatus.SUCCESS
+            or source is None
+            or not source.is_file()
+        ):
+            raise WorkflowExecutionError(PHOTO_STEP, "verified photo manifest is required")
+        with source.open("rb") as stream:
+            raw = stream.read(8193)
+        digest = hashlib.sha256(raw).hexdigest()
+        if self.store.get_output_hashes(run_id, "photos") != {relative: digest}:
+            raise WorkflowExecutionError(PHOTO_STEP, "photo manifest changed; start a new run")
+        files = verify_photo_manifest(self.repo_root, inputs, raw)
+        if require_approval and parse_photos(inputs).photos:
+            with self.store.connect() as connection:
+                row = connection.execute(
+                    "select decision, photo_manifest_sha256 from approvals "
+                    "where run_id=? and step_id='owner_gate'",
+                    (run_id,),
+                ).fetchone()
+            if (
+                row is None
+                or row["decision"] != "approved"
+                or row["photo_manifest_sha256"] != digest
+            ):
+                raise WorkflowExecutionError(PHOTO_STEP, "owner must review this photo version")
+        return digest, files
+
+    def verified_export_outputs(
+        self,
+        spec: WorkflowSpec,
+        run_id: str,
+        inputs: dict[str, str],
+    ) -> dict[str, bytes]:
+        """Capture only current successful outputs whose dependency/version hashes match."""
+        context = {**inputs, "run_id": run_id, "workflow_id": spec.id}
+        step_id = "export"
+        contents: dict[str, bytes] = {}
+        for step in spec.execution_order():
+            outputs = self.store.get_step_outputs(run_id, step.id)
+            hashes = self.store.get_output_hashes(run_id, step.id)
+            if (
+                self.store.get_step_status(run_id, step.id) != StepStatus.SUCCESS
+                or set(outputs) != set(self._declared_outputs(step, context))
+                or set(outputs) != set(hashes)
+                or (
+                    step.depends_on
+                    and self.store.get_consumed_ref_digest(run_id, step.id)
+                    != self._consumed_ref_digest(self._artifact_refs(run_id, step))
+                )
+            ):
+                raise WorkflowExecutionError(
+                    step_id, "stale or incomplete approval/review; resume first"
+                )
+            for relative in outputs:
+                path = resolve_inside_repo(self.repo_root, relative, {})
+                try:
+                    data = path.read_bytes()
+                except OSError:
+                    raise WorkflowExecutionError(step_id, "required artifact is missing") from None
+                if hashlib.sha256(data).hexdigest() != hashes[relative]:
+                    raise WorkflowExecutionError(
+                        step_id, "artifact changed after review; resume first"
+                    )
+                contents[relative] = data
+        return contents
+
+    def _execute_step(  # noqa: PLR0911 — one return per native step type
         self,
         run_id: str,
         step: WorkflowStep,
@@ -93,6 +183,31 @@ class WorkflowStepExecutor:
                     return self._run_gate(run_id, step, context, status, lease_signal)
                 case StepType.KB_UPDATE:
                     return self._run_kb_update(run_id, step, context, lease_signal)
+                case StepType.METRICS_REPORT:
+                    content = weekly_outcomes_report(
+                        self.repo_root,
+                        self.store,
+                        context.get("client", ""),
+                        context.get("week_start", ""),
+                        parse_channel(context.get("channel", "naver")),
+                    )
+                    return self._write_outputs(step, context, content, lease_signal)
+                case StepType.PHOTOS_PREPARE:
+                    return self._write_outputs(
+                        step, context, photo_manifest(self.repo_root, context), lease_signal
+                    )
+                case StepType.FEEDBACK_REPORT | StepType.LEARNING_CONTEXT:
+                    from aicmo.learning import (  # noqa: PLC0415 — runner-backed verification is loaded after runner initialization
+                        feedback_report,
+                        learning_context,
+                    )
+
+                    content = (
+                        feedback_report(self, context)
+                        if step.type == StepType.FEEDBACK_REPORT
+                        else learning_context(self, context.get("client", ""))
+                    )
+                    return self._write_outputs(step, context, content, lease_signal)
                 case unreachable:
                     assert_never(unreachable)
 
@@ -185,10 +300,126 @@ class WorkflowStepExecutor:
             model=step.model or "",
             artifact_refs=artifact_refs,
         )
-        result = self.adapter.generate(request)
+        request = replace(
+            request,
+            artifact_refs=self._minimize_artifact_refs(request.artifact_refs, context),
+        )
+        if context["workflow_id"] == LOCAL_PACK_WORKFLOW and any(
+            ref.truncated for ref in artifact_refs
+        ):
+            raise WorkflowExecutionError(step.id, "local pack context was truncated")
+        result = self._invoke_adapter(self.adapter, request)
         if not result.ok:
-            raise WorkflowExecutionError(step.id, f"agent executor failed: {result.detail}")
-        return self._write_outputs(step, context, result.text, lease_signal)
+            detail = self._minimize_pii(result.detail, context)
+            raise WorkflowExecutionError(step.id, f"agent executor failed: {detail}")
+        content = self._minimize_pii(result.text, context)
+        if (
+            context["workflow_id"] == LOCAL_PACK_WORKFLOW
+            and step.id == "drafts"
+            and OFFLINE_STUB_MARKER not in content
+        ):
+            validate_pack(content, context)
+        return self._write_outputs(step, context, content, lease_signal)
+
+    def _invoke_adapter(self, adapter: StepAdapter, request: AgentRequest) -> AgentResult:
+        """Record logical adapter calls, including reviewer repair, without content or prices."""
+        started = perf_counter()
+        call_id = uuid4().hex
+        attempt = next(
+            str(row["attempt"])
+            for row in self.store.list_steps(request.run_id)
+            if row["step_id"] == request.step_id
+        )
+        base = {
+            "schema_version": "aicmo.adapter-call.v1",
+            "call_id": call_id,
+            "adapter": _observation_text(type(adapter).__name__),
+            "role": _observation_text(request.role),
+            "attempt": attempt,
+        }
+        self.store.record_event(
+            request.run_id,
+            request.step_id,
+            "agent.call_started",
+            "Adapter call started",
+            base,
+        )
+        try:
+            result = adapter.generate(request)
+        except Exception:
+            self.store.record_event(
+                request.run_id,
+                request.step_id,
+                "agent.call_finished",
+                "Adapter call raised",
+                {
+                    **base,
+                    "result": "error",
+                    "usage_status": "unavailable",
+                    "cost_status": "unavailable",
+                    "elapsed_ms": str(round((perf_counter() - started) * 1000)),
+                },
+            )
+            raise
+        usage = result.usage
+        metadata: dict[str, str] = {}
+        if usage is not None:
+            for key, value in asdict(usage).items():
+                if key.endswith("_tokens"):
+                    metadata[key] = (
+                        str(value) if type(value) is int and value >= 0 else "unavailable"
+                    )
+                else:
+                    metadata[key] = _observation_text(value)
+        measured = all(
+            metadata.get(key, "unavailable") != "unavailable"
+            for key in ("input_tokens", "output_tokens")
+        )
+        self.store.record_event(
+            request.run_id,
+            request.step_id,
+            "agent.call_finished",
+            "Adapter response recorded",
+            {
+                **base,
+                "result": "response_ok" if result.ok else "error",
+                "usage_status": "reported" if measured else "unavailable",
+                "cost_status": "not_applicable"
+                if isinstance(adapter, LocalAdapter)
+                else "unavailable",
+                "execution_mode": "demo"
+                if isinstance(adapter, LocalAdapter)
+                else "configured_executor",
+                "elapsed_ms": str(round((perf_counter() - started) * 1000)),
+                **metadata,
+            },
+        )
+        return result
+
+    @staticmethod
+    def _minimize_pii(text: str, context: dict[str, str]) -> str:
+        allowed = (
+            (context.get("public_store_phone", ""),)
+            if context.get("public_contact_approved", "false").casefold() == "true"
+            else ()
+        )
+        return minimize_customer_pii(text, allowed=allowed)
+
+    def _minimize_artifact_refs(
+        self,
+        refs: tuple[ArtifactRef, ...],
+        context: dict[str, str],
+    ) -> tuple[ArtifactRef, ...]:
+        return tuple(
+            ArtifactRef(
+                producer_step_id=ref.producer_step_id,
+                path=ref.path,
+                sha256=ref.sha256,
+                content_excerpt=self._minimize_pii(ref.content_excerpt, context),
+                truncated=ref.truncated,
+            )
+            for ref in refs
+        )
 
     def _run_gate(
         self,
@@ -199,6 +430,11 @@ class WorkflowStepExecutor:
         lease_signal: _LeaseSignal,
     ) -> list[str]:
         approval = self.store.approval_for(run_id, step.id)
+        if context.get("workflow_id") == LOCAL_PACK_WORKFLOW:
+            self.verified_photos(
+                run_id,
+                require_approval=approval == ApprovalDecision.APPROVED or step.terminal_delivery,
+            )
         if step.requires_approval and approval is None:
             if status == StepStatus.WAITING_APPROVAL:
                 # Idempotent re-wait: the step already holds its waiting state and
@@ -206,7 +442,7 @@ class WorkflowStepExecutor:
                 # (and must not re-snapshot files the owner may be editing).
                 return self.store.get_step_outputs(run_id, step.id)
             self._snapshot_run_artifacts(run_id, step.id, context, lease_signal)
-            payload = self._gate_payload(step, GateDecision.WAITING_APPROVAL, context)
+            payload = self._gate_payload(run_id, step, GateDecision.WAITING_APPROVAL, context)
             outputs = self._write_outputs(
                 step,
                 context,
@@ -238,12 +474,11 @@ class WorkflowStepExecutor:
             raise WorkflowExecutionError(step.id, "manual gate rejected")
         # Approved manual gates pass on the human's authority; auto gates are evaluated
         # against the gated artifacts so a stub/empty/incomplete output cannot pass silently.
-        decision = (
-            GateDecision.PASS
-            if approval == ApprovalDecision.APPROVED
-            else self._evaluate_gate(run_id, step, context)
-        )
-        payload = self._gate_payload(step, decision, context)
+        if approval == ApprovalDecision.APPROVED:
+            decision, semantic_review = GateDecision.PASS, None
+        else:
+            decision, semantic_review = self._evaluate_gate(run_id, step, context)
+        payload = self._gate_payload(run_id, step, decision, context, semantic_review)
         outputs = self._write_outputs(
             step,
             context,
@@ -271,22 +506,60 @@ class WorkflowStepExecutor:
         resumed wait must not capture already-edited files as the original."""
         if not context.get("run_id"):
             return
-        snapshot_root = self._resolve("artifacts/${run_id}/_pre_edit", context)
         for row in self.store.list_steps(run_id):
             if row["status"] != StepStatus.SUCCESS.value:
                 continue
-            for relative in self.store.get_step_outputs(run_id, str(row["step_id"])):
+            producer = str(row["step_id"])
+            hashes = self.store.get_output_hashes(run_id, producer)
+            for relative in self.store.get_step_outputs(run_id, producer):
                 source = self._stored_artifact_path(relative)
                 if source is None or not source.exists():
                     continue
-                target = snapshot_root / relative
+                content = source.read_bytes()
+                digest = hashlib.sha256(content).hexdigest()
+                if hashes.get(relative) != digest:
+                    raise WorkflowExecutionError(
+                        step_id, "artifact changed before approval snapshot"
+                    )
+                version = self._resolve(f".aicmo/snapshots/{digest}", context)
+                if version.exists():
+                    if version.read_bytes() != content:
+                        raise WorkflowExecutionError(step_id, "approval snapshot has changed")
+                else:
+                    active = self._check_lease(run_id, step_id, lease_signal)
+                    version.parent.mkdir(parents=True, exist_ok=True)
+                    temp = native_io_path(
+                        version.with_name(f"{version.name}.{self.runner_token}.tmp")
+                    )
+                    try:
+                        temp.write_bytes(content)
+                        self._replace_output(run_id, step_id, lease_signal, active, temp, version)
+                    finally:
+                        temp.unlink(missing_ok=True)
+                self._check_lease(run_id, step_id, lease_signal)
+                with self.store.connect() as connection:
+                    connection.execute(
+                        "insert into approval_snapshots values (?, ?, ?, ?, ?) "
+                        "on conflict(run_id, gate_id, source_path) do update set "
+                        "snapshot_path=excluded.snapshot_path, sha256=excluded.sha256",
+                        (
+                            run_id,
+                            step_id,
+                            relative,
+                            str(version.relative_to(self.repo_root)).replace("\\", "/"),
+                            digest,
+                        ),
+                    )
+                target = native_io_path(
+                    self._resolve(f"artifacts/${{run_id}}/_pre_edit/{relative}", context)
+                )
                 if target.exists():
                     continue
                 active = self._check_lease(run_id, step_id, lease_signal)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 tmp = target.with_name(f"{target.name}.{self.runner_token}.tmp")
                 try:
-                    tmp.write_bytes(source.read_bytes())
+                    tmp.write_bytes(content)
                     self._replace_output(run_id, step_id, lease_signal, active, tmp, target)
                 finally:
                     tmp.unlink(missing_ok=True)
@@ -300,10 +573,10 @@ class WorkflowStepExecutor:
         candidate = Path(relative)
         if candidate.is_absolute() or ".." in candidate.parts:
             return None
-        resolved = (self.repo_root / candidate).resolve()
-        if not resolved.is_relative_to(self.repo_root.resolve()):
+        try:
+            return resolve_inside_repo(self.repo_root, relative, {})
+        except WorkflowExecutionError:
             return None
-        return resolved
 
     def _artifact_refs(self, run_id: str, step: WorkflowStep) -> tuple[ArtifactRef, ...]:
         remaining = ARTIFACT_REF_CONTENT_BUDGET
@@ -353,6 +626,8 @@ class WorkflowStepExecutor:
         run_id: str,
         context: dict[str, str],
     ) -> None:
+        if self.store.is_run_cancelled(run_id):
+            return
         stale: set[str] = set()
         for step in spec.execution_order():
             if self.store.get_step_status(run_id, step.id) != StepStatus.SUCCESS:
@@ -378,10 +653,10 @@ class WorkflowStepExecutor:
             if any(dependency in invalidated for dependency in step.depends_on):
                 invalidated.add(step.id)
         for step in spec.execution_order():
-            if (
-                step.id in invalidated
-                and self.store.get_step_status(run_id, step.id) == StepStatus.SUCCESS
-            ):
+            if step.id in invalidated and self.store.get_step_status(run_id, step.id) in {
+                StepStatus.SUCCESS,
+                StepStatus.WAITING_APPROVAL,
+            }:
                 self.store.reopen_step(run_id, step.id)
 
     def _evaluate_gate(
@@ -389,32 +664,49 @@ class WorkflowStepExecutor:
         run_id: str,
         step: WorkflowStep,
         context: dict[str, str],
-    ) -> GateDecision:
+    ) -> tuple[GateDecision, ReviewerResolution | None]:
+        texts = self._gate_texts(run_id, step)
+        if not texts:
+            # Fail closed: an auto gate with no gated artifact text cannot validate
+            # anything, so it must block rather than silently pass.
+            return GateDecision.FAIL, None
+        deterministic = evaluate_artifacts(texts).status
+        if deterministic == GateDecision.FAIL or self.review_adapter is None:
+            return deterministic, None
+        review = self._semantic_review(step, context, texts)
+        return stricter(deterministic, review.decision), review
+
+    def _gate_texts(self, run_id: str, step: WorkflowStep) -> list[str]:
         texts: list[str] = []
         for dependency in step.depends_on:
             for relative in self.store.get_step_outputs(run_id, dependency):
                 source = self._stored_artifact_path(relative)
                 if source is not None and source.exists():
-                    texts.append(source.read_text(encoding="utf-8"))
-        if not texts:
-            # Fail closed: an auto gate with no gated artifact text cannot validate
-            # anything, so it must block rather than silently pass.
-            return GateDecision.FAIL
-        deterministic = evaluate_artifacts(texts).status
-        if deterministic == GateDecision.FAIL or self.review_adapter is None:
-            return deterministic
-        return stricter(deterministic, self._semantic_review(step, context, texts))
+                    content = source.read_text(encoding="utf-8")
+                    if (
+                        step.terminal_delivery
+                        and dependency == "drafts"
+                        and self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW
+                        and OFFLINE_STUB_MARKER not in content
+                    ):
+                        validate_pack(content, self.store.get_inputs(run_id))
+                    texts.append(content)
+        return texts
 
     def _semantic_review(
         self,
         step: WorkflowStep,
         context: dict[str, str],
         texts: list[str],
-    ) -> GateDecision:
+    ) -> ReviewerResolution:
         review_adapter = self.review_adapter
         if review_adapter is None:
-            return GateDecision.PASS
-        review_input = "\n\n---\n\n".join(texts)[:REVIEW_INPUT_LIMIT]
+            msg = "semantic review requires a configured reviewer"
+            raise RuntimeError(msg)
+        review_input = self._minimize_pii(
+            "\n\n---\n\n".join(texts)[:REVIEW_INPUT_LIMIT],
+            context,
+        )
         policy_sources: list[str] = []
         role_contracts = [REVIEW_CONTRACT]
         declared_policy_sources = tuple(
@@ -437,7 +729,10 @@ class WorkflowStepExecutor:
             relative = f"clients/{client}/{filename}"
             source = self._resolve(relative, {})
             if source.is_file() and criteria_remaining:
-                content = source.read_text(encoding="utf-8")[:criteria_remaining]
+                content = self._minimize_pii(
+                    source.read_text(encoding="utf-8")[:criteria_remaining],
+                    context,
+                )
                 client_criteria.append({"path": relative, "content": content})
                 criteria_remaining -= len(content)
         request = AgentRequest(
@@ -453,15 +748,29 @@ class WorkflowStepExecutor:
                     "policy_sources": policy_sources,
                     "client": client,
                     "client_criteria": client_criteria,
+                    **(
+                        {"brief_json": context["brief_json"]}
+                        if context["workflow_id"] == LOCAL_PACK_WORKFLOW
+                        else {}
+                    ),
                 },
                 ensure_ascii=False,
                 separators=(",", ":"),
             ),
             model=step.model or "",
-            artifact_refs=self._artifact_refs(context["run_id"], step),
+            artifact_refs=self._minimize_artifact_refs(
+                self._artifact_refs(context["run_id"], step),
+                context,
+            ),
         )
-        result = review_adapter.generate(request)
-        resolution = resolve_reviewer_output(review_adapter, request, result)
+        result = self._invoke_adapter(review_adapter, request)
+        result = replace(result, text=self._minimize_pii(result.text, context))
+        resolution = resolve_reviewer_output(
+            review_adapter,
+            request,
+            result,
+            generate=lambda repair: self._invoke_adapter(review_adapter, repair),
+        )
         self.store.record_event(
             context["run_id"],
             step.id,
@@ -484,7 +793,7 @@ class WorkflowStepExecutor:
                 "artifact_ref_count": str(len(request.artifact_refs)),
             },
         )
-        return resolution.decision
+        return resolution
 
     def _run_kb_update(
         self,
@@ -493,17 +802,12 @@ class WorkflowStepExecutor:
         context: dict[str, str],
         lease_signal: _LeaseSignal,
     ) -> list[str]:
-        body = "\n".join(
-            [
-                f"# KB Update Queue: {step.id}",
-                "",
-                f"- client: {context.get('client', '[unknown]')}",
-                f"- run_id: {run_id}",
-                "- status: queued-for-reporter",
-                "",
-                "Reporter must verify and append durable insights.",
-                "Runner does not write directly to knowledge-base.",
-            ],
+        body = (
+            "# KB Update Queue\n\n"
+            f"- client: {context.get('client', '[unknown]')}\n"
+            "- status: queued-for-reporter\n\n"
+            "Reporter must verify and append durable insights.\n"
+            "Runner does not write directly to knowledge-base."
         )
         outputs = self._write_outputs(step, context, body, lease_signal)
         for output in outputs:
@@ -513,17 +817,95 @@ class WorkflowStepExecutor:
 
     def _gate_payload(
         self,
+        run_id: str,
         step: WorkflowStep,
         status: GateDecision,
         context: dict[str, str],
-    ) -> dict[str, str]:
-        return {
+        semantic_review: ReviewerResolution | None = None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
             "step_id": step.id,
             "status": status.value,
-            "run_id": context["run_id"],
+            "run_id": run_id,
             "workflow_id": context["workflow_id"],
             "pass_if": step.pass_if or "status in ['PASS','WARN']",
         }
+        if not step.terminal_delivery:
+            return payload
+
+        texts = self._gate_texts(run_id, step)
+        combined = "\n\n---\n\n".join(texts)
+        refs = self._artifact_refs(run_id, step)
+        deterministic = evaluate_artifacts(texts)
+        reasons = list(deterministic.reasons)
+        uses_agent = any(
+            row["step_type"] == StepType.AGENT.value for row in self.store.list_steps(run_id)
+        )
+        demo = (uses_agent and isinstance(self.adapter, LocalAdapter)) or any(
+            OFFLINE_STUB_MARKER in text for text in texts
+        )
+        review_truncated = len(combined) > REVIEW_INPUT_LIMIT
+        if self.review_adapter is None:
+            reasons.append("semantic reviewer was not configured")
+        if semantic_review is not None and semantic_review.decision != GateDecision.PASS:
+            reasons.append(semantic_review.reason)
+        elif status != GateDecision.PASS and not deterministic.reasons:
+            reasons.append(f"review gate returned {status.value}")
+        if review_truncated:
+            reasons.append("semantic review input was truncated")
+        if any(ref.truncated for ref in refs):
+            reasons.append("artifact reference was truncated")
+        if not refs:
+            reasons.append("no versioned artifact reference was produced")
+        deliverable = (
+            not demo
+            and self.review_adapter is not None
+            and status == GateDecision.PASS
+            and not review_truncated
+            and bool(refs)
+            and not any(ref.truncated for ref in refs)
+        )
+        payload.update(
+            {
+                "schema_version": DELIVERY_MANIFEST_SCHEMA_VERSION,
+                "delivery_status": (
+                    "deliverable" if deliverable else "demo" if demo else "blocked"
+                ),
+                "deliverable": deliverable,
+                "reasons": [
+                    self._minimize_pii(reason, context) for reason in dict.fromkeys(reasons)
+                ],
+                "generator": type(self.adapter).__name__ if uses_agent else "native",
+                "reviewer": (
+                    type(self.review_adapter).__name__ if self.review_adapter is not None else None
+                ),
+                "semantic_review": (
+                    {
+                        "status": semantic_review.decision.value,
+                        "reason": self._minimize_pii(semantic_review.reason, context),
+                        "outcome": semantic_review.outcome,
+                    }
+                    if semantic_review is not None
+                    else None
+                ),
+                "review_input": {
+                    "characters_total": len(combined),
+                    "characters_reviewed": min(len(combined), REVIEW_INPUT_LIMIT),
+                    "truncated": review_truncated,
+                },
+                "artifacts": [
+                    {
+                        "version": ref.version,
+                        "producer_step_id": ref.producer_step_id,
+                        "path": ref.path,
+                        "sha256": ref.sha256,
+                        "truncated": ref.truncated,
+                    }
+                    for ref in refs
+                ],
+            },
+        )
+        return payload
 
     def _write_outputs(
         self,
@@ -532,12 +914,16 @@ class WorkflowStepExecutor:
         content: str,
         lease_signal: _LeaseSignal,
     ) -> list[str]:
+        # Native builders validate metadata and sanitize their free-text fields before assembly.
+        # Reprocessing whole manifests/reports corrupts phone-shaped hashes and run/client IDs.
+        if step.type in (StepType.FILE_LOAD, StepType.AGENT):
+            content = self._minimize_pii(content, context)
         written: list[str] = []
         for output_template in self._output_templates(step):
             target = self._resolve(output_template, context)
             active = self._check_lease(context["run_id"], step.id, lease_signal)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = target.with_name(f"{target.name}.{self.runner_token}.tmp")
+            native_io_path(target.parent).mkdir(parents=True, exist_ok=True)
+            tmp = native_io_path(target.with_name(f"{target.name}.{self.runner_token}.tmp"))
             try:
                 tmp.write_text(content.rstrip() + "\n", encoding="utf-8")
                 self._replace_output(
@@ -563,14 +949,14 @@ class WorkflowStepExecutor:
         target: Path,
     ) -> None:
         if not active:
-            tmp.replace(target)
+            tmp.replace(native_io_path(target))
             return
         with self.store.hold_lease_for_write(run_id, step_id, self.runner_token) as owned:
             if lease_signal.done():
                 lease_signal.result()
             if not owned:
                 raise WorkflowExecutionError(step_id, "step lease lost before artifact replace")
-            tmp.replace(target)
+            tmp.replace(native_io_path(target))
 
     def _output_templates(self, step: WorkflowStep) -> tuple[str, ...]:
         if step.outputs:

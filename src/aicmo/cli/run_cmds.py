@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -7,10 +6,15 @@ from typing import Annotated
 
 import typer
 
-from aicmo.feedback import record_artifact_feedback
-from aicmo.ingest import archive_item, retain_failed_urls, scan_inbox
+from aicmo.feedback import prepare_feedback, record_artifact_feedback
+from aicmo.ingest import InboxItem, archive_item, retain_failed_urls, scan_inbox
+from aicmo.learning import read_feedback_file
+from aicmo.local_pack import read_brief_file
 from aicmo.phase_git import PhaseGitMode, run_phase_git
-from aicmo.redaction import redact
+from aicmo.photos import import_photos
+from aicmo.redaction import minimize_customer_pii, redact
+from aicmo.runner import WorkflowRunner
+from aicmo.source_input import source_checked_date
 from aicmo.store import WorkflowStore
 
 from ._options import (
@@ -36,6 +40,7 @@ from ._shared import (
     select_adapter,
     select_review_adapter,
 )
+from .quota_cmds import quota_notice
 
 
 class _RunIdFactory:
@@ -51,7 +56,11 @@ class _RunIdFactory:
 generated_run_id = _RunIdFactory()
 
 
-def run_workflow(
+def _safe_display(value: object) -> str:
+    return minimize_customer_pii(redact(str(value)))
+
+
+def run_workflow(  # noqa: C901 — explicit mutually exclusive file inputs
     workflow_id: Annotated[str, typer.Argument(help="Workflow id under workflows/*.workflow.yaml")],
     client: Annotated[str | None, typer.Option("--client")] = None,
     topic: Annotated[str | None, typer.Option("--topic")] = None,
@@ -61,13 +70,23 @@ def run_workflow(
         typer.Option("--artifact-format", help="Requested artifact format, e.g. markdown, json."),
     ] = None,
     extra_inputs: Annotated[
-        list[str],
+        list[str] | None,
         typer.Option(
             "--input",
             help="Extra workflow input as key=value (repeatable), e.g. "
             "--input source_url=https://example.com/article",
         ),
-    ] = [],
+    ] = None,
+    brief_file: Annotated[
+        Path | None,
+        typer.Option("--brief-file", help="UTF-8 JSON brief for local-store-pack"),
+    ] = None,
+    feedback_file: Annotated[
+        Path | None, typer.Option("--feedback-file", help="UTF-8 JSON for local-pack-feedback")
+    ] = None,
+    photos_file: Annotated[
+        Path | None, typer.Option("--photos-file", help="JPEG/PNG upload JSON for local-store-pack")
+    ] = None,
     feedback: Annotated[
         str | None,
         typer.Option("--feedback", help="Artifact feedback to persist for engine improvement."),
@@ -87,7 +106,7 @@ def run_workflow(
     review_anthropic: ReviewAnthropicOpt = False,
 ) -> None:
     inputs = {
-        **parse_input_pairs(extra_inputs),
+        **parse_input_pairs(extra_inputs or []),
         **compact_inputs(
             {
                 "client": client,
@@ -97,8 +116,25 @@ def run_workflow(
             },
         ),
     }
+    if brief_file is not None:
+        if "brief_json" in inputs:
+            reason = "use either --brief-file or --input brief_json, not both"
+            raise typer.BadParameter(reason)
+        inputs["brief_json"] = read_brief_file(brief_file)
+    if feedback_file is not None:
+        if workflow_id != "local-pack-feedback" or "feedback_json" in inputs:
+            reason = "use --feedback-file only for local-pack-feedback, without feedback_json"
+            raise typer.BadParameter(reason)
+        inputs["feedback_json"] = read_feedback_file(feedback_file)
     run_id_value = run_id or generated_run_id()
+    if feedback and client:
+        prepare_feedback(client, run_id_value, artifact_format or "unspecified", feedback)
     repo_root = repo.resolve()
+    if photos_file is not None:
+        if workflow_id != "local-store-pack" or not inputs.get("client") or "photos_json" in inputs:
+            reason = "use --photos-file only with local-store-pack and client, without photos_json"
+            raise typer.BadParameter(reason)
+        inputs["photos_json"] = import_photos(repo_root, inputs["client"], photos_file)
     runner = make_runner(
         repo_root,
         db,
@@ -109,6 +145,8 @@ def run_workflow(
     )
     runner.store.initialize()
     runner.store.ensure_phase_git_mode(run_id_value, phase_git.value)
+    if workflow_id == "local-store-pack" and client:
+        quota_notice(runner.store, client)
     result = runner.run(workflow_id=workflow_id, run_id=run_id_value, inputs=inputs)
     if feedback and client:
         path = record_artifact_feedback(
@@ -123,6 +161,58 @@ def run_workflow(
     elif phase_git != PhaseGitMode.OFF:
         emit_phase_git_result(run_phase_git(repo_root, phase_git, run_id_value, "workflow"))
     emit_result(result)
+
+
+def _ingest_item(runner: WorkflowRunner, item: InboxItem, client: str, repo_root: Path) -> bool:
+    failed_urls: list[str] = []
+    for url in item.urls:
+        run_id = generated_run_id()
+        console.print(
+            _safe_display(f"{item.source_file.name} -> {run_id}: {url}"),
+            markup=False,
+        )
+        try:
+            inputs = {"client": client, "source_url": url}
+            if item.source_text:
+                inputs.update(
+                    {
+                        "source_text": item.source_text,
+                        "source_checked_at": source_checked_date().isoformat(),
+                    },
+                )
+            result = runner.run(
+                workflow_id="content-engine",
+                run_id=run_id,
+                inputs=inputs,
+            )
+        except Exception as exc:  # noqa: BLE001 — keep ingesting the remaining URLs
+            console.print(
+                _safe_display(f"  failed: {type(exc).__name__}: {exc}"),
+                markup=False,
+            )
+            failed_urls.append(url)
+            continue
+        console.print(f"  {result.status}", markup=False)
+        if result.status not in ("success", "waiting_approval"):
+            failed_urls.append(url)
+
+    if not item.urls:
+        console.print(_safe_display(f"skipped (no urls): {item.source_file.name}"), markup=False)
+    elif not failed_urls:
+        archived = archive_item(item)
+        console.print(_safe_display(f"archived: {archived.relative_to(repo_root)}"), markup=False)
+    elif len(failed_urls) < len(item.urls):
+        retain_failed_urls(item, failed_urls)
+        console.print(
+            _safe_display(
+                f"retained {len(failed_urls)} failed url(s) in {item.source_file.name} for retry"
+            ),
+            markup=False,
+        )
+    else:
+        console.print(_safe_display(f"kept for retry: {item.source_file.name}"), markup=False)
+    return bool(failed_urls)
+
 
 def ingest_inbox(
     client: Annotated[str, typer.Option("--client", help="Client slug (inbox/<client>/)")],
@@ -148,14 +238,20 @@ def ingest_inbox(
     repo_root = repo.resolve()
     items = scan_inbox(repo_root, client)
     if not items:
-        console.print(f"inbox empty: inbox/{client}/ (drop .txt/.md files with one URL per line)")
+        message = f"inbox empty: inbox/{client}/ (drop .txt/.md files with one URL per line)"
+        console.print(_safe_display(message))
         return
     if dry_run:
         for item in items:
-            console.print(f"{item.source_file.name}: {len(item.urls)} url(s)", markup=False)
+            console.print(
+                _safe_display(f"{item.source_file.name}: {len(item.urls)} url(s)"),
+                markup=False,
+            )
             for url in item.urls:
+                source_status = "provided source" if item.source_text else "URL only: unavailable"
+                plan = _safe_display(f"source_url={url} ({source_status})")
                 console.print(
-                    f"  would run content-engine --input source_url={redact(url)}",
+                    f"  would run content-engine --input {plan}",
                     markup=False,
                 )
         return
@@ -163,48 +259,15 @@ def ingest_inbox(
         repo_root,
         db,
         select_adapter(executor, executor_cmd, anthropic),
-        select_review_adapter(review, review_cmd, False),
+        select_review_adapter(review, review_cmd, review_anthropic=False),
         emit_phase_deliverables,
     )
     any_failed = False
     for item in items:
-        failed_urls: list[str] = []
-        for url in item.urls:
-            run_id = generated_run_id()
-            console.print(f"{item.source_file.name} -> {run_id}: {redact(url)}", markup=False)
-            try:
-                result = runner.run(
-                    workflow_id="content-engine",
-                    run_id=run_id,
-                    inputs={"client": client, "source_url": url},
-                )
-            except Exception as exc:  # noqa: BLE001 — keep ingesting the remaining URLs
-                console.print(redact(f"  failed: {type(exc).__name__}: {exc}"), markup=False)
-                failed_urls.append(url)
-                continue
-            console.print(f"  {result.status}", markup=False)
-            if result.status not in ("success", "waiting_approval"):
-                failed_urls.append(url)
-        if not item.urls:
-            console.print(f"skipped (no urls): {item.source_file.name}", markup=False)
-        elif not failed_urls:
-            archived = archive_item(item)
-            console.print(f"archived: {archived.relative_to(repo_root)}", markup=False)
-        else:
-            any_failed = True
-            if len(failed_urls) < len(item.urls):
-                # Keep only the failed URLs so the next pass never duplicates
-                # runs that already reached the owner gate.
-                retain_failed_urls(item, failed_urls)
-                console.print(
-                    f"retained {len(failed_urls)} failed url(s) in "
-                    f"{item.source_file.name} for retry",
-                    markup=False,
-                )
-            else:
-                console.print(f"kept for retry: {item.source_file.name}", markup=False)
+        any_failed |= _ingest_item(runner, item, client, repo_root)
     if any_failed:
         raise typer.Exit(EXIT_FAILED)
+
 
 def resume_run(
     run_id: Annotated[str, typer.Argument()],
@@ -223,6 +286,13 @@ def resume_run(
     review: ReviewOpt = None,
     review_cmd: ReviewCmdOpt = None,
     review_anthropic: ReviewAnthropicOpt = False,
+    allow_policy_change: Annotated[
+        bool,
+        typer.Option(
+            "--allow-policy-change",
+            help="Explicitly resume with different executor, reviewer, or model settings.",
+        ),
+    ] = False,
 ) -> None:
     repo_root = repo.resolve()
     policy_store = WorkflowStore(db or default_db(repo_root))
@@ -239,8 +309,18 @@ def resume_run(
         emit_phase_deliverables,
         phase_git_callback(repo_root, selected_mode, run_id),
     )
-    result = runner.resume(run_id)
+    result = runner.resume(run_id, allow_policy_change=allow_policy_change)
     emit_result(result)
+
+
+def cancel_run(
+    run_id: Annotated[str, typer.Argument()],
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+    db: Annotated[Path | None, typer.Option("--db")] = None,
+) -> None:
+    make_runner(repo, db).cancel(run_id)
+    console.print(f"{run_id}: cancelled")
+
 
 def retry_step(
     run_id: Annotated[str, typer.Argument()],
@@ -261,3 +341,4 @@ def register(app: typer.Typer, run_id_factory: Callable[[], str]) -> None:
 
 def register_retry(app: typer.Typer) -> None:
     app.command("retry")(retry_step)
+    app.command("cancel")(cancel_run)

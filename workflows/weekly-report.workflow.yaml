@@ -1,0 +1,25 @@
+id: weekly-report
+name: 가게 수기 성과 주간 보고서
+inputs:
+  client: required
+  week_start: required
+  channel: optional
+steps:
+  - id: load_context
+    type: file.load
+    paths: ["clients/${client}/config.md"]
+    outputs: ["artifacts/${run_id}/context.md"]
+  - id: report
+    type: metrics.report
+    role: reporter
+    depends_on: [load_context]
+    prompt: playbooks/06-analytics/weekly-report.md
+    outputs: ["artifacts/${run_id}/weekly-report.md"]
+  - id: delivery_gate
+    type: gate
+    role: reviewer
+    terminal_delivery: true
+    depends_on: [report]
+    prompt: playbooks/06-analytics/weekly-report.md
+    pass_if: "status in ['PASS','WARN']"
+    outputs: ["artifacts/${run_id}/delivery-review.json"]

@@ -86,7 +86,7 @@ def test_primer_pdf_option_uses_renderer(tmp_path: Path, monkeypatch: pytest.Mon
     source.write_text(_PAYLOAD, encoding="utf-8")
     out = tmp_path / "primer.html"
     pdf = tmp_path / "primer.pdf"
-    calls = []
+    calls: list[tuple[Path, Path]] = []
 
     def fake_render(_html_path: Path, pdf_path: Path) -> str:
         calls.append((_html_path, pdf_path))

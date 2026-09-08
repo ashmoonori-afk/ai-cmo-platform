@@ -2,6 +2,74 @@ from __future__ import annotations
 
 SCHEMA = (
     """
+    create table if not exists pack_edit_receipts (
+        run_id text primary key references runs(run_id),
+        receipt_json text not null,
+        body text not null,
+        state text not null check (state in ('applying','applied'))
+    )
+    """,
+    """
+    create table if not exists product_quotas (
+        client text not null,
+        period text not null,
+        pack_limit integer not null check (pack_limit >= 0),
+        draft_limit integer not null check (draft_limit >= 0),
+        draft_used integer not null default 0 check (draft_used >= 0),
+        primary key (client, period)
+    )
+    """,
+    """
+    create table if not exists product_usage (
+        run_id text primary key references runs(run_id),
+        client text not null,
+        period text not null,
+        state text not null check (
+            state in ('reserved','consumed','released','credited','unmetered')
+        ),
+        delivery_sha256 text
+    )
+    """,
+    """
+    create table if not exists learned_feedback (
+        event_sha256 text primary key,
+        client text not null,
+        feedback_run_id text not null,
+        insight text not null,
+        created_at text not null default current_timestamp
+    )
+    """,
+    """
+    create table if not exists approval_snapshots (
+        run_id text not null,
+        gate_id text not null,
+        source_path text not null,
+        snapshot_path text not null,
+        sha256 text not null,
+        primary key (run_id, gate_id, source_path)
+    )
+    """,
+    """
+    create table if not exists manual_outcome_imports (
+        confirmation_sha256 text primary key,
+        client text not null,
+        week_start text not null,
+        channel text not null,
+        source_sha256 text not null
+    )
+    """,
+    """
+    create table if not exists manual_outcomes (
+        client text not null,
+        observed_on text not null,
+        channel text not null,
+        payload_json text not null,
+        source_sha256 text not null check (length(source_sha256) = 64),
+        revision integer not null check (revision > 0),
+        primary key (client, observed_on, channel)
+    )
+    """,
+    """
     create table if not exists workflows (
         workflow_id text primary key,
         name text not null,
@@ -31,7 +99,8 @@ SCHEMA = (
         run_id text primary key,
         phase_git_mode text not null check (
             phase_git_mode in ('off', 'dry-run', 'commit', 'push', 'merge')
-        )
+        ),
+        execution_policy_json text
     )
     """,
     """
@@ -84,6 +153,7 @@ SCHEMA = (
         decision text not null,
         reviewer text not null,
         notes text not null,
+        photo_manifest_sha256 text,
         created_at text not null default current_timestamp,
         unique (run_id, step_id),
         foreign key (run_id, step_id) references steps(run_id, step_id)

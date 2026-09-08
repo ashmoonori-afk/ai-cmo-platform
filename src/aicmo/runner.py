@@ -1,48 +1,166 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Self
 
+from aicmo.adapters import CommandAdapter, StepAdapter
+from aicmo.anthropic_adapter import AnthropicAdapter, resolve_model
 from aicmo.errors import (
     RunConflictError,
     StepTransitionError,
     WorkflowExecutionError,
     WorkflowSpecError,
 )
-from aicmo.models import ApprovalDecision, RunResult, StepStatus, WorkflowSpec, WorkflowStep
-from aicmo.paths import parse_safe_id
-from aicmo.redaction import contains_raw_secret
+from aicmo.export import verified_delivery
+from aicmo.learning import parse_feedback
+from aicmo.local_pack import DRAFT_STEP, parse_brief, validate_pack
+from aicmo.local_pack import WORKFLOW_ID as LOCAL_PACK_WORKFLOW
+from aicmo.models import (
+    ApprovalDecision,
+    RunResult,
+    RunStatus,
+    StepStatus,
+    WorkflowSpec,
+    WorkflowStep,
+)
+from aicmo.pack_edits import EditApproval, prepare_edit_application, verify_edit_approval
+from aicmo.paths import native_io_path, parse_safe_id
+from aicmo.photos import PHOTO_STEP, parse_photos, verify_photo_assets
+from aicmo.quota import QuotaError
+from aicmo.redaction import contains_raw_secret, minimize_customer_pii
+from aicmo.source_input import PreparedInputs, operating_inputs, prepare_workflow_inputs
 from aicmo.spec import load_workflow_spec
 from aicmo.step_executor import WorkflowStepExecutor
+from aicmo.step_state import MAX_STEP_ATTEMPTS
+from aicmo.web_run_lock import serialized_web_run
 
-_OPERATING_INPUTS = {"artifact_format", "feedback"}
+_OPERATING_INPUTS = {"artifact_format", "feedback", *operating_inputs()}
 
 
 @dataclass(frozen=True, slots=True)
 class WorkflowRunner(WorkflowStepExecutor):
+    @serialized_web_run
     def run(self: Self, workflow_id: str, run_id: str, inputs: dict[str, str]) -> RunResult:
         parse_safe_id("workflow_id", workflow_id)
         parse_safe_id("run_id", run_id)
         spec = load_workflow_spec(self.repo_root, workflow_id)
+        if spec.id == "local-pack-feedback":
+            inputs = {
+                **inputs,
+                "feedback_json": parse_feedback(inputs.get("feedback_json", "")).model_dump_json(),
+            }
+        if spec.id == LOCAL_PACK_WORKFLOW:
+            parse_brief(inputs)
+            verify_photo_assets(self.repo_root, inputs)
+        prepared = prepare_workflow_inputs(spec.inputs, inputs)
+        inputs = prepared.values
+        if spec.id == LOCAL_PACK_WORKFLOW:
+            parse_brief(inputs)
+        if spec.id == "local-pack-feedback":
+            parse_feedback(inputs.get("feedback_json", ""))
         self._validate_inputs(spec, inputs)
         self.store.initialize()
         self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
+        self.store.ensure_execution_policy(run_id, self._execution_policy(spec))
+        self._write_source_manifest(run_id, prepared)
         self.store.record_event(run_id, None, "run.started", f"Started {workflow_id}", inputs)
         return self._execute(spec, run_id, inputs)
 
-    def resume(self: Self, run_id: str) -> RunResult:
+    @serialized_web_run
+    def resume(self: Self, run_id: str, *, allow_policy_change: bool = False) -> RunResult:
         self.store.initialize()
         run = self.store.get_run(run_id)
         inputs = self.store.get_inputs(run_id)
         try:
             spec = load_workflow_spec(self.repo_root, str(run["workflow_id"]))
             self.store.ensure_run(spec=spec, run_id=run_id, inputs=inputs)
+            prepared = prepare_workflow_inputs(spec.inputs, inputs)
+            if spec.id == "local-pack-feedback":
+                parse_feedback(prepared.values.get("feedback_json", ""))
+            if spec.id == LOCAL_PACK_WORKFLOW:
+                parse_brief(prepared.values)
+            if prepared.values != inputs:
+                raise RunConflictError(
+                    run_id,
+                    "stored inputs do not meet current privacy rules; start a new run",
+                )
+            self._write_source_manifest(run_id, prepared)
+            changed = self.store.ensure_execution_policy(
+                run_id,
+                self._execution_policy(spec),
+                allow_change=allow_policy_change,
+            )
         except WorkflowSpecError as exc:
             reason = f"current specification cannot be verified ({exc}); start a new run"
             raise RunConflictError(run_id, reason) from None
+        if changed:
+            self.store.record_event(
+                run_id,
+                None,
+                "run.policy_changed",
+                "Executor, reviewer, or model policy changed by explicit request",
+            )
         self.store.record_event(run_id, None, "run.resumed", f"Resumed {run_id}")
         return self._execute(spec, run_id, inputs)
 
+    @serialized_web_run
+    def cancel(self: Self, run_id: str) -> None:
+        self.store.initialize()
+        self.store.cancel_run(run_id)
+        self.store.record_event(run_id, None, "run.cancelled", f"Cancelled {run_id}")
+
+    def _execution_policy(self: Self, spec: WorkflowSpec) -> str:
+        return json.dumps(
+            {
+                "schema_version": "aicmo.run-policy.v1",
+                "executor": self._adapter_identity(self.adapter),
+                "reviewer": (
+                    self._adapter_identity(self.review_adapter)
+                    if self.review_adapter is not None
+                    else None
+                ),
+                "models": {step.id: step.model or "" for step in spec.steps},
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _adapter_identity(adapter: StepAdapter) -> dict[str, str]:
+        identity = f"{type(adapter).__module__}.{type(adapter).__qualname__}"
+        if isinstance(adapter, CommandAdapter):
+            command = json.dumps(adapter.command, separators=(",", ":"))
+            return {
+                "type": identity,
+                "command_sha256": hashlib.sha256(command.encode()).hexdigest(),
+                "timeout_seconds": f"{adapter.timeout_seconds:g}",
+            }
+        if isinstance(adapter, AnthropicAdapter):
+            return {
+                "type": identity,
+                "default_model": resolve_model("", adapter.default_model),
+                "max_tokens": str(adapter.max_tokens),
+            }
+        return {"type": identity}
+
+    def _write_source_manifest(self: Self, run_id: str, prepared: PreparedInputs) -> None:
+        if prepared.source_manifest is None:
+            return
+        target = self.repo_root / "artifacts" / run_id / "source-manifest.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(".json.tmp")
+        temporary.write_text(
+            json.dumps(prepared.source_manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(target)
+
+    @serialized_web_run
     def approve(
         self: Self,
         run_id: str,
@@ -50,6 +168,18 @@ class WorkflowRunner(WorkflowStepExecutor):
         reviewer: str,
         notes: str,
         accept_edits: bool = False,
+        photos_reviewed: bool = False,
+    ) -> list[str]:
+        return self._approve(run_id, step_id, reviewer, notes, accept_edits, photos_reviewed)
+
+    def _approve(
+        self: Self,
+        run_id: str,
+        step_id: str,
+        reviewer: str,
+        notes: str,
+        accept_edits: bool = False,
+        photos_reviewed: bool = False,
     ) -> list[str]:
         """Record a manual approval. With accept_edits, bless human edits made to
         successful steps' artifacts while the gate was waiting: their hashes are
@@ -59,17 +189,43 @@ class WorkflowRunner(WorkflowStepExecutor):
         open a window where that resume regenerates over the owner's edits.
         Returns the list of artifact paths whose content changed since generation."""
         self.store.initialize()
+        if (
+            accept_edits
+            and self.store.get_step_status(run_id, step_id) != StepStatus.WAITING_APPROVAL
+        ):
+            raise StepTransitionError(
+                run_id, step_id, "--accept-edits requires a gate in waiting_approval"
+            )
+        if self.store.approval_for(run_id, step_id) is not None:
+            raise StepTransitionError(run_id, step_id, "an approval decision is already recorded")
+        photo_digest = None
+        local_pack = self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW
+        if local_pack:
+            inputs = self.store.get_inputs(run_id)
+            photo_digest, _ = self.verified_photos(run_id)
+            if parse_photos(inputs).photos and not photos_reviewed:
+                raise WorkflowExecutionError(
+                    PHOTO_STEP, "review photo-preview, then use --photos-reviewed"
+                )
+            if accept_edits:
+                source = self._stored_artifact_path(f"artifacts/{run_id}/local-pack.json")
+                if source is None or not source.is_file():
+                    raise WorkflowExecutionError(DRAFT_STEP, "edited pack is missing")
+                validate_pack(source.read_text("utf-8"), inputs)
         changed: list[str] = []
         if accept_edits:
-            if self.store.get_step_status(run_id, step_id) != StepStatus.WAITING_APPROVAL:
-                raise StepTransitionError(
-                    run_id,
-                    step_id,
-                    "--accept-edits requires a gate in waiting_approval",
-                )
             changed = self._accept_artifact_edits(run_id, step_id)
-        self.store.approve(run_id, step_id, ApprovalDecision.APPROVED, reviewer, notes)
-        self.store.record_event(run_id, step_id, "gate.approved", notes, {"reviewer": reviewer})
+        safe_notes = minimize_customer_pii(notes)
+        self.store.approve(
+            run_id, step_id, ApprovalDecision.APPROVED, reviewer, safe_notes, photo_digest
+        )
+        self.store.record_event(
+            run_id,
+            step_id,
+            "gate.approved",
+            safe_notes,
+            {"reviewer": reviewer},
+        )
         if accept_edits:
             self.store.record_event(
                 run_id,
@@ -80,12 +236,60 @@ class WorkflowRunner(WorkflowStepExecutor):
             )
         return changed
 
+    @serialized_web_run
+    def apply_pack_edit(self: Self, run_id: str, receipt: EditApproval, body: str) -> None:
+        """Apply one frozen web edit; an unfinished durable receipt blocks other run mutations."""
+        receipt = EditApproval.model_validate_json(receipt.model_dump_json())
+        self.store.initialize()
+        # Applying already-confirmed text is provider-free, including cancellation recovery.
+        # Generation still checks the stored execution policy in run/resume.
+        path = prepare_edit_application(self, run_id, receipt, body)
+        with self.store.connect() as connection:
+            row = connection.execute(
+                "select state from pack_edit_receipts where run_id=?", (run_id,)
+            ).fetchone()
+        if row["state"] == "applied":
+            verify_edit_approval(self, run_id, receipt)
+            return
+        self._write_pack_edit(path, body)
+        if self.store.approval_for(run_id, "owner_gate") is None:
+            self._approve(
+                run_id,
+                "owner_gate",
+                receipt.reviewer,
+                "웹에서 수정 문안 확인",
+                accept_edits=True,
+                photos_reviewed=True,
+            )
+        verify_edit_approval(self, run_id, receipt)
+        with self.store.connect() as connection:
+            connection.execute(
+                "update pack_edit_receipts set state='applied' where run_id=?", (run_id,)
+            )
+
+    @staticmethod
+    def _write_pack_edit(path: Path, body: str) -> None:
+        with NamedTemporaryFile(
+            dir=native_io_path(path.parent), prefix=".owner-edit-", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(body.encode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            temporary.replace(native_io_path(path))
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def _accept_artifact_edits(self: Self, run_id: str, gate_step_id: str) -> list[str]:
         changed: list[str] = []
+        local_pack = self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW
         for row in self.store.list_steps(run_id):
             if row["status"] != StepStatus.SUCCESS.value:
                 continue
             step_id = str(row["step_id"])
+            if local_pack and step_id != "drafts":
+                continue
             outputs = self.store.get_step_outputs(run_id, step_id)
             if not outputs:
                 continue
@@ -106,19 +310,45 @@ class WorkflowRunner(WorkflowStepExecutor):
             self.store.record_output_hashes(run_id, step_id, current)
         return changed
 
+    @serialized_web_run
     def reject(self: Self, run_id: str, step_id: str, reviewer: str, notes: str) -> None:
         self.store.initialize()
-        self.store.approve(run_id, step_id, ApprovalDecision.REJECTED, reviewer, notes)
+        safe_notes = minimize_customer_pii(notes)
+        self.store.approve(run_id, step_id, ApprovalDecision.REJECTED, reviewer, safe_notes)
         self.store.mark_step_failed(run_id, step_id, "manual gate rejected")
-        self.store.record_event(run_id, step_id, "gate.rejected", notes, {"reviewer": reviewer})
+        self.store.record_event(
+            run_id,
+            step_id,
+            "gate.rejected",
+            safe_notes,
+            {"reviewer": reviewer},
+        )
 
+    @serialized_web_run
     def retry(self: Self, run_id: str, step_id: str) -> None:
         self.store.initialize()
         self.store.retry_step(run_id, step_id)
         self.store.record_event(run_id, step_id, "step.retry", f"Retry requested for {step_id}")
 
-    def _execute(self: Self, spec: WorkflowSpec, run_id: str, inputs: dict[str, str]) -> RunResult:
+    def _execute(  # noqa: C901 — sequential workflow and immutable photo checks
+        self: Self, spec: WorkflowSpec, run_id: str, inputs: dict[str, str]
+    ) -> RunResult:
+        with self.store.connect() as connection:
+            credited = connection.execute(
+                "select 1 from product_usage where run_id=? and state='credited'", (run_id,)
+            ).fetchone()
+        if credited is not None:
+            reason = "credited run cannot resume; create a new run"
+            raise QuotaError(reason)
         context = {**inputs, "run_id": run_id, "workflow_id": spec.id}
+        if spec.id == LOCAL_PACK_WORKFLOW:
+            verify_photo_assets(self.repo_root, inputs)
+            if self.store.get_step_status(run_id, "photos") == StepStatus.SUCCESS:
+                self.verified_photos(
+                    run_id,
+                    require_approval=self.store.approval_for(run_id, "owner_gate")
+                    == ApprovalDecision.APPROVED,
+                )
         self._reopen_stale_successes(spec, run_id, context)
         for step in spec.execution_order():
             status = self.store.get_step_status(run_id, step.id)
@@ -130,16 +360,17 @@ class WorkflowRunner(WorkflowStepExecutor):
                     continue
                 self._reopen_successes_and_dependents(spec, run_id, {step.id})
                 status = StepStatus.PENDING
-            if not self._dependencies_done(run_id, step):
-                return self._fail(
-                    run_id,
-                    step.id,
-                    "dependency did not complete",
-                    owner=None,
-                )
+            halted = self._before_step(run_id, step, status)
+            if halted is not None:
+                return halted
             try:
                 artifact_refs = self._artifact_refs(run_id, step)
                 outputs = self._execute_step(run_id, step, context, status, artifact_refs)
+            except QuotaError as exc:
+                self.store.record_event(run_id, step.id, "quota.blocked", str(exc))
+                return RunResult(
+                    status=RunStatus.FAILED.value, run_id=run_id, failed_step_id=step.id
+                )
             except WorkflowExecutionError as exc:
                 return self._fail(
                     run_id,
@@ -169,9 +400,79 @@ class WorkflowRunner(WorkflowStepExecutor):
             )
             if after_step is not None:
                 return after_step
-        self.store.mark_run_success(run_id)
+        return self._complete_run(run_id)
+
+    def _before_step(
+        self: Self,
+        run_id: str,
+        step: WorkflowStep,
+        status: StepStatus,
+    ) -> RunResult | None:
+        if self.store.is_run_cancelled(run_id):
+            return RunResult(status=RunStatus.CANCELLED.value, run_id=run_id)
+        if (
+            status != StepStatus.WAITING_APPROVAL
+            and self.store.get_step_attempt(run_id, step.id) >= MAX_STEP_ATTEMPTS
+        ):
+            self.store.record_event(
+                run_id,
+                step.id,
+                "step.retry_exhausted",
+                f"Step attempt limit reached ({MAX_STEP_ATTEMPTS})",
+            )
+            return RunResult(
+                status=RunStatus.FAILED.value,
+                run_id=run_id,
+                failed_step_id=step.id,
+            )
+        if not self._dependencies_done(run_id, step):
+            return self._fail(run_id, step.id, "dependency did not complete", owner=None)
+        return None
+
+    @serialized_web_run
+    def complete_verified_local_pack(self: Self, run_id: str) -> RunResult:
+        """Recover a completed pack's final write without invoking or changing its providers."""
+        verified_delivery(
+            self, run_id, LOCAL_PACK_WORKFLOW, completing=True, require_deliverable=False
+        )
+        return self._complete_run(run_id)
+
+    def _complete_run(self: Self, run_id: str) -> RunResult:
+        if self.store.get_run(run_id)["workflow_id"] == LOCAL_PACK_WORKFLOW:
+            try:
+                self.verified_photos(run_id, require_approval=True)
+            except WorkflowExecutionError as exc:
+                return self._fail(run_id, "delivery_gate", str(exc), owner=None)
+        digest = None
+        reviewed_digest = None
+        with self.store.connect() as connection:
+            reserved = connection.execute(
+                "select 1 from product_usage where run_id=? and state='reserved'", (run_id,)
+            ).fetchone()
+        if reserved is not None:
+            try:
+                _, contents = verified_delivery(
+                    self, run_id, LOCAL_PACK_WORKFLOW, completing=True, require_deliverable=False
+                )
+                manifest_bytes = contents[f"artifacts/{run_id}/delivery-review.json"]
+                reviewed_digest = hashlib.sha256(manifest_bytes).hexdigest()
+                manifest = json.loads(manifest_bytes)
+                if (
+                    manifest["deliverable"] is True
+                    and manifest["status"] == "PASS"
+                    and manifest["semantic_review"].get("status") == "PASS"
+                    and all(ref["truncated"] is False for ref in manifest["artifacts"])
+                ):
+                    digest = reviewed_digest
+            except WorkflowExecutionError as exc:
+                return self._fail(run_id, "delivery_gate", str(exc), owner=None)
+        if not self.store.mark_run_success(run_id, digest, reviewed_digest):
+            status = (
+                RunStatus.CANCELLED if self.store.is_run_cancelled(run_id) else RunStatus.FAILED
+            )
+            return RunResult(status=status.value, run_id=run_id)
         self.store.record_event(run_id, None, "run.success", f"Completed {run_id}")
-        return RunResult(status="success", run_id=run_id)
+        return RunResult(status=RunStatus.SUCCESS.value, run_id=run_id)
 
     def _dependencies_done(self: Self, run_id: str, step: WorkflowStep) -> bool:
         return all(
@@ -231,6 +532,8 @@ class WorkflowRunner(WorkflowStepExecutor):
         return RunResult(status="failed", run_id=run_id, failed_step_id=step_id)
 
     def _lost_lease(self: Self, run_id: str, step_id: str, message: str) -> RunResult:
+        if self.store.is_run_cancelled(run_id):
+            return RunResult(status=RunStatus.CANCELLED.value, run_id=run_id)
         self.store.record_event(run_id, step_id, "step.lost_lease", message)
         return RunResult(status="failed", run_id=run_id, failed_step_id=step_id)
 

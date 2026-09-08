@@ -24,7 +24,7 @@ def _write(path: Path, content: str) -> None:
 def approval_repo(repo_root: Path) -> Path:
     _write(
         repo_root / "workflows" / "approval-edit.workflow.yaml",
-        "\n".join(
+        "\n".join(  # noqa: FLY002 — line list mirrors workflow YAML
             [
                 "id: approval-edit",
                 "name: Approval Edit Flow",
@@ -73,6 +73,17 @@ def _start_waiting_run(repo_root: Path, run_id: str) -> WorkflowRunner:
     return runner
 
 
+def test_long_run_id_snapshot_uses_native_windows_paths(approval_repo: Path) -> None:
+    from aicmo.paths import native_io_path  # noqa: PLC0415 — targeted filesystem regression
+
+    run_id = "long-" + "x" * 123
+    runner = _start_waiting_run(approval_repo, run_id)
+    relative = f"artifacts/{run_id}/draft.md"
+    snapshot = native_io_path(approval_repo / f"artifacts/{run_id}/_pre_edit/{relative}")
+    assert snapshot.read_bytes() == (approval_repo / relative).read_bytes()
+    assert runner.resume(run_id).status == "waiting_approval"
+
+
 def test_pre_edit_snapshot_captures_original_and_is_write_once(approval_repo: Path) -> None:
     runner = _start_waiting_run(approval_repo, "run_snap")
     draft = approval_repo / "artifacts" / "run_snap" / "draft.md"
@@ -111,9 +122,12 @@ class _OrderProbeStore(WorkflowStore):
         decision: ApprovalDecision,
         reviewer: str,
         notes: str,
+        photo_manifest_sha256: str | None = None,
     ) -> None:
         _OrderProbeStore.calls.append("approve")
-        WorkflowStore.approve(self, run_id, step_id, decision, reviewer, notes)
+        WorkflowStore.approve(
+            self, run_id, step_id, decision, reviewer, notes, photo_manifest_sha256
+        )
 
 
 def test_accept_edits_blesses_before_approval_row(approval_repo: Path) -> None:
@@ -128,7 +142,8 @@ def test_accept_edits_blesses_before_approval_row(approval_repo: Path) -> None:
     _OrderProbeStore.calls.clear()
     runner.approve("run_order", "owner_gate", "owner", "ok", accept_edits=True)
     calls = _OrderProbeStore.calls
-    assert "approve" in calls and "bless" in calls
+    assert "approve" in calls
+    assert "bless" in calls
     assert calls.index("bless") < calls.index("approve")
 
 
@@ -146,9 +161,12 @@ def test_edit_without_accept_edits_is_regenerated(approval_repo: Path) -> None:
     draft.write_text(_EDIT_MARKER, encoding="utf-8")
     changed = runner.approve("run_plain", "owner_gate", "owner", "ok")
     assert changed == []
-    assert runner.resume("run_plain").status == "success"
+    assert runner.resume("run_plain").status == "waiting_approval"
+    assert runner.store.approval_for("run_plain", "owner_gate") is None
     # Tamper detection keeps its default behavior: the edited file was regenerated.
     assert _EDIT_MARKER not in draft.read_text(encoding="utf-8")
+    runner.approve("run_plain", "owner_gate", "owner", "regenerated version checked")
+    assert runner.resume("run_plain").status == "success"
 
 
 def test_accept_edits_preserves_owner_changes(approval_repo: Path) -> None:

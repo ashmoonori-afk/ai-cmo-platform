@@ -1,0 +1,10 @@
+{% extends "store_app/base.html" %}{% block title %}가게 정보 확인 · 우리 가게 홍보{% endblock %}
+{% block content %}<h1>가게 정보를 확인해 주세요</h1><p role="status"><span class="badge">{{ draft.get_state_display }}</span></p>
+{% if draft.state == 'queued' or draft.state == 'running' %}<section class="card"><h2>가게를 준비하고 있어요</h2><p>입력은 저장되었습니다. 화면을 닫아도 계속 준비합니다.</p><a class="button" href="{% url 'onboarding-confirm' %}">준비 상태 새로 확인</a></section>
+{% else %}
+{% if draft.state == 'failed' %}<p role="alert">가게 준비를 완료하지 못했습니다. 입력은 보관되어 있습니다. 다시 시도해도 해결되지 않으면 운영자에게 문의해 주세요. 문의 시 가게 준비 번호 {{ draft.id }}를 알려 주세요.</p>{% endif %}
+<section class="card"><h2>입력한 가게 정보</h2><dl>{% for label,value in rows %}<dt><strong>{{ label }}</strong></dt><dd class="copy">{{ value }}</dd>{% endfor %}</dl>
+<p class="muted">입력하지 않은 고객 문제·특징·행동은 미확인으로 남깁니다. 가게 정보를 자동 인증하거나 외부 사이트를 수집하지 않습니다.</p>
+{% if draft.state == 'draft' %}<div class="actions"><a href="{% url 'onboarding-step' 1 %}">가게·동네 수정</a><a href="{% url 'onboarding-step' 2 %}">상품·운영 정보 수정</a><a href="{% url 'onboarding-step' 3 %}">목적·여력 수정</a></div>{% endif %}</section>
+<section class="card">{% if draft.state == 'failed' and draft.attempts >= draft.MAX_ATTEMPTS and not draft.stage_id %}<p role="alert">가게 준비를 세 번 시도했습니다. 운영자가 저장 상태를 확인한 뒤 도와드리겠습니다.</p>{% else %}<form method="post">{% csrf_token %}{{ form.as_p }}<button>{% if draft.state == 'failed' %}같은 내용으로 다시 준비{% else %}확인하고 가게 준비{% endif %}</button></form>{% endif %}</section>{% endif %}
+<p><a href="{% url 'home' %}">오늘로 돌아가기</a></p>{% endblock %}

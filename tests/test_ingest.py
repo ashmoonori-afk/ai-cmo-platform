@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from aicmo.errors import WorkflowExecutionError
 from aicmo.ingest import InboxItem, archive_item, parse_urls, retain_failed_urls, scan_inbox
 from aicmo.runner import WorkflowRunner
 from aicmo.store import WorkflowStore
@@ -17,7 +18,7 @@ def _write(path: Path, content: str) -> None:
 
 
 def test_parse_urls_filters_and_dedupes() -> None:
-    text = "\n".join(
+    text = "\n".join(  # noqa: FLY002 — line list mirrors inbox contents
         [
             "# 오늘 본 기사",
             "https://a.example/one",
@@ -69,9 +70,15 @@ def test_scan_inbox_survives_cp949_files(tmp_path: Path) -> None:
 def test_retain_failed_urls_rewrites_only_failures(tmp_path: Path) -> None:
     source = tmp_path / "inbox" / "c" / "mixed.txt"
     _write(source, "https://ok.example\nhttps://bad.example\n")
-    item = InboxItem(source_file=source, urls=("https://ok.example", "https://bad.example"))
+    item = InboxItem(
+        source_file=source,
+        urls=("https://ok.example", "https://bad.example"),
+        source_text="제공된 원문",
+    )
     retain_failed_urls(item, ["https://bad.example"])
-    assert parse_urls(source.read_text(encoding="utf-8")) == ["https://bad.example"]
+    retained = source.read_text(encoding="utf-8")
+    assert parse_urls(retained) == ["https://bad.example"]
+    assert "제공된 원문" in retained
 
 
 @pytest.fixture
@@ -86,13 +93,15 @@ def engine_repo(repo_root: Path) -> Path:
     )
     _write(
         repo_root / "workflows" / "content-engine.workflow.yaml",
-        "\n".join(
+        "\n".join(  # noqa: FLY002 — line list mirrors workflow YAML
             [
                 "id: content-engine",
                 "name: Content Engine",
                 "inputs:",
                 "  client: required",
                 "  source_url: required",
+                "  source_text: optional",
+                "  source_checked_at: optional",
                 "steps:",
                 "  - id: load_context",
                 "    type: file.load",
@@ -119,17 +128,40 @@ def engine_repo(repo_root: Path) -> Path:
     return repo_root
 
 
-def test_ingested_url_reaches_owner_gate(engine_repo: Path) -> None:
+def test_url_only_is_blocked_without_claiming_the_source_was_read(engine_repo: Path) -> None:
+    runner = WorkflowRunner(
+        repo_root=engine_repo,
+        store=WorkflowStore(engine_repo / "runs.sqlite3"),
+    )
+
+    with pytest.raises(WorkflowExecutionError, match="external source unavailable"):
+        runner.run(
+            "content-engine",
+            "run_ingest_1",
+            {"client": "sample-client-a", "source_url": "https://a.example/one"},
+        )
+
+    assert not (engine_repo / "artifacts" / "run_ingest_1").exists()
+
+
+def test_provided_source_reaches_owner_gate_with_manifest(engine_repo: Path) -> None:
     runner = WorkflowRunner(
         repo_root=engine_repo,
         store=WorkflowStore(engine_repo / "runs.sqlite3"),
     )
     result = runner.run(
         "content-engine",
-        "run_ingest_1",
-        {"client": "sample-client-a", "source_url": "https://a.example/one"},
+        "run_ingest_2",
+        {
+            "client": "sample-client-a",
+            "source_url": "https://a.example/one",
+            "source_text": "사용자가 직접 제공한 실제 기사 본문 내용입니다.",
+            "source_checked_at": "2026-09-05",
+        },
     )
     assert result.status == "waiting_approval"
-    posts = engine_repo / "artifacts" / "run_ingest_1" / "channel-posts.md"
+    posts = engine_repo / "artifacts" / "run_ingest_2" / "channel-posts.md"
     assert posts.exists()
     assert "source_url" in posts.read_text(encoding="utf-8")
+    manifest = engine_repo / "artifacts" / "run_ingest_2" / "source-manifest.json"
+    assert '"content_status": "provided_by_user"' in manifest.read_text("utf-8")

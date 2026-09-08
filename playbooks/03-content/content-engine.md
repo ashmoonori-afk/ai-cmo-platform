@@ -2,7 +2,7 @@
 
 ## 목적
 
-**URL 하나(기사·유튜브·블로그·자사 콘텐츠)를 던지면** 소스 검증 → 소스 리포트 → 채널별 포스트+이미지 → 사장님 승인(수정 가능) → 발행 큐 → **수정 내용 자동 학습(reflection)**까지 한 줄로 처리한다. langchain-ai/social-media-agent 파이프라인의 한국형 이식 (기획: `docs/product/content-engine-plan.md`).
+**URL·사용자가 제공한 원문·확인일을 입력하면** 소스 검증 → 소스 리포트 → 채널별 포스트+이미지 → 사장님 승인(수정 가능) → 발행 큐 → **수정 내용 자동 학습(reflection)**까지 한 줄로 처리한다. URL만 있으면 외부 원문을 읽었다고 주장하지 않고 실행 전에 중단한다. langchain-ai/social-media-agent 파이프라인의 한국형 이식 (기획: `docs/product/content-engine-plan.md`).
 
 ## 에이전트 조합
 
@@ -16,6 +16,8 @@ researcher(검증→리포트) → copywriter(포스트) → designer(이미지)
 |------|------|------|
 | `client` | 클라이언트 폴더명 | 필수 |
 | `source_url` | 소스 URL (기사/영상/블로그/자사 글) | 필수 |
+| `source_text` | 사용자가 제공한 원문. URL만 있으면 실행하지 않음 | 필수 |
+| `source_checked_at` | 원문을 확인한 날짜 (`YYYY-MM-DD`) | 필수 |
 | `channels` | 대상 채널 (없으면 config.md 채널믹스의 집중 채널) | 선택 |
 
 ## 참조 문서
@@ -30,7 +32,7 @@ researcher(검증→리포트) → copywriter(포스트) → designer(이미지)
 
 ### Step 1: 소스 검증 (researcher → source-verdict)
 
-WebFetch로 소스 본문을 추출하고 3중 판정:
+사용자가 제공한 `source_text`를 검증한다. 플랫폼은 URL을 직접 가져오지 않으며, URL-only 입력은 `external source unavailable`로 중단한다. 제공된 원문은 다음 3중 판정을 거친다.
 1. **가치**: 이 소스가 타깃 고객에게 유용한 정보인가 (단순 광고/저품질이면 REJECT + 사유)
 2. **관련성**: config.md의 업종·ICP와 연결점이 있는가 (연결점 1줄 명시)
 3. **저작권 게이트 (필수)**: 인용은 출처 표기 + 짧은 발췌만, **전문 복제 금지**. 이미지 무단 사용 금지. 판정 결과에 "인용 가능 범위"를 명시한다.
@@ -85,15 +87,18 @@ uv run aicmo approve {run_id} owner_gate --reviewer owner --accept-edits
 
 ```powershell
 # 단건:
-uv run aicmo run content-engine --client {slug} --input source_url="{URL}" --executor claude
+uv run aicmo run content-engine --client {slug} --input source_url="{URL}" \
+  --input source_text="{제공 원문}" --input source_checked_at="{YYYY-MM-DD}" --executor claude
 # 수정 후 승인:
 uv run aicmo approve {run_id} owner_gate --reviewer owner --accept-edits
 uv run aicmo resume {run_id} --executor claude
 
-# 일괄 (inbox 인제스트): inbox/{slug}/에 URL 파일(.txt/.md, 한 줄에 하나)을 넣고
+# 일괄 (inbox 인제스트): inbox/{slug}/의 각 .txt/.md에 URL 줄과 실제 원문을 함께 넣고
 uv run aicmo ingest --client {slug} --executor claude    # 각 URL이 owner_gate까지 자동 진행
 uv run aicmo ingest --client {slug} --dry-run            # 계획만 확인
 ```
+
+URL 줄만 있는 inbox 파일은 실행되지 않고 retry 대상으로 남는다.
 
 주기 실행은 Claude Code 예약 세션(cron)에서 `aicmo ingest`를 호출하면 된다. 자동 발행(API) 어댑터는 의도적으로 보류 — X API 유료·인스타 앱 심사 등 시니어 온보딩 장벽 대비 실익 검토 후 (기획서 §4).
 

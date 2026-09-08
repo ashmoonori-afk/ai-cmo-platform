@@ -1,0 +1,11 @@
+고객명: 김민수
+작성자 이메일: minsu.kim@example.test
+연락처: 010.9876.5432
+리뷰: 예약 안내가 친절했고 다시 방문하고 싶습니다.
+고객 이름: 박서연
+구매자명: 이준호
+주문자: 최유진
+예약자: 정하늘
+추가 이메일: review.user [at] example.test
+HTML 이메일: entity.user&#64;example.test
+전각 전화: ０１０－１２３４－５６７８

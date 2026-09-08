@@ -110,6 +110,60 @@ class WorkflowRunStore(StoreDb):
         if row["phase_git_mode"] != mode:
             raise RunConflictError(run_id, "existing run uses a different phase-git policy")
 
+    def ensure_execution_policy(
+        self: Self,
+        run_id: str,
+        policy_json: str,
+        *,
+        allow_change: bool = False,
+    ) -> bool:
+        """Persist the executor/reviewer/model policy. Returns whether it changed."""
+        with self.connect() as connection:
+            connection.execute("begin immediate")
+            row = connection.execute(
+                "select execution_policy_json from run_policies where run_id = ?",
+                (run_id,),
+            ).fetchone()
+            execution_started = (
+                connection.execute(
+                    "select 1 from steps where run_id = ? and attempt > 0 limit 1",
+                    (run_id,),
+                ).fetchone()
+                is not None
+            )
+            if row is None:
+                connection.execute(
+                    "insert into run_policies (run_id, phase_git_mode, execution_policy_json) "
+                    "values (?, 'off', ?)",
+                    (run_id, policy_json),
+                )
+                return False
+            current = row["execution_policy_json"]
+            if current == policy_json:
+                return False
+            if not allow_change and (current is not None or execution_started):
+                raise RunConflictError(
+                    run_id,
+                    "executor, reviewer, or model policy changed; repeat the original settings "
+                    "or explicitly allow a policy change",
+                )
+            connection.execute(
+                "update run_policies set execution_policy_json = ? where run_id = ?",
+                (policy_json, run_id),
+            )
+        return current is not None or execution_started
+
+    def get_execution_policy(self: Self, run_id: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "select execution_policy_json from run_policies where run_id = ?",
+                (run_id,),
+            ).fetchone()
+        return None if row is None or row["execution_policy_json"] is None else str(row[0])
+
+    def is_run_cancelled(self: Self, run_id: str) -> bool:
+        return str(self.get_run(run_id)["status"]) == RunStatus.CANCELLED.value
+
     def get_phase_git_mode(self: Self, run_id: str) -> str:
         with self.connect() as connection:
             row = connection.execute(

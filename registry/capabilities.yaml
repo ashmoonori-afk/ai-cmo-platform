@@ -1,0 +1,887 @@
+version: 1
+description: AI CMO Platform capability registry — single machine-readable source for agents, playbooks, and natural-language
+  dispatch mapping. Any CLI/agent harness reads this file to dispatch work. Synced with CLAUDE.md tables by tests/test_capabilities_registry.py.
+agents:
+- name: community-manager
+  role: Reddit/Hacker News 기회 발굴, 커뮤니티 톤 초안
+  model: sonnet
+  path: agents/community-manager.md
+- name: competitor
+  role: 경쟁사 분석
+  model: opus
+  path: agents/competitor.md
+- name: copywriter
+  role: 블로그/SNS/뉴스레터/케이스스터디 작성
+  model: sonnet
+  path: agents/copywriter.md
+- name: data-analyst
+  role: 매출/성과 데이터 분석, 인사이트 추출
+  model: opus
+  path: agents/data-analyst.md
+- name: designer
+  role: 랜딩페이지/상세페이지 디자인, 디자인 감사
+  model: sonnet
+  path: agents/designer.md
+- name: growth-engineer
+  role: 기술적 SEO 수정·사이트 개선 코드 실행
+  model: sonnet
+  path: agents/growth-engineer.md
+- name: reporter
+  role: 주간/월간 리포트, KB 업데이트, 회의록
+  model: sonnet
+  path: agents/reporter.md
+- name: repurposer
+  role: 콘텐츠 1개 → 멀티 포맷 변환
+  model: haiku
+  path: agents/repurposer.md
+- name: researcher
+  role: 시장/업종/기업 리서치
+  model: opus
+  path: agents/researcher.md
+- name: reviewer
+  role: 모든 산출물 품질 검증
+  model: sonnet
+  path: agents/reviewer.md
+- name: sales-writer
+  role: 콜드메일, 제안서, 미팅 브리프, 피칭덱
+  model: sonnet
+  path: agents/sales-writer.md
+- name: seo-specialist
+  role: 키워드 리서치, SEO/GEO 감사, 콘텐츠 최적화
+  model: sonnet
+  path: agents/seo-specialist.md
+- name: strategist
+  role: 전략 수립 (GTM, 포지셔닝, 퍼널 등)
+  model: opus
+  path: agents/strategist.md
+modules:
+  00-chains: chains
+  01-strategy: strategy
+  02-intelligence: intelligence
+  03-content: content
+  04-sales: sales
+  05-seo: seo
+  06-analytics: analytics
+  07-operations: operations
+  08-design: design
+  08-role-sops: role-sops
+  09-local: local
+  10-ads: ads
+  11-community: community
+output_pattern: outputs/{client}/{module}/{YYYYMMDD}_{제목}.md
+engine_artifacts: artifacts/{run_id}/ (aicmo run 실행물, gitignore)
+mappings:
+- id: 1
+  triggers:
+  - GTM 전략
+  - 시장진입 전략
+  - go to market
+  - GTM 분석 해줘
+  playbook: playbooks/01-strategy/gtm-motion-analysis.md
+  chain_note: null
+  agents: researcher + competitor (병렬) → strategist → reviewer
+  model: opus
+- id: 2
+  triggers:
+  - 포지셔닝
+  - 경쟁 포지션
+  - 포지셔닝 맵
+  - 우리 위치가 어디야
+  playbook: playbooks/01-strategy/positioning-map.md
+  chain_note: null
+  agents: competitor → strategist → reviewer
+  model: opus
+- id: 3
+  triggers:
+  - 캠페인 기획
+  - 캠페인 짜줘
+  - 마케팅 캠페인
+  - 분기 캠페인
+  playbook: playbooks/01-strategy/campaign-planning.md
+  chain_note: null
+  agents: strategist → reviewer
+  model: opus
+- id: 4
+  triggers:
+  - 채널 전략
+  - 채널 분석
+  - 어떤 채널
+  - 마케팅 채널 추천
+  playbook: playbooks/01-strategy/channel-strategy.md
+  chain_note: null
+  agents: researcher → strategist → reviewer
+  model: opus
+- id: 5
+  triggers:
+  - 가격 전략
+  - 프라이싱
+  - 가격 분석
+  - 가격 어떻게 정해
+  - pricing
+  playbook: playbooks/01-strategy/pricing-strategy.md
+  chain_note: null
+  agents: competitor + researcher (병렬) → strategist → reviewer
+  model: opus
+- id: 6
+  triggers:
+  - 퍼널 설계
+  - 퍼널 짜줘
+  - 마케팅 퍼널
+  - 전환 퍼널
+  - funnel
+  playbook: playbooks/01-strategy/funnel-design.md
+  chain_note: null
+  agents: strategist → reviewer
+  model: opus
+- id: 7
+  triggers:
+  - 경쟁사 분석
+  - 경쟁사 모니터링
+  - 경쟁사 뭐해
+  - 경쟁 동향
+  playbook: playbooks/02-intelligence/competitor-monitoring.md
+  chain_note: null
+  agents: competitor → reviewer
+  model: opus
+- id: 8
+  triggers:
+  - 트렌드
+  - 업계 동향
+  - 시장 트렌드
+  - 요즘 뭐가 뜨지
+  playbook: playbooks/02-intelligence/industry-trends.md
+  chain_note: null
+  agents: researcher
+  model: opus
+- id: 9
+  triggers:
+  - 기업 리서치
+  - '{회사명} 조사'
+  - 거래처 분석
+  - 타겟 기업 조사
+  playbook: playbooks/02-intelligence/account-research.md
+  chain_note: null
+  agents: researcher
+  model: opus
+- id: 10
+  triggers:
+  - ICP 분석
+  - 고객 프로필
+  - 이상적 고객
+  - 타겟 고객 분석
+  playbook: playbooks/02-intelligence/icp-analysis.md
+  chain_note: null
+  agents: data-analyst + researcher (병렬) → strategist
+  model: opus
+- id: 11
+  triggers:
+  - 고객 피드백
+  - 리뷰 분석
+  - 고객 의견
+  - VOC 분석
+  playbook: playbooks/02-intelligence/customer-feedback.md
+  chain_note: null
+  agents: data-analyst
+  model: opus
+- id: 12
+  triggers:
+  - 블로그
+  - 아티클
+  - 글 써줘
+  - 블로그 포스트
+  - SEO 글
+  playbook: playbooks/03-content/blog-article.md
+  chain_note: null
+  agents: seo-specialist → copywriter → reviewer
+  model: sonnet
+- id: 13
+  triggers:
+  - SNS
+  - 소셜 포스트
+  - LinkedIn 글
+  - Social Channel A 글
+  - 트위터 글
+  playbook: playbooks/03-content/social-post.md
+  chain_note: null
+  agents: copywriter → reviewer
+  model: sonnet
+- id: 14
+  triggers:
+  - 뉴스레터
+  - 이메일 뉴스레터
+  - 뉴스레터 써줘
+  playbook: playbooks/03-content/newsletter.md
+  chain_note: null
+  agents: copywriter → reviewer
+  model: sonnet
+- id: 15
+  triggers:
+  - 케이스스터디
+  - 사례 연구
+  - 고객 사례
+  - 성공 사례
+  playbook: playbooks/03-content/case-study.md
+  chain_note: null
+  agents: researcher → copywriter → reviewer
+  model: sonnet
+- id: 16
+  triggers:
+  - 리드마그넷
+  - 가이드 만들어
+  - 체크리스트
+  - 템플릿 만들어
+  playbook: playbooks/03-content/lead-magnet.md
+  chain_note: null
+  agents: strategist → copywriter → reviewer
+  model: sonnet
+- id: 17
+  triggers:
+  - 리퍼포즈
+  - 콘텐츠 변환
+  - 멀티채널
+  - 다른 포맷으로
+  - 재활용
+  playbook: playbooks/03-content/repurpose.md
+  chain_note: null
+  agents: repurposer (4개 병렬) → reviewer
+  model: haiku
+- id: 18
+  triggers:
+  - 소셜 캘린더
+  - SNS 일정
+  - 콘텐츠 캘린더
+  - 이번달 SNS 계획
+  playbook: playbooks/03-content/social-calendar.md
+  chain_note: null
+  agents: strategist → copywriter → reviewer
+  model: sonnet
+- id: 19
+  triggers:
+  - AB 카피
+  - 카피 변형
+  - 카피 테스트
+  - 다른 버전으로
+  - A/B 테스트
+  playbook: playbooks/03-content/ab-copy.md
+  chain_note: null
+  agents: copywriter (2-3개 병렬) → reviewer
+  model: sonnet
+- id: 20
+  triggers:
+  - 콜드메일
+  - 아웃바운드
+  - 이메일 시퀀스
+  - 영업 메일
+  - 콜드 이메일
+  playbook: playbooks/04-sales/outbound-sequence.md
+  chain_note: null
+  agents: researcher → sales-writer (3통 병렬) → reviewer
+  model: sonnet
+- id: 21
+  triggers:
+  - 미팅 준비
+  - 콜 프렙
+  - 미팅 브리프
+  - 상담 준비
+  playbook: playbooks/04-sales/call-prep.md
+  chain_note: null
+  agents: researcher → sales-writer
+  model: sonnet
+- id: 22
+  triggers:
+  - 제안서
+  - 프로포절
+  - 제안서 써줘
+  - proposal
+  playbook: playbooks/04-sales/proposal-draft.md
+  chain_note: null
+  agents: researcher + competitor (병렬) → sales-writer → reviewer
+  model: opus
+- id: 23
+  triggers:
+  - 미팅 후
+  - 팔로업
+  - 미팅 정리
+  - 후속 조치
+  - 미팅 메모 정리
+  playbook: playbooks/04-sales/post-meeting.md
+  chain_note: null
+  agents: sales-writer → reviewer
+  model: sonnet
+- id: 24
+  triggers:
+  - 피칭덱
+  - IR덱
+  - 투자 발표
+  - 피치덱
+  - pitch deck
+  playbook: playbooks/04-sales/pitch-deck.md
+  chain_note: null
+  agents: strategist → sales-writer → reviewer
+  model: opus
+- id: 25
+  triggers:
+  - 키워드 리서치
+  - 키워드 분석
+  - 키워드 찾아줘
+  - SEO 키워드
+  playbook: playbooks/05-seo/keyword-research.md
+  chain_note: null
+  agents: seo-specialist
+  model: sonnet
+- id: 26
+  triggers:
+  - SEO 감사
+  - SEO 체크
+  - SEO 분석
+  - 사이트 SEO
+  - SEO 진단
+  playbook: playbooks/05-seo/seo-audit.md
+  chain_note: null
+  agents: seo-specialist
+  model: sonnet
+- id: 27
+  triggers:
+  - 콘텐츠 브리프
+  - SEO 브리프
+  - 글 기획
+  - 콘텐츠 기획
+  playbook: playbooks/05-seo/content-brief.md
+  chain_note: null
+  agents: seo-specialist → copywriter
+  model: sonnet
+- id: 28
+  triggers:
+  - 성과 리포트
+  - 퍼포먼스
+  - 성과 분석
+  - 마케팅 성과
+  - 채널별 성과
+  playbook: playbooks/06-analytics/performance-report.md
+  chain_note: null
+  agents: data-analyst
+  model: opus
+- id: 29
+  triggers:
+  - 주간 리포트
+  - 이번주 요약
+  - 위클리 리포트
+  - 주간 보고
+  playbook: playbooks/06-analytics/weekly-report.md
+  chain_note: null
+  agents: reporter → reviewer
+  model: sonnet
+- id: 30
+  triggers:
+  - GA 감사
+  - GA 분석
+  - GA4 체크
+  - 구글 애널리틱스 감사
+  playbook: playbooks/06-analytics/ga-audit.md
+  chain_note: null
+  agents: data-analyst
+  model: opus
+- id: 31
+  triggers:
+  - 회의록
+  - 미팅노트
+  - 회의 정리
+  - 미팅 기록
+  playbook: playbooks/07-operations/meeting-notes.md
+  chain_note: null
+  agents: reporter
+  model: sonnet
+- id: 32
+  triggers:
+  - 데이터 정리
+  - 데이터 클린업
+  - 데이터 변환
+  - CSV 정리
+  playbook: playbooks/07-operations/data-cleanup.md
+  chain_note: null
+  agents: data-analyst
+  model: sonnet
+- id: 33
+  triggers:
+  - 새 클라이언트
+  - 온보딩
+  - 클라이언트 추가
+  - 신규 고객 세팅
+  playbook: playbooks/07-operations/client-onboarding.md
+  chain_note: null
+  agents: researcher + competitor (병렬) → strategist → reporter
+  model: opus
+- id: 34
+  triggers:
+  - 전체 마케팅 전략
+  - 마케팅 플랜 세워줘
+  - 종합 전략
+  playbook: null
+  chain_note: GTM → 포지셔닝 → 채널전략 → 퍼널
+  agents: researcher + competitor → strategist → reviewer
+  model: opus
+  chain:
+  - playbooks/01-strategy/gtm-motion-analysis.md
+  - playbooks/01-strategy/positioning-map.md
+  - playbooks/01-strategy/channel-strategy.md
+  - playbooks/01-strategy/funnel-design.md
+- id: 35
+  triggers:
+  - 블로그 쓰고 SNS도
+  - 콘텐츠 풀세트
+  - 글 쓰고 퍼뜨려줘
+  playbook: null
+  chain_note: blog-article → repurpose
+  agents: seo-specialist → copywriter → repurposer → reviewer
+  model: sonnet
+  chain:
+  - playbooks/03-content/blog-article.md
+  - playbooks/03-content/repurpose.md
+- id: 36
+  triggers:
+  - 영업 준비 풀세트
+  - 영업 자료 다 만들어줘
+  playbook: null
+  chain_note: account-research → call-prep → outbound-sequence
+  agents: researcher → sales-writer → reviewer
+  model: sonnet
+  chain:
+  - playbooks/02-intelligence/account-research.md
+  - playbooks/04-sales/call-prep.md
+  - playbooks/04-sales/outbound-sequence.md
+- id: 37
+  triggers:
+  - 이번달 콘텐츠 전체
+  - 월간 콘텐츠 제작
+  playbook: null
+  chain_note: social-calendar → blog × N → repurpose
+  agents: strategist → copywriter → repurposer → reviewer
+  model: sonnet
+  chain:
+  - playbooks/03-content/social-calendar.md
+  - playbooks/03-content/repurpose.md
+- id: 38
+  triggers:
+  - 경쟁사 분석하고 전략 짜줘
+  - 경쟁사 보고 대응
+  playbook: null
+  chain_note: competitor-monitoring → positioning-map
+  agents: competitor → strategist → reviewer
+  model: opus
+  chain:
+  - playbooks/02-intelligence/competitor-monitoring.md
+  - playbooks/01-strategy/positioning-map.md
+- id: 39
+  triggers:
+  - SEO 콘텐츠 만들어
+  - 검색 최적화 글
+  playbook: null
+  chain_note: keyword-research → content-brief → blog-article
+  agents: seo-specialist → copywriter → reviewer
+  model: sonnet
+  chain:
+  - playbooks/05-seo/keyword-research.md
+  - playbooks/05-seo/content-brief.md
+  - playbooks/03-content/blog-article.md
+- id: 40
+  triggers:
+  - 신규 시장 진출 전략
+  - 새 시장 개척
+  playbook: null
+  chain_note: industry-trends → gtm-motion-analysis → channel-strategy
+  agents: researcher + competitor → strategist → reviewer
+  model: opus
+  chain:
+  - playbooks/02-intelligence/industry-trends.md
+  - playbooks/01-strategy/gtm-motion-analysis.md
+  - playbooks/01-strategy/channel-strategy.md
+- id: 41
+  triggers:
+  - 제안서랑 피칭덱
+  - 영업 프레젠테이션 준비
+  playbook: null
+  chain_note: proposal-draft → pitch-deck
+  agents: researcher + competitor → strategist → sales-writer → reviewer
+  model: opus
+  chain:
+  - playbooks/04-sales/proposal-draft.md
+  - playbooks/04-sales/pitch-deck.md
+- id: 42
+  triggers:
+  - 고객 분석하고 전략 수정
+  - ICP 재정의
+  playbook: null
+  chain_note: customer-feedback → icp-analysis → funnel-design
+  agents: data-analyst + researcher → strategist → reviewer
+  model: opus
+  chain:
+  - playbooks/02-intelligence/customer-feedback.md
+  - playbooks/02-intelligence/icp-analysis.md
+  - playbooks/01-strategy/funnel-design.md
+- id: 43
+  triggers:
+  - 주간 보고 + KB 정리
+  - 이번주 마무리
+  playbook: playbooks/06-analytics/weekly-report.md
+  chain_note: weekly-report + 검토된 KB 후보 (엔진 자동 갱신 없음)
+  agents: reporter → reviewer
+  model: sonnet
+- id: 44
+  triggers:
+  - 랜딩페이지 만들어줘
+  - LP 디자인
+  - 랜딩 페이지
+  playbook: playbooks/08-design/landing-page.md
+  chain_note: landing-page
+  agents: strategist → copywriter → designer → reviewer
+  model: sonnet
+- id: 45
+  triggers:
+  - 상세페이지 만들어줘
+  - 제품 상세페이지
+  - 디테일 페이지
+  playbook: playbooks/08-design/detail-page.md
+  chain_note: detail-page
+  agents: copywriter → designer → reviewer
+  model: sonnet
+- id: 46
+  triggers:
+  - 디자인 감사해줘
+  - 디자인 리뷰
+  - 페이지 디자인 체크
+  playbook: playbooks/08-design/design-audit.md
+  chain_note: design-audit
+  agents: designer → reviewer
+  model: sonnet
+- id: 47
+  triggers:
+  - 디자인 방향 잡아줘
+  - 디자인 디렉션
+  - 스타일 가이드
+  playbook: playbooks/08-design/design-direction.md
+  chain_note: design-direction
+  agents: strategist → designer
+  model: sonnet
+- id: 48
+  triggers:
+  - 랜딩페이지 풀세트
+  - LP 기획부터 디자인까지
+  playbook: playbooks/08-design/landing-page.md
+  chain_note: gtm + landing-page + design
+  agents: researcher + competitor (병렬) → strategist → copywriter → designer → reviewer
+  model: opus
+- id: 49
+  triggers:
+  - 네이버 쇼핑 SEO
+  - 스마트스토어 SEO
+  - 쇼핑 검색 최적화
+  playbook: playbooks/05-seo/naver-shopping-seo.md
+  chain_note: naver-shopping-seo
+  agents: seo-specialist → reviewer
+  model: sonnet
+- id: 50
+  triggers:
+  - 일품 재고 전략
+  - 빈티지 마케팅
+  - 한정판 전략
+  - 구제 마케팅
+  playbook: playbooks/01-strategy/one-item-inventory.md
+  chain_note: one-item-inventory
+  agents: strategist → copywriter → reviewer
+  model: sonnet
+- id: 51
+  triggers:
+  - 비주얼 가이드
+  - 촬영 가이드
+  - 상품 촬영 방향
+  playbook: playbooks/03-content/visual-content-guide.md
+  chain_note: visual-content-guide
+  agents: designer → reviewer
+  model: sonnet
+- id: 52
+  triggers:
+  - 후킹문안
+  - 후킹 카피
+  - 훅 리스트
+  - 문안집
+  - 낚는 문구
+  playbook: playbooks/03-content/hooking-copy.md
+  chain_note: null
+  agents: copywriter → reviewer
+  model: sonnet
+- id: 53
+  triggers:
+  - 사업 시작 마케팅 전부
+  - 런치팩
+  - 창업 마케팅 풀세트
+  - 가게 마케팅 처음부터
+  - 홈페이지부터 전략까지 다
+  playbook: playbooks/00-chains/launch-pack.md
+  chain_note: '선형 체인: 상담 온보딩 → 지원·사기방어 → 리서치 → 전략 → 채널믹스 → 후킹문안 → 브랜드킷 → 홈페이지 → 채널 실행 팩 → 검증·리포트'
+  agents: researcher + competitor (병렬) → strategist → copywriter → designer → reviewer → reporter
+  model: opus
+- id: 54
+  triggers:
+  - 네이버 플레이스
+  - 스마트플레이스
+  - 플레이스 등록
+  - 지도에 가게 등록
+  playbook: playbooks/09-local/naver-place-setup.md
+  chain_note: null
+  agents: seo-specialist → copywriter → reviewer
+  model: sonnet
+- id: 55
+  triggers:
+  - 카톡 채널
+  - 카카오톡 채널
+  - 단골 관리
+  - 단골 메시지
+  playbook: playbooks/09-local/kakao-channel-setup.md
+  chain_note: null
+  agents: copywriter → reviewer
+  model: sonnet
+- id: 56
+  triggers:
+  - 당근
+  - 당근마켓
+  - 동네 광고
+  - 비즈프로필
+  playbook: playbooks/09-local/danggeun-bizprofile.md
+  chain_note: null
+  agents: copywriter → reviewer
+  model: sonnet
+- id: 57
+  triggers:
+  - 배달앱
+  - 배민
+  - 쿠팡이츠
+  - 배달 입점
+  playbook: playbooks/09-local/delivery-app-optimization.md
+  chain_note: null
+  agents: copywriter → reviewer
+  model: sonnet
+- id: 58
+  triggers:
+  - SNS 루틴
+  - 인스타 뭐 올려
+  - 릴스 루틴
+  - SNS 시작하고 싶어
+  playbook: playbooks/09-local/local-sns-routine.md
+  chain_note: null
+  agents: strategist → copywriter → reviewer
+  model: sonnet
+- id: 59
+  triggers:
+  - 전단
+  - 현수막
+  - 간판
+  - 인쇄물
+  - 오프라인 홍보
+  playbook: playbooks/09-local/offline-print-kit.md
+  chain_note: null
+  agents: copywriter → designer → reviewer
+  model: sonnet
+- id: 60
+  triggers:
+  - 지원사업
+  - 정부 지원
+  - 무료 지원
+  - 대행 사기
+  - 광고 대행 전화 받았는데
+  playbook: playbooks/09-local/support-programs.md
+  chain_note: null
+  agents: researcher → reporter
+  model: sonnet
+- id: 61
+  triggers:
+  - 네이버 광고
+  - 파워링크
+  - 검색광고
+  - 네이버 검색 광고 해줘
+  playbook: playbooks/10-ads/naver-search-ads.md
+  chain_note: null
+  agents: seo-specialist → copywriter → reviewer
+  model: sonnet
+- id: 62
+  triggers:
+  - 메타 광고
+  - 페이스북 광고
+  - 인스타 광고
+  - 인스타그램 광고 돌려줘
+  playbook: playbooks/10-ads/meta-ads.md
+  chain_note: null
+  agents: strategist → copywriter → reviewer
+  model: sonnet
+- id: 63
+  triggers:
+  - 광고 실험
+  - 광고 테스트 어떻게
+  - 광고 지표 해석
+  - 광고 전략 라이브러리
+  - 훅 테스트
+  playbook: playbooks/10-ads/ad-strategy-library.md
+  chain_note: 참조 사전 — 실험 설계·지표 해석·컨텐츠·후킹 검증 전략 20종
+  agents: strategist (참조)
+  model: sonnet
+- id: 64
+  triggers:
+  - 이 링크로 포스트 만들어줘
+  - 이 기사로 SNS 올려줘
+  - 콘텐츠 엔진
+  - 이 영상 소개해줘
+  playbook: playbooks/03-content/content-engine.md
+  chain_note: '소스 URL → 검증 → 리포트 → 채널 포스트 → 승인·수정 학습 → 발행 큐. CLI: `aicmo run content-engine --client {slug} --input source_url=...`,
+    승인 시 `--accept-edits`'
+  agents: researcher → copywriter → designer → reviewer → reporter
+  model: sonnet
+- id: 65
+  triggers:
+  - 레딧
+  - reddit
+  - 레딧 답변
+  - 커뮤니티 반응
+  - 레딧 마케팅
+  playbook: playbooks/11-community/reddit-engagement.md
+  chain_note: null
+  agents: community-manager → reviewer
+  model: sonnet
+- id: 66
+  triggers:
+  - 해커뉴스
+  - Show HN
+  - HN 론칭
+  - hackernews
+  - 해커 뉴스
+  playbook: playbooks/11-community/hackernews-launch.md
+  chain_note: null
+  agents: community-manager → reviewer
+  model: sonnet
+- id: 67
+  triggers:
+  - GEO 모니터링
+  - AI 검색 노출
+  - AI 인용 추적
+  - ChatGPT에 우리 브랜드
+  - AI 검색에 뜨나
+  playbook: playbooks/05-seo/geo-visibility-monitor.md
+  chain_note: null
+  agents: seo-specialist → reviewer
+  model: sonnet
+- id: 68
+  triggers:
+  - 백링크
+  - 링크 아웃리치
+  - 백링크 확보
+  - 링크 빌딩
+  playbook: playbooks/05-seo/backlink-outreach.md
+  chain_note: null
+  agents: researcher + seo-specialist (병렬) → sales-writer → reviewer
+  model: sonnet
+- id: 69
+  triggers:
+  - 기술 SEO 수정
+  - SEO 코드 수정
+  - 메타태그 고쳐줘
+  - 스키마 추가해줘
+  - 사이트맵 만들어줘
+  playbook: playbooks/05-seo/technical-seo-fix.md
+  chain_note: null
+  agents: growth-engineer → reviewer
+  model: sonnet
+- id: 70
+  triggers:
+  - X 포스트
+  - 트위터 매일
+  - X 일일 초안
+  - 오늘 트윗
+  - 트위터 뭐 올려
+  playbook: playbooks/03-content/x-twitter-daily.md
+  chain_note: null
+  agents: copywriter → reviewer
+  model: sonnet
+- id: 71
+  triggers:
+  - 링크드인 대표 글
+  - 파운더 보이스
+  - 대표님 LinkedIn
+  - 고스트라이팅
+  - LinkedIn 대표 글
+  playbook: playbooks/03-content/linkedin-founder-voice.md
+  chain_note: null
+  agents: copywriter → reviewer
+  model: sonnet
+- id: 72
+  triggers:
+  - UGC 영상
+  - 숏폼 브리프
+  - 영상 스크립트
+  - 릴스 브리프
+  - 틱톡 브리프
+  playbook: playbooks/08-design/ugc-video-brief.md
+  chain_note: null
+  agents: designer → reviewer
+  model: sonnet
+- id: 73
+  triggers:
+  - 인플루언서
+  - 크리에이터 캠페인
+  - 협찬 제안
+  - 시딩
+  - 인플루언서 마케팅
+  playbook: playbooks/04-sales/influencer-campaign.md
+  chain_note: null
+  agents: researcher + strategist (병렬) → sales-writer → reviewer
+  model: sonnet
+- id: 74
+  triggers:
+  - 데일리 루프
+  - 오늘 마케팅
+  - 매일 자동 마케팅
+  - 일일 피드
+  - 오늘 마케팅 뭐하지
+  playbook: playbooks/00-chains/daily-cmo-loop.md
+  chain_note: '체인: 성과 다이제스트 → 기회 스캔(병렬) → 채널 초안 → 검증 → 오너 승인 → KB. CLI: `aicmo run daily-cmo-loop --client {slug}`'
+  agents: data-analyst + seo-specialist + community-manager (병렬) → copywriter → reviewer → reporter
+  model: sonnet
+- id: 75
+  triggers:
+  - 가게 실행팩
+  - 국내 가게 주간팩
+  - 소식과 리뷰 답글
+  playbook: playbooks/09-local/local-store-pack.md
+  chain_note: 'CLI: aicmo run local-store-pack --client {slug} --brief-file brief.json; 사장님 승인 후 최종 검토 및 로컬 내보내기'
+  agents: copywriter → reviewer
+  model: sonnet
+- id: 76
+  triggers:
+  - 가게 문안 피드백
+  - 채택과 수정 학습
+  playbook: playbooks/07-operations/local-pack-feedback.md
+  chain_note: 'CLI: aicmo run local-pack-feedback --client {slug} --feedback-file feedback.json; owner 승인과 reviewer PASS 후 learn-feedback으로 반영'
+  agents: reporter → reviewer
+  model: sonnet
+gates:
+  reviewer_required: true
+  exempt:
+  - industry-trends
+  - account-research
+  - meeting-notes
+  - data-cleanup
+  verdicts:
+  - PASS
+  - WARN
+  - FAIL
+  - ESCALATE
+  approval_gated:
+  - publishing
+  - sending
+  - downloads
+  - image generation
+  - live integrations
+unmapped_playbooks:
+  playbooks/00-chains/ai-cmo-operating-system.md: platform operating pipeline doc, not a dispatch trigger
+  playbooks/00-chains/content-full-cycle.md: chain doc — composed via mappings 35/37
+  playbooks/00-chains/full-strategy-chain.md: chain doc — composed via mapping 34
+  playbooks/00-chains/sales-prep-bundle.md: chain doc — composed via mapping 36
+  playbooks/08-design/asset-evaluation.md: design support SOP — invoked from design playbooks, no direct trigger
+  playbooks/08-role-sops/: role SOP library (10 files) — specialist role definitions, not dispatch playbooks

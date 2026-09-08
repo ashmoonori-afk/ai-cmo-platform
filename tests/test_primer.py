@@ -38,7 +38,7 @@ def test_primer_section_registry_is_ordered_and_immutable() -> None:
         ("next90", "첫 90일 KPI와 다음 단계"),
     ]
     with pytest.raises(FrozenInstanceError):
-        PRIMER_SECTIONS[0].title = "변경"  # type: ignore[misc]
+        PRIMER_SECTIONS[0].title = "변경"  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_render_primer_is_self_contained_and_has_six_sections(
