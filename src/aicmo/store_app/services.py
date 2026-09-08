@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from aicmo.adapters import CommandAdapter
 from aicmo.errors import AicmoError, RunNotFoundError, StepTransitionError
-from aicmo.export import export_local_pack, verified_delivery
+from aicmo.export import export_local_pack, verified_delivery, verified_pack
 from aicmo.local_pack import WORKFLOW_ID, LocalPack, parse_brief, validate_pack
 from aicmo.models import ApprovalDecision, WorkflowStep
 from aicmo.pack_edits import EditApproval, EditBase
@@ -236,13 +236,23 @@ def cancel(job: Job, runner: WorkflowRunner) -> None:
     )
 
 
-def download(job: Job) -> Path:
+def _delivery_reader(job: Job) -> WorkflowRunner:
     if job.state != "success" or job.cancel_requested:
         reason = "검토·승인을 마친 파일만 저장할 수 있습니다."
         raise StoreActionError(reason)
     runner = reader()
-    if runner.store.get_inputs(job.run_id).get("client") != job.store.client:
+    inputs = runner.store.get_inputs(job.run_id)
+    if inputs != job.inputs or inputs.get("client") != job.store.client:
         raise Http404
+    return runner
+
+
+def verified_files(job: Job) -> tuple[str, dict[str, bytes]]:
+    return verified_pack(_delivery_reader(job), job.run_id)
+
+
+def download(job: Job) -> Path:
+    runner = _delivery_reader(job)
     # Export takes an engine write transaction; this endpoint is POST-only.
     runner = replace(runner, store=WorkflowStore(runner.store.db_path))
     return export_local_pack(runner, job.run_id)

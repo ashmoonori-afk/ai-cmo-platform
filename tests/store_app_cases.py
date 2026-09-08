@@ -115,6 +115,14 @@ class StoreAppTests(TransactionTestCase):
             manifest = json.loads(archive.read("manifest.json"))
             for name, digest in manifest["files"].items():
                 self.assertEqual(hashlib.sha256(archive.read(name)).hexdigest(), digest)
+        # A same-store Job with different facts must not expose the old approved files.
+        original_inputs = job.inputs
+        job.inputs = {**job.inputs, "brief_json": _brief(minutes=5)["brief_json"]}
+        job.save(update_fields=["inputs"])
+        self.assertEqual(self.client.post(f"/jobs/{job.id}/download/").status_code, 404)
+        self.assertEqual(self.client.get(f"/jobs/{job.id}/delivery/").status_code, 404)
+        job.inputs = original_inputs
+        job.save(update_fields=["inputs"])
 
     def test_other_store_and_unauthenticated_access(self) -> None:
         job = self.submit()

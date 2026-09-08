@@ -1,0 +1,33 @@
+{% load tz %}
+<section aria-labelledby="publication-{{ card.key }}">
+  <h3 id="publication-{{ card.key }}">직접 게시 기록</h3>
+  {% if publication.latest.posted_on %}
+  <p><strong>사용자 보고: {{ publication.latest.posted_on|date:"Y년 n월 j일" }} 직접 게시</strong></p>
+  {% elif publication.latest %}<p>사용자 보고를 취소했습니다.</p>
+  {% else %}<p>아직 직접 게시한 기록이 없습니다.</p>{% endif %}
+  <p class="helptext">실제로 게시한 뒤 날짜를 기록해 주세요. 외부 게시 여부는 확인하지 않으며 문의·예약·주간 성과에 자동 합산하지 않습니다.</p>
+  <form method="post" action="{% url 'publication' job_id=job.id item_key=card.key %}">
+    {% csrf_token %}
+    {% for hidden in publication.form.hidden_fields %}{{ hidden }}{% endfor %}
+    {{ publication.form.posted_on.label_tag }}
+    {{ publication.form.posted_on }}
+    <div class="actions">
+      <button type="submit" name="action" value="report">{% if publication.latest.posted_on %}게시 날짜 정정{% else %}직접 게시했어요{% endif %}</button>
+    </div>
+  </form>
+  {% if publication.latest.posted_on %}
+  <form method="post" action="{% url 'publication' job_id=job.id item_key=card.key %}">
+    {% csrf_token %}
+    {% for hidden in publication.form.hidden_fields %}<input type="hidden" name="{{ hidden.name }}" value="{{ hidden.value }}">{% endfor %}
+    <button class="secondary" type="submit" name="action" value="cancel">오기록 취소</button>
+  </form>
+  {% endif %}
+  {% if publication.history %}
+  <details><summary>사용자 보고·정정 이력</summary>
+    <ol>{% for event in publication.history %}
+      <li>{{ event.created_at|timezone:"Asia/Seoul"|date:"Y-m-d H:i" }} (한국 시간) — {% if event.posted_on %}{{ event.posted_on|date:"Y-m-d" }} 게시로 기록{% else %}이전 보고 취소{% endif %}</li>
+    {% endfor %}</ol>
+    {% if publication.history_more %}<p class="helptext">최근 20건을 표시합니다. 더 오래된 이력도 삭제하지 않고 보관하고 있습니다.</p>{% endif %}
+  </details>
+  {% endif %}
+</section>

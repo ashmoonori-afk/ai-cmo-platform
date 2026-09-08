@@ -99,7 +99,8 @@ def verified_delivery(  # noqa: C901, PLR0912 — sequential fail-closed deliver
     return inputs, contents
 
 
-def _verified_pack(runner: WorkflowStepExecutor, run_id: str) -> tuple[str, dict[str, bytes]]:
+def verified_pack(runner: WorkflowStepExecutor, run_id: str) -> tuple[str, dict[str, bytes]]:
+    """Read approved export bytes without writing delivery files or changing run state."""
     inputs, contents = verified_delivery(runner, run_id, WORKFLOW_ID)
     raw_pack = contents[f"artifacts/{run_id}/local-pack.json"]
     pack_text = raw_pack.decode("utf-8")
@@ -158,7 +159,7 @@ def export_local_pack(runner: WorkflowStepExecutor, run_id: str) -> Path:
     # Move to per-store jobs if export throughput becomes a measured bottleneck.
     with runner.store.connect() as connection:
         connection.execute("begin immediate")
-        digest, files = _verified_pack(runner, run_id)
+        digest, files = verified_pack(runner, run_id)
         buffer = io.BytesIO()
         with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
             for name, data in files.items():

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, ClassVar
 
 from django.conf import settings
@@ -106,6 +106,41 @@ class EditVersion(models.Model):
 
     def __str__(self) -> str:
         return f"저장된 문안 {self.revision}"
+
+
+class PublicationReport(models.Model):
+    """Append-only owner reports; these do not prove external publication."""
+
+    if TYPE_CHECKING:
+        # Django supplies these concrete foreign-key columns.
+        job_id: uuid.UUID  # pyright: ignore[reportUninitializedInstanceVariable]
+        recorded_by_id: int  # pyright: ignore[reportUninitializedInstanceVariable]
+
+    job: models.ForeignKey[Job, Job] = models.ForeignKey(Job, on_delete=models.PROTECT)
+    bundle_sha256: models.CharField[str, str] = models.CharField(max_length=64)
+    item_key: models.CharField[str, str] = models.CharField(max_length=16)
+    file_sha256: models.CharField[str, str] = models.CharField(max_length=64)
+    revision: models.PositiveBigIntegerField[int, int] = models.PositiveBigIntegerField()
+    posted_on: models.DateField[date | None, date | None] = models.DateField(null=True, blank=True)
+    recorded_by: models.ForeignKey[User, User] = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT
+    )
+    request_key: models.UUIDField[uuid.UUID, uuid.UUID] = models.UUIDField(unique=True)
+    created_at: models.DateTimeField[datetime, datetime] = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints: ClassVar = [
+            models.UniqueConstraint(
+                fields=["job", "bundle_sha256", "item_key", "revision"],
+                name="publication_item_revision",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(revision__gte=1), name="publication_revision"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"직접 게시 사용자 보고 {self.item_key} / {self.revision}"
 
 
 class OnboardingDraft(models.Model):

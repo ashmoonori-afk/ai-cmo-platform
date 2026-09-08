@@ -2,7 +2,16 @@ from django.contrib import admin
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from aicmo.store_app import archive, editor_views, onboarding_views, photos, rewrites, views
+from aicmo.store_app import (
+    archive,
+    delivery,
+    editor_views,
+    onboarding_views,
+    photos,
+    publication,
+    rewrites,
+    views,
+)
 
 urlpatterns = [
     path("", views.home, name="home"),
@@ -25,4 +34,10 @@ urlpatterns = [
     path("jobs/<uuid:job_id>/approve/", views.approve, name="approve"),
     path("jobs/<uuid:job_id>/cancel/", views.cancel, name="cancel"),
     path("jobs/<uuid:job_id>/download/", views.download, name="download"),
+    path("jobs/<uuid:job_id>/delivery/", delivery.detail, name="delivery"),
+    path(
+        "jobs/<uuid:job_id>/publication/<slug:item_key>/",
+        publication.record,
+        name="publication",
+    ),
 ]
