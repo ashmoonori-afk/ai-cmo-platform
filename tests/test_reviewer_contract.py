@@ -72,6 +72,38 @@ def test_review_and_repair_have_separate_usage_and_minimized_input(tmp_path: Pat
     assert "Jane Doe" not in json.dumps(payloads)
 
 
+def test_cancel_during_review_does_not_dispatch_format_repair(tmp_path: Path) -> None:
+    class CancellingReviewAdapter(SequencedReviewAdapter):
+        def generate(self, request: AgentRequest) -> AgentResult:
+            result = super().generate(request)
+            if request.role == "reviewer":
+                runner.cancel(request.run_id)
+            return result
+
+    adapter = CancellingReviewAdapter(
+        [AgentResult(text="malformed review"), AgentResult(text=_decision("PASS"))],
+    )
+    runner, store = _runner(tmp_path, adapter)
+
+    result = runner.run("review-fixture", "cancel-review", {"client": "acme"})
+
+    assert [request.role for request in adapter.seen] == ["reviewer"]
+    assert result.status == "cancelled"
+    assert store.get_step_outputs("cancel-review", "draft")
+    assert store.get_step_outputs("cancel-review", "review") == []
+    assert not (tmp_path / "artifacts" / "cancel-review" / "review.json").exists()
+    with store.connect() as connection:
+        events = connection.execute(
+            "select event_type, payload_json from events where run_id=? and step_id=? "
+            "and event_type in ('agent.call_started', 'agent.call_finished') order by event_id",
+            ("cancel-review", "review"),
+        ).fetchall()
+    assert [row["event_type"] for row in events] == ["agent.call_started", "agent.call_finished"]
+    assert all(json.loads(row["payload_json"])["role"] == "reviewer" for row in events)
+    assert runner.resume("cancel-review").status == "cancelled"
+    assert len(adapter.seen) == 1
+
+
 def _runner(
     tmp_path: Path,
     review_adapter: SequencedReviewAdapter,

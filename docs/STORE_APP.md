@@ -241,6 +241,18 @@ date,channel,posts,inquiries,reservations,coupon_redemptions
 - 엔진 오류·이벤트의 자유 설명은 인식 가능한 고객 연락처와 비밀값을 정리한다. 구조 ID·SHA·revision은
   일반 문장 마스킹으로 바꾸지 않는다. 기존 원장을 소급 삭제하거나 프록시/공급자 로그까지 정리한 것은 아니다.
 
+### 운영자 읽기 점검
+
+선택한 설치 환경의 `aicmo inspect-store --repo PATH`로 기존 저장소의 웹·엔진 상태 집계를 읽는다.
+DB·디렉터리를 만들거나 초기화하지 않으며 결과는 운영자용 영문 JSON이다. 조회 실패는 `summary: null`로
+표시해 정상 0과 구분한다. 종료 코드 0은 두 집계를 읽었다는 뜻이며, worker 생존과 공급자 비용은 확인하지 않는다.
+두 DB는 독립 시점의 관측이다. busy 대기 1초와 SQL progress 예산 2초는 전체 명령 실행 시간의 상한이 아니다.
+
+출력의 `runtime.sqlite_version`과 `wal_reset_fix`를 설치 환경마다 확인한다. 저장소의 `.python-version`은
+Python 3.13.15를 지정하지만 모든 플랫폼의 SQLite 패치를 보장하지 않는다. 기본 `uv run`은 기존 `.venv`를
+재구성할 수 있으므로 환경을 유지해야 할 때는 명시적으로 선택한 설치 환경의 실행 파일을 사용한다.
+기존 서버의 중단·런타임 전환·배포와 운영 검증은 운영자가 별도로 수행한다.
+
 ### 가게 준비가 중단된 경우
 
 온보딩 worker는 기존 `scaffold_client(pdf=False)`를 사용하며 모델·외부 사이트·PDF 변환을 호출하지 않는다.

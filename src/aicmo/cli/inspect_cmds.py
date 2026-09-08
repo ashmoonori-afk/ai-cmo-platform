@@ -6,6 +6,7 @@ import typer
 from rich.table import Table
 
 from aicmo.quota import run_quota_status
+from aicmo.store_inspection import inspect_store
 
 from ._shared import console, make_runner
 
@@ -108,7 +109,18 @@ def usage_run(
     )
 
 
+def inspect_store_command(
+    repo: Annotated[Path, typer.Option("--repo")] = Path(),
+) -> None:
+    """Read aggregate DB state as JSON; exit 0 means readable, not a live worker."""
+    result = inspect_store(repo)
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    if result["inspection_status"] != "available":
+        raise typer.Exit(1)
+
+
 def register(app: typer.Typer) -> None:
     app.command("status")(status_run)
     app.command("list-runs")(list_runs)
     app.command("usage")(usage_run)
+    app.command("inspect-store")(inspect_store_command)
